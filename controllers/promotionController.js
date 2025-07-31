@@ -9,7 +9,7 @@ const calculateStatus = (start, end) => {
 };
 
 // ✅ Create Promotion
-const createPromotion = async (req, res) => {
+  const createPromotion = async (req, res) => {
     try {
         const status = calculateStatus(req.body.startDate, req.body.endDate);
         const bannerUrls = req.files?.map(file => `/uploads/banners/${file.filename}`) || [];

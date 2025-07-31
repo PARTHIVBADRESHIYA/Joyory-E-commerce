@@ -15,6 +15,7 @@ export const sendCampaignNow = async (req, res) => {
             console.log(`📧 Sending to: ${user.email}`);
         }
 
+        
         campaign.delivered = true;
         campaign.deliveredAt = new Date();
         await campaign.save();
@@ -23,9 +24,12 @@ export const sendCampaignNow = async (req, res) => {
     } catch (err) {
         res.status(500).json({ message: 'Failed to send campaign', error: err.message });
     }
+
 };
 
 // Create a new campaign
+
+
 export const createCampaign = async (req, res) => {
     try {
         const {

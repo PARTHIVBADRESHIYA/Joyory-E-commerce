@@ -20,7 +20,27 @@ const orderSchema = new mongoose.Schema({
     discount: { type: mongoose.Schema.Types.ObjectId, ref: 'Discount', default: null },
     discountCode: String,
     discountAmount: Number,
-    amount: { type: Number, required: true }
+    affiliate: { type: mongoose.Schema.Types.ObjectId, ref: 'Affiliate' },
+    buyerDiscountAmount: { type: Number, default: 0 },
+    shippingAddress: {
+        type: Object, // or use a sub-schema if structured
+        required: true
+    },
+
+    amount: { type: Number, required: true },
+    promotionUsed: {
+        promotionId: { type: mongoose.Schema.Types.ObjectId, ref: "Promotion" },
+        campaignName: String,
+    },
+    // models/Order.js (add fields like this)
+    refund: {
+        isRefunded: { type: Boolean, default: false },
+        refundAmount: { type: Number, default: 0 },
+        refundReason: { type: String },
+        refundedAt: { type: Date },
+    },
+
+
 }, { timestamps: true });
 
 

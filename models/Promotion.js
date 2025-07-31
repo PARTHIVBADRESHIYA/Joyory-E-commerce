@@ -16,6 +16,8 @@ const promotionSchema = new mongoose.Schema({
     endTime: { type: String },
     banners: [{ type: String }], // File URLs or paths
     promoCodes: [{ type: String }],
+    conversions: { type: Number, default: 0 },
+    orders: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Order' }],
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Admin',

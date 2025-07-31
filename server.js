@@ -9,6 +9,7 @@ import { autoSendScheduledCampaigns } from './middlewares/utils/cron/autoSendCam
 
 
 import authRoutes from './routes/authRoutes.js';
+import userRoutes from './routes/userRoutes.js';
 import productRoutes from './routes/productRoutes.js';
 import inventoryRoutes from './routes/inventoryRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
@@ -20,6 +21,8 @@ import affiliateRoutes from './routes/affiliateRoutes.js';
 import blogRoutes from './routes/blogRoutes.js';
 import supportRoutes from './routes/supportRoutes.js';
 import campaignRoutes from './routes/campaignRoutes.js';
+
+
 
 import storeSettingRoutes from './routes/settings/storeSettingRoutes.js';
 import shippingRoutes from './routes/settings/shippingRoutes.js';
@@ -33,6 +36,16 @@ import adminRoleAdminController from './routes/settings/admin/adminRoleAdmin.js'
 import notificationRoutes from './routes/settings/admin/notificationRoutes.js';
 import securityRoutes from './routes/settings/admin/securityRoutes.js';
 
+import attributeRoutes from './routes/attributeRoutes.js';
+
+import testRoutes from "./routes/testRoutes.js";
+
+
+//user side backend
+
+import userProductRoutes from "./routes/user/userProductRoutes.js";
+import userCartAndOrderRoutes from "./routes/user/userCartAndOrderRoutes.js";
+import userAddressRoutes from "./routes/user/userAddressRoutes.js";
 
 
 // Connect to MongoDB
@@ -45,14 +58,20 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+
 cron.schedule('*/10 * * * *', autoSendScheduledCampaigns); // runs every 10 mins
 
 
 // Use Auth Routes
 app.use('/api/auth', authRoutes);
+
+// Use User Routes
+app.use('/api/users', userRoutes);
 app.use("/api/admin", authRoutes);
 
 app.use('/api', productRoutes);
+
+app.use('/api/attributes', attributeRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/orders', orderRoutes);
 
@@ -60,7 +79,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/discounts', discountRoutes);
 
 //promotion
-app.use('/api/promotions', promotionRoutes);
+app.use('/api/promotions', promotionRoutes);    
 
 //review
 app.use('/api/reviews', reviewRoutes);
@@ -100,6 +119,22 @@ app.use('/api/notifications', notificationRoutes);
 
 //security
 app.use('/api/security', securityRoutes);
+
+
+app.use("/api", testRoutes);
+
+
+//user side backend
+
+app.use('/api/user/products', userProductRoutes);
+
+app.use('/api/user/cart', userCartAndOrderRoutes);
+
+app.use('/api/user/address', userAddressRoutes);
+
+
+
+
 
 
 // Example route

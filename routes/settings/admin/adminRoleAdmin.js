@@ -1,4 +1,5 @@
 import express from 'express';
+import multer from 'multer';
 import {
   registerRoleAdmin,
   loginRoleAdmin,
@@ -11,7 +12,6 @@ import {
 
 import {verifyRoleAdmin  } from "../../../middlewares/authMiddleware.js";
 
-import multer from 'multer';
 const upload = multer({ dest: 'uploads/profilePics/' });
 
 const router = express.Router();

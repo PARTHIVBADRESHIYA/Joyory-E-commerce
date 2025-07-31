@@ -1,8 +1,7 @@
 import express from 'express';
 import { createPromotion, getPromotionSummary, getPromotionList } from './../controllers/promotionController.js';
 import { verifyAdminOrTeamMember } from './../middlewares/authMiddleware.js';
-import upload from './../middlewares/upload.js';
-
+import { uploadPromotion } from '../middlewares/upload.js';
 
 const router = express.Router();
 
@@ -13,7 +12,7 @@ router.get('/list', verifyAdminOrTeamMember, getPromotionList);
 
 router.post(
   '/', verifyAdminOrTeamMember,
-  upload.array('banners', 5),
+  uploadPromotion.array('banners', 5),
   createPromotion
 );
 

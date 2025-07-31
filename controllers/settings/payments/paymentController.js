@@ -2,6 +2,7 @@ import Payment from '../../../models/settings/payments/Payment.js';
 import Order from '../../../models/Order.js';
 import { encrypt, decrypt } from '../../../middlewares/utils/encryption.js';
 import Product from '../../../models/Product.js';
+import Affiliate from '../../../models/Affiliate.js';
 import mongoose from 'mongoose';
 
 export const payForOrder = async (req, res) => {
@@ -12,36 +13,30 @@ export const payForOrder = async (req, res) => {
             return res.status(400).json({ message: 'Order already Completed' });
         }
 
-        // Step 1: Deduct inventory
-        for (const item of order.products) {
-            const product = await Product.findById(item.productId);
-            if (!product || product.quantity < item.quantity) {
-                return res.status(400).json({ message: `Insufficient stock for ${product?.name}` });
-            }
+        // ✅ No stock manipulation
 
-            product.quantity -= item.quantity;
-            product.sales += item.quantity;
-            product.status =
-                product.quantity === 0
-                    ? 'Out of stock'
-                    : product.quantity <= product.thresholdValue
-                        ? 'Low stock'
-                        : 'In-stock';
-
-            await product.save({ validateBeforeSave: false });
-        }
-
-        // Step 2: Mark order as completed
+        // ✅ Update order
         order.status = 'Completed';
         order.paymentDate = new Date();
         await order.save();
 
-        // Step 3: Create payment record
+        // ✅ Affiliate payout
+        if (order.affiliate) {
+            const affiliate = await Affiliate.findById(order.affiliate);
+            if (affiliate) {
+                const earning = order.amount * (affiliate.commissionRate || 0.15); // default 15%
+                affiliate.totalEarnings += earning;
+                affiliate.successfulOrders += 1;
+                await affiliate.save();
+            }
+        }
+
+        // ✅ Create payment
         const PaymentModel = (await import('../../../models/settings/payments/Payment.js')).default;
 
         const payment = await PaymentModel.create({
             order: order._id,
-            method: req.body.method, // ⬅️ Must be passed from frontend (required field)
+            method: req.body.method,
             status: 'Completed',
             transactionId: req.body.transactionId || `TXN-${Date.now()}`,
             amount: order.total || order.amount || 0,
@@ -50,40 +45,38 @@ export const payForOrder = async (req, res) => {
             expiryDate: req.body.expiryDate
         });
 
+        // ✅ Send response once only
         res.status(200).json({
             message: 'Payment successful',
             orderId: order._id,
             paymentId: payment._id
         });
 
+        // ✅ Background affiliate update (no res.send here!)
         for (const item of order.products) {
             const product = await Product.findById(item.productId);
-            if (product) {
-                product.sales += item.quantity;
-                product.quantity -= item.quantity;
-                await product.save();
+            if (!product) continue;
 
-                // Calculate profit per product (selling - buying)
-                const profit = (product.sellingPrice - product.buyingPrice) * item.quantity;
+            const profit = (product.sellingPrice - product.buyingPrice) * item.quantity;
 
-                // Affiliate revenue tracking
-                let activity = await AffiliateActivity.findOne({ product: product._id });
-                if (!activity) {
-                    activity = new AffiliateActivity({ product: product._id });
-                }
-                const prevRevenue = activity.revenue || 0;
-                const newRevenue = prevRevenue + (item.price * item.quantity);
-                const trend = prevRevenue === 0 ? 100 : (((newRevenue - prevRevenue) / prevRevenue) * 100).toFixed(1);
-
-                activity.conversions += item.quantity;
-                activity.revenue = newRevenue;
-                activity.trend = parseFloat(trend);
-                await activity.save();
+            let activity = await AffiliateActivity.findOne({ product: product._id });
+            if (!activity) {
+                activity = new AffiliateActivity({ product: product._id });
             }
+
+            const prevRevenue = activity.revenue || 0;
+            const newRevenue = prevRevenue + (item.price * item.quantity);
+            const trend = prevRevenue === 0 ? 100 : (((newRevenue - prevRevenue) / prevRevenue) * 100).toFixed(1);
+
+            activity.conversions += item.quantity;
+            activity.revenue = newRevenue;
+            activity.trend = parseFloat(trend);
+            await activity.save();
         }
 
     } catch (err) {
-        res.status(500).json({ message: 'Payment failed', error: err.message });
+        // ✅ Only one response in case of error
+        return res.status(400).json({ message: "Payment failed", error: err.message });
     }
 };
 

@@ -81,17 +81,16 @@ const adminLogin = async (req, res) => {
 // @desc    Manually Add Customer (Only by Admin)
 const manuallyAddCustomer = async (req, res) => {
     try {
-        const authUser = req.user || req.admin; // Use authenticated admin from middleware
-        if (!authUser || authUser.role !== 'admin') {
-            return res.status(403).json({ message: "Unauthorized: Admin access required" });
+        if (!req.admin || !req.isSuperAdmin) {
+            return res.status(403).json({ message: "Unauthorized: Only Super Admin can add users manually" });
         }
 
-        const { name, email, phone, country, state, address1, address2 } = req.body;
+        const { name, email, phone, country, state, address1, address2, password } = req.body;
 
         const existing = await User.findOne({ email });
         if (existing) return res.status(400).json({ message: "User already exists" });
 
-        const newUser = await User.create({
+        const newUserData = {
             name,
             email,
             phone,
@@ -102,7 +101,13 @@ const manuallyAddCustomer = async (req, res) => {
             createdBy: "admin",
             isManual: true,
             role: 'user'
-        });
+        };
+
+        if (password) {
+            newUserData.password = password;
+        }
+
+        const newUser = await User.create(newUserData);
 
         res.status(201).json({ message: "Customer added successfully", user: newUser });
     } catch (err) {

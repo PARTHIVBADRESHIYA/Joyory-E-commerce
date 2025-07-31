@@ -1,12 +1,20 @@
 import express from 'express';
-const router = express.Router();
-import { addProductController, getAllProducts, updateProductStock } from '../controllers/productController.js';
+import { addProductController, getAllProducts, updateProductStock, updateProductById } from '../controllers/productController.js';
 import { verifyAdminOrTeamMember } from '../middlewares/authMiddleware.js';
+import { uploadProduct } from '../middlewares/upload.js';
+
+const router = express.Router();
+
 
 // Admin-only routes
-router.post('/add-product', verifyAdminOrTeamMember, addProductController);
+router.post('/add-product', verifyAdminOrTeamMember, uploadProduct.array('images', 5),  // 👈 Accept up to 5 images
+    addProductController);
 router.get('/products', verifyAdminOrTeamMember, getAllProducts);
-router.put('/product/:id/stock', verifyAdminOrTeamMember, updateProductStock);
+router.patch('/products/:id', verifyAdminOrTeamMember, uploadProduct.array('images'), updateProductById);
+router.put('/products/:id/stock', verifyAdminOrTeamMember, updateProductStock);
+
+
+
 
 
 export default router;

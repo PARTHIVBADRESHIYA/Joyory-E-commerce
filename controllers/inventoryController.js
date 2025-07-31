@@ -16,6 +16,7 @@ export const addInventoryItem = async (req, res) => {
             description,
             image
         } = req.body;
+        
 
         const availability =
             quantity === 0
