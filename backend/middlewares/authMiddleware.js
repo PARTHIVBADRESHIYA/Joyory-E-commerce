@@ -9,7 +9,7 @@ import Order from '../models/Order.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key';
 if (!JWT_SECRET) throw new Error("JWT_SECRET is not defined in env");
-;   
+;
 
 
 export const verifyOrderOwnership = async (req, res, next) => {
@@ -93,10 +93,18 @@ export const verifyAdminOrTeamMember = async (req, res, next) => {
             req.admin = mainAdmin;
             req.isSuperAdmin = true;
             req.adminId = decoded.id;
+
+            // ✅ REQUIRED for Notification system
+            req.user = {
+                id: mainAdmin._id,
+                email: mainAdmin.email,
+                type: 'Admin',
+            };
+
             return next();
         }
 
-        // ✅ ADMIN ROLE ADMIN — IMPORTANT: Populate the role
+        // ✅ ADMIN ROLE ADMIN
         const roleAdmin = await AdminRoleAdmin.findById(decoded.id).populate('role');
         if (roleAdmin) {
             if (!roleAdmin.role || !roleAdmin.role._id) {
@@ -106,6 +114,14 @@ export const verifyAdminOrTeamMember = async (req, res, next) => {
             req.roleAdmin = roleAdmin;
             req.rolePermissions = roleAdmin.role.permissions;
             req.isRoleAdmin = true;
+
+            // ✅ REQUIRED for Notification system
+            req.user = {
+                id: roleAdmin._id,
+                email: roleAdmin.email,
+                type: 'AdminRoleAdmin',
+            };
+
             return next();
         }
 
@@ -114,6 +130,14 @@ export const verifyAdminOrTeamMember = async (req, res, next) => {
         if (teamMember) {
             req.teamMember = teamMember;
             req.rolePermissions = teamMember.role.permissions;
+
+            // ✅ REQUIRED for Notification system
+            req.user = {
+                id: teamMember._id,
+                email: teamMember.email,
+                type: 'TeamMember',
+            };
+
             return next();
         }
 
@@ -122,7 +146,6 @@ export const verifyAdminOrTeamMember = async (req, res, next) => {
         return res.status(401).json({ message: 'Invalid token', error: err.message });
     }
 };
-
 
 
 export const verifyRoleAdmin = async (req, res, next) => {
@@ -150,4 +173,3 @@ export const verifyRoleAdmin = async (req, res, next) => {
 
 export const protect = authenticateUser;
 export const isAdmin = verifyAdminOrTeamMember;
-    

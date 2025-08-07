@@ -1,7 +1,10 @@
 import dotenv from 'dotenv';
 dotenv.config();
-    import express from 'express';
+import express from 'express';
 import cors from 'cors';
+import http from 'http'; // ✅ NEW
+import { Server } from 'socket.io'; // ✅ NEW
+
 import connectDB from './config/db.js';
 // Load environment variables
 import cron from 'node-cron';
@@ -21,7 +24,7 @@ import affiliateRoutes from './routes/affiliateRoutes.js';
 import blogRoutes from './routes/blogRoutes.js';
 import supportRoutes from './routes/supportRoutes.js';
 import campaignRoutes from './routes/campaignRoutes.js';
-
+import commentRoutes from './routes/commentRoutes.js';
 
 
 import storeSettingRoutes from './routes/settings/storeSettingRoutes.js';
@@ -61,6 +64,28 @@ app.use(express.json());
 
 cron.schedule('*/10 * * * *', autoSendScheduledCampaigns); // runs every 10 mins
 
+// ✅ SETUP SOCKET.IO
+// ============================
+const server = http.createServer(app);
+
+const io = new Server(server, {
+    cors: {
+        origin: '*', // Replace with frontend origin in production
+        methods: ['GET', 'POST']
+    }
+});
+
+io.on('connection', (socket) => {
+    console.log('🔌 Client connected:', socket.id);
+
+    socket.on('disconnect', () => {
+        console.log('❌ Client disconnected:', socket.id);
+    });
+});
+
+// ✅ Export io to use in controllers
+export { io };
+
 
 // Use Auth Routes
 app.use('/api/auth', authRoutes);
@@ -79,7 +104,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/discounts', discountRoutes);
 
 //promotion
-app.use('/api/promotions', promotionRoutes);    
+app.use('/api/promotions', promotionRoutes);
 
 //review
 app.use('/api/reviews', reviewRoutes);
@@ -120,8 +145,12 @@ app.use('/api/notifications', notificationRoutes);
 //security
 app.use('/api/security', securityRoutes);
 
+//comments
+app.use('/api/comments', commentRoutes);
+
 
 app.use("/api", testRoutes);
+
 
 
 //user side backend

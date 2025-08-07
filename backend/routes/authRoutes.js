@@ -1,6 +1,7 @@
 import express from 'express';
 import { verifyAdminOrTeamMember } from '../middlewares/authMiddleware.js';
 import { manuallyAddCustomer, getAllCustomers} from "./../controllers/authController.js";
+import { adminLoginLimiter, userLoginLimiter } from '../middlewares/security/rateLimiter.js';
 
 import {
     addProductController,
@@ -12,14 +13,20 @@ import {
     userLogin,
     adminLogin
 } from "./../controllers/authController.js";
+
+import { adminLoginSchema } from '../middlewares/validations/adminValidator.js';
+import { userLoginSchema, userSignupSchema } from '../middlewares/validations/userValidation.js';
+
+import { validate } from '../middlewares/validations/validate.js';
+
 // import Admin from '../models/Admin.js';
 
 // Customer Signup/Login
-router.post('/user/signup', userSignup);
-router.post('/user/login', userLogin);
+router.post('/user/signup',validate(userSignupSchema),  userSignup);
+router.post('/user/login', userLoginLimiter,validate(userLoginSchema), userLogin);
 
 // Admin Signup/Login
-router.post('/admin/add-customer',verifyAdminOrTeamMember, manuallyAddCustomer);
+router.post('/admin/add-customer',verifyAdminOrTeamMember,manuallyAddCustomer);
 router.get('/admin/customers', verifyAdminOrTeamMember, getAllCustomers);
 
 
@@ -48,6 +55,6 @@ router.post('/add-product', verifyAdminOrTeamMember, addProductController);
 
 
 // Admin Login
-router.post('/admin/login', adminLogin);
+router.post('/admin/login',adminLoginLimiter, validate(adminLoginSchema),adminLogin);
 
 export default router;

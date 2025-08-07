@@ -1,7 +1,16 @@
 import mongoose from 'mongoose';
 
 const notificationSettingSchema = new mongoose.Schema({
-    adminId: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminRoleAdmin', required: true, unique: true },
+    adminId: {
+        type: mongoose.Schema.Types.ObjectId,
+        required: true,
+        refPath: 'adminType'
+    },
+    adminType: {
+        type: String,
+        required: true,
+        enum: ['Admin', 'AdminRoleAdmin']
+    },
     email: {
         productUpdates: { type: Boolean, default: false },
         securityUpdates: { type: Boolean, default: false },

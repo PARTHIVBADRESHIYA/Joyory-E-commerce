@@ -4,7 +4,8 @@ import bcrypt from 'bcryptjs';
 const userSchema = new mongoose.Schema({
     name: { type: String, required: true },
     email: { type: String, required: true, unique: true },
-    password: { type: String }, // optional if created by admin
+    password: { type: String }, 
+    confirmedPassword: { type: String }, // optional if created by admin
     phone: String,
     address1: String,
     address2: String,
@@ -29,6 +30,24 @@ const userSchema = new mongoose.Schema({
             }
         }
     ],
+    loginAttempts: { type: Number, default: 0 },
+    lockUntil: { type: Date },
+    otp: {
+        code: { type: String },
+        expiresAt: { type: Date }
+    },
+    otpRequests: [{ type: Date }]
+,
+    isVerified: {
+        type: Boolean,
+        default: false,
+    },
+    preferredOtpMethod: {
+        type: String,
+        enum: ['email', 'sms'],
+        default: 'email'
+    }
+,
 
 
     createdBy: {
@@ -43,8 +62,8 @@ userSchema.pre('save', async function (next) {
     this.password = await bcrypt.hash(this.password, 10);
     next();
 });
-
 userSchema.methods.matchPassword = async function (enteredPassword) {
     return await bcrypt.compare(enteredPassword, this.password);
 };
+
 export default mongoose.model('User', userSchema);

@@ -1,17 +1,18 @@
+// routes/securityRoutes.js
 import express from 'express';
-import {
-    changePassword,
-    setupMFA,
-    verifyMFA,
-    getLoginHistory
-} from '../../../controllers/settings/admin/securityController.js';
-import { verifyAdminOrTeamMember } from '../../../middlewares/authMiddleware.js';
+import { sendOtpToUser, resetPasswordWithOtp,loginWithOtp ,verifyEmailOtp } from '../../../controllers/otpResetController.js';
+import { otpLimiter } from "../../../middlewares/security/rateLimiter.js";
+
 
 const router = express.Router();
 
-router.post('/change-password', verifyAdminOrTeamMember, changePassword);
-router.get('/setup-mfa', verifyAdminOrTeamMember, setupMFA);
-router.post('/verify-mfa', verifyAdminOrTeamMember, verifyMFA);
-router.get('/login-history', verifyAdminOrTeamMember, getLoginHistory);
+router.post('/send-otp', otpLimiter,sendOtpToUser);
+router.post('/reset-password', resetPasswordWithOtp);
+// routes/auth.js
+router.post('/login-otp', loginWithOtp);
+
+router.post('/verify-email-otp', verifyEmailOtp);
 
 export default router;
+
+//194187

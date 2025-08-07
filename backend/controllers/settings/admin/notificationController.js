@@ -4,6 +4,8 @@ import { sendEmail, sendSMS } from '../../../middlewares/utils/sendNotification.
 export const updateNotification = async (req, res) => {
     try {
         const adminId = req.user.id; // comes from JWT middleware
+        const adminType = req.user.type || 'AdminRoleAdmin'; // ⬅️ fallback
+
 
         const { email, phone } = req.body;
 
@@ -16,7 +18,7 @@ export const updateNotification = async (req, res) => {
             await settings.save();
         } else {
             // Create new
-            settings = new NotificationSetting({ adminId, email, phone });
+            settings = new NotificationSetting({ adminId, adminType,email, phone });
             await settings.save();
         }
 
@@ -31,11 +33,18 @@ export const testNotification = async (req, res) => {
     const { type, channel } = req.body;
     const admin = req.user;
 
+    let logInfo = "";
+
     if (channel === 'email') {
+        logInfo = `[EMAIL] To: ${admin.email} | Type: ${type}`;
         await sendEmail(admin, type);
     } else if (channel === 'phone') {
+        logInfo = `[SMS] To: ${admin.phone} | Type: ${type}`;
         await sendSMS(admin.phone, type);
     }
 
-    res.json({ message: `Test ${channel} notification sent for ${type}` });
+    res.json({
+        message: `Test ${channel} notification sent for ${type}`,
+        debug: logInfo
+    });
 };
