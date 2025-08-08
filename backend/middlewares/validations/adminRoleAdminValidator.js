@@ -44,13 +44,14 @@ export const adminRoleAdminSchema = Joi.object({
             'any.required': 'Confirm password is required'
         }),
 
-    role: Joi.string()
+    roleId: Joi.string()
         .custom(isValidObjectId)
         .required()
         .messages({
             'any.invalid': 'Invalid role ID',
-            'any.required': 'Role is required'
+            'any.required': 'RoleId is required'
         }),
+
 
     newsletter: Joi.boolean().optional(),
     optimizeSpeed: Joi.boolean().optional(),

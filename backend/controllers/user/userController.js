@@ -1,0 +1,138 @@
+import User from '../../models/User.js';
+import Order from '../../models/Order.js';
+
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
+import { generateOTP } from '../../middlewares/utils/generateOTP.js';
+import { sendEmail } from '../../middlewares/utils/emailService.js';
+import { sendSms } from '../../middlewares/utils/sendSms.js';
+// import { notifyMainAdmins } from '../middlewares/utils/notifyMainAdmins.js'; // ✅ Make sure this path is correct
+
+// JWT Token Generator
+const generateToken = (user) => {
+    return jwt.sign(
+        { id: user._id, role: user.role },
+        process.env.JWT_SECRET,
+        { expiresIn: '7d' }
+    );
+};
+
+// ====================== USER SECTION ===================== //
+
+// @desc    User Signup (Customer only)
+const userSignup = async (req, res) => {
+
+    try {
+        const { name, email, password, confirmPassword, phone, preferredOtpMethod } = req.body;
+
+        // Validate method
+        if (!preferredOtpMethod || !['email', 'sms'].includes(preferredOtpMethod)) {
+            return res.status(400).json({ message: 'Preferred OTP method must be email or sms' });
+        }
+
+        const existing = await User.findOne({ email });
+        if (existing) return res.status(400).json({ message: 'Email already registered' });
+
+        // If user chooses SMS but phone is missing
+        if (preferredOtpMethod === 'sms' && !phone) {
+            return res.status(400).json({ message: 'Phone number is required for SMS OTP' });
+        }
+
+        const plainOtp = generateOTP();
+        const hashedOtp = await bcrypt.hash(plainOtp, 10);
+
+        // Save user
+        const user = await User.create({
+            name,
+            email,
+            phone,
+            password,
+            role: 'user',
+            isManual: false,
+            isVerified: false,
+            otp: {
+                code: hashedOtp,
+                expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+            }
+        });
+
+        // Send OTP via selected method
+        if (preferredOtpMethod === 'email') {
+            await sendEmail(email, 'Verify your email', `<p>Your verification OTP is: <b>${plainOtp}</b></p>`);
+        } else {
+            try {
+                await sendSms(phone, `Your verification OTP is: ${plainOtp}`);
+            } catch (err) {
+                return res.status(500).json({ message: 'Failed to send SMS', error: err.message });
+            }
+        }
+
+        res.status(201).json({
+            message: `Signup successful. Please verify your ${preferredOtpMethod} using the OTP sent.`
+        });
+
+    } catch (err) {
+        res.status(500).json({ message: 'Signup failed', error: err.message });
+    }
+};
+
+
+// @desc    User Login (5 attempts → 5min lock)
+const userLogin = async (req, res) => {
+
+
+    try {
+        const { email, password } = req.body;
+
+        const user = await User.findOne({ email });
+        if (!user || user.role !== 'user') return res.status(401).json({ message: 'Invalid credentials' });
+
+        if (!user.isVerified) {
+            return res.status(403).json({ message: 'Please verify your email before logging in.' });
+        }
+
+
+        // Check lock
+        if (user.lockUntil && user.lockUntil > new Date()) {
+            const remaining = user.lockUntil - new Date();
+            const m = Math.floor((remaining % 3600000) / 60000);
+            const s = Math.floor((remaining % 60000) / 1000);
+            return res.status(403).json({ message: `Account locked. Try again in ${m}m ${s}s.` });
+        }
+
+        console.log('Entered:', password);
+        console.log('Stored Hash:', user.password);
+
+
+        const isMatch = await user.matchPassword(password);
+        if (!isMatch) {
+            user.loginAttempts = (user.loginAttempts || 0) + 1;
+
+            if (user.loginAttempts >= 5) {
+                user.lockUntil = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+                user.loginAttempts = 0;
+            }
+
+            await user.save();
+            return res.status(401).json({ message: 'Invalid credentials' });
+        }
+
+        // Success
+        user.loginAttempts = 0;
+        user.lockUntil = undefined;
+        await user.save();
+
+        const token = generateToken(user);
+        res.status(200).json({ token, user: { id: user._id, name: user.name, role: user.role } });
+    } catch (err) {
+        res.status(500).json({ message: 'Login failed', error: err.message });
+    }
+};
+
+
+
+
+export {
+    userSignup,
+    userLogin,
+};

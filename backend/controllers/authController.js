@@ -1,10 +1,9 @@
 import User from '../models/User.js';
 import Admin from '../models/Admin.js';
+import Order from '../models/Order.js';
+
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { generateOTP } from '../middlewares/utils/generateOTP.js';
-import { sendEmail } from '../middlewares/utils/emailService.js';
-import { sendSms } from '../middlewares/utils/sendSms.js';
 import { notifyMainAdmins } from '../middlewares/utils/notifyMainAdmins.js'; // ✅ Make sure this path is correct
 
 // JWT Token Generator
@@ -16,122 +15,27 @@ const generateToken = (user) => {
     );
 };
 
-// ====================== USER SECTION ===================== //
-
-// @desc    User Signup (Customer only)
-const userSignup = async (req, res) => {
-
-    try {
-        const { name, email, password, confirmPassword, phone, preferredOtpMethod } = req.body;
-
-        // Validate method
-        if (!preferredOtpMethod || !['email', 'sms'].includes(preferredOtpMethod)) {
-            return res.status(400).json({ message: 'Preferred OTP method must be email or sms' });
-        }
-
-        const existing = await User.findOne({ email });
-        if (existing) return res.status(400).json({ message: 'Email already registered' });
-
-        // If user chooses SMS but phone is missing
-        if (preferredOtpMethod === 'sms' && !phone) {
-            return res.status(400).json({ message: 'Phone number is required for SMS OTP' });
-        }
-
-        const plainOtp = generateOTP();
-        const hashedOtp = await bcrypt.hash(plainOtp, 10);
-
-        // Save user
-        const user = await User.create({
-            name,
-            email,
-            phone,
-            password,
-            role: 'user',
-            isManual: false,
-            isVerified: false,
-            otp: {
-                code: hashedOtp,
-                expiresAt: new Date(Date.now() + 10 * 60 * 1000)
-            }
-        });
-
-        // Send OTP via selected method
-        if (preferredOtpMethod === 'email') {
-            await sendEmail(email, 'Verify your email', `<p>Your verification OTP is: <b>${plainOtp}</b></p>`);
-        } else {
-            try {
-                await sendSms(phone, `Your verification OTP is: ${plainOtp}`);
-            } catch (err) {
-                return res.status(500).json({ message: 'Failed to send SMS', error: err.message });
-            }
-        }
-
-        res.status(201).json({
-            message: `Signup successful. Please verify your ${preferredOtpMethod} using the OTP sent.`
-        });
-
-    } catch (err) {
-        res.status(500).json({ message: 'Signup failed', error: err.message });
-    }
-};
-
-
-// @desc    User Login (5 attempts → 5min lock)
-const userLogin = async (req, res) => {
-
-
-    try {
-        const { email, password } = req.body;
-
-        const user = await User.findOne({ email });
-        if (!user || user.role !== 'user') return res.status(401).json({ message: 'Invalid credentials' });
-
-        if (!user.isVerified) {
-            return res.status(403).json({ message: 'Please verify your email before logging in.' });
-        }
-
-
-        // Check lock
-        if (user.lockUntil && user.lockUntil > new Date()) {
-            const remaining = user.lockUntil - new Date();
-            const m = Math.floor((remaining % 3600000) / 60000);
-            const s = Math.floor((remaining % 60000) / 1000);
-            return res.status(403).json({ message: `Account locked. Try again in ${m}m ${s}s.` });
-        }
-
-        console.log('Entered:', password);
-        console.log('Stored Hash:', user.password);
-
-
-        const isMatch = await user.matchPassword(password);
-        if (!isMatch) {
-            user.loginAttempts = (user.loginAttempts || 0) + 1;
-
-            if (user.loginAttempts >= 5) {
-                user.lockUntil = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
-                user.loginAttempts = 0;
-            }
-
-            await user.save();
-            return res.status(401).json({ message: 'Invalid credentials' });
-        }
-
-        // Success
-        user.loginAttempts = 0;
-        user.lockUntil = undefined;
-        await user.save();
-
-        const token = generateToken(user);
-        res.status(200).json({ token, user: { id: user._id, name: user.name, role: user.role } });
-    } catch (err) {
-        res.status(500).json({ message: 'Login failed', error: err.message });
-    }
-};
-
 // ====================== ADMIN SECTION ===================== //
 
+const adminRegister = async (req, res) => {
+    try {
+        const { name, email, password } = req.body;
+
+        const existing = await Admin.findOne({ email });
+        if (existing) return res.status(400).json({ message: 'Admin already exists' });
+
+        const admin = new Admin({ name, email, password });
+        await admin.save();
+
+        res.status(201).json({ message: 'Admin created successfully' });
+    } catch (err) {
+        console.error('Admin Register Error:', err);
+        res.status(500).json({ message: 'Admin creation failed', error: err.message });
+    }
+}
+
 // @desc    Admin Login (3 attempts → 24hr lock, notify only on lock)
-const adminLogin = async (req, res) => {  
+const adminLogin = async (req, res) => {
     try {
         const { email, password } = req.body;
 
@@ -222,19 +126,173 @@ const manuallyAddCustomer = async (req, res) => {
     }
 };
 
-const getAllCustomers = async (req, res) => {
+// @desc    Get all users (for admin)
+const getAllUsers = async (req, res) => {
     try {
-        const customers = await User.find({ role: 'user' }).sort({ createdAt: -1 });
-        res.status(200).json(customers);
+        const users = await User.find({ role: 'user' }).sort({ createdAt: -1 });
+        res.status(200).json(users);
     } catch (err) {
-        res.status(500).json({ message: "Failed to fetch customers", error: err.message });
+        res.status(500).json({ message: 'Failed to fetch users', error: err.message });
+    }
+};
+
+// @desc    Get user by ID (for admin)
+const getUserById = async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id);
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        res.status(200).json(user);
+    } catch (err) {
+        res.status(500).json({ message: 'Error retrieving user', error: err.message });
+    }
+};
+
+// @desc    Update user by admin
+const updateUserByAdmin = async (req, res) => {
+    try {
+        const updates = req.body;
+        const updatedUser = await User.findByIdAndUpdate(req.params.id, updates, { new: true });
+        if (!updatedUser) return res.status(404).json({ message: 'User not found' });
+
+        res.status(200).json({ message: 'User updated', user: updatedUser });
+    } catch (err) {
+        res.status(500).json({ message: 'Failed to update user', error: err.message });
+    }
+};
+
+// @desc    Delete user by admin
+const deleteUser = async (req, res) => {
+    try {
+        const deleted = await User.findByIdAndDelete(req.params.id);
+        if (!deleted) return res.status(404).json({ message: 'User not found' });
+
+        res.status(200).json({ message: 'User deleted' });
+    } catch (err) {
+        res.status(500).json({ message: 'Failed to delete user', error: err.message });
+    }
+};
+
+// @desc    Get user analytics (orders, income, etc)
+const getUserAnalytics = async (req, res) => {
+    try {
+        const userId = req.params.id;
+        const orders = await Order.find({ user: userId });
+
+        if (!orders.length) {
+            return res.status(404).json({ message: "No orders found for this user" });
+        }
+
+        let totalSpent = 0;
+        let totalItemsOrdered = 0;
+        let totalDiscountUsed = 0;
+        let refunds = 0;
+        let cancelled = 0;
+        let lastOrderDate = null;
+
+        const statusBreakdown = {};
+        const paymentTypeBreakdown = {};
+
+        for (const order of orders) {
+            totalSpent += order.amount || 0;
+            totalDiscountUsed += order.discountAmount || 0;
+            lastOrderDate = !lastOrderDate || new Date(order.date) > new Date(lastOrderDate)
+                ? order.date
+                : lastOrderDate;
+
+            for (const item of order.products) {
+                totalItemsOrdered += item.quantity;
+            }
+
+            if (order.refund?.isRefunded) refunds++;
+            if (order.status === 'Cancelled') cancelled++;
+
+            statusBreakdown[order.status] = (statusBreakdown[order.status] || 0) + 1;
+            paymentTypeBreakdown[order.orderType] = (paymentTypeBreakdown[order.orderType] || 0) + 1;
+        }
+
+        const averageOrderValue = parseFloat((totalSpent / orders.length).toFixed(2));
+
+        const stats = {
+            totalOrders: orders.length,
+            totalSpent,
+            totalItemsOrdered,
+            totalDiscountUsed,
+            refunds,
+            cancelled,
+            lastOrderDate,
+            averageOrderValue,
+            statusBreakdown,
+            paymentTypeBreakdown
+        };
+
+        res.status(200).json(stats);
+
+    } catch (err) {
+        console.error("🔥 Error fetching user analytics:", err);
+        res.status(500).json({ message: 'Failed to fetch analytics', error: err.message });
+    }
+};
+
+// controllers/analyticsController.js
+
+const getFullCustomerAnalytics = async (req, res) => {
+    try {
+        const [totalCustomers, incomeAgg, monthlySpend, refundOrders] = await Promise.all([
+            // Total customers with role 'user'
+            User.countDocuments({ role: 'user' }),
+
+            // Total income from delivered or completed orders
+            Order.aggregate([
+                { $match: { status: { $in: ['Delivered', 'Completed'] } } },
+                { $group: { _id: null, total: { $sum: "$amount" } } }
+            ]),
+
+            // Monthly spend from delivered or completed orders
+            Order.aggregate([
+                { $match: { status: { $in: ['Delivered', 'Completed'] } } },
+                {
+                    $group: {
+                        _id: {
+                            month: { $month: "$createdAt" },
+                            year: { $year: "$createdAt" }
+                        },
+                        totalSpend: { $sum: "$amount" }
+                    }
+                }
+            ]),
+
+            // All orders where refund.isRefunded is true
+            Order.find({ "refund.isRefunded": true }, { refund: 1 })
+        ]);
+
+        // Calculate refundCount and totalRefundAmount from refundOrders
+        const refundCount = refundOrders.length;
+        const totalRefundAmount = refundOrders.reduce((sum, order) => {
+            return sum + (order.refund?.refundAmount || 0);
+        }, 0);
+
+        res.json({
+            totalCustomers,
+            totalIncome: incomeAgg[0]?.total || 0,
+            monthlySpend,
+            refundCount,
+            totalRefundAmount
+        });
+
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 };
 
 export {
-    userSignup,
-    userLogin,
+    adminRegister,
     adminLogin,
     manuallyAddCustomer,
-    getAllCustomers
+    getAllUsers,
+    getUserById,
+    updateUserByAdmin,
+    deleteUser,
+    getUserAnalytics,
+    getFullCustomerAnalytics
 };

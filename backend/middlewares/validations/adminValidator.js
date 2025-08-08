@@ -46,14 +46,6 @@ export const adminSignupSchema = Joi.object({
         .messages({
             'any.only': 'Confirm password must match password',
             'any.required': 'Confirm password is required'
-        }),
-
-    role: Joi.string()
-        .custom(isValidObjectId)
-        .required()
-        .messages({
-            'any.invalid': 'Invalid role ID',
-            'any.required': 'Role is required'
         })
 });
 

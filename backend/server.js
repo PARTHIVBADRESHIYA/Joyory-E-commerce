@@ -12,7 +12,7 @@ import { autoSendScheduledCampaigns } from './middlewares/utils/cron/autoSendCam
 
 
 import authRoutes from './routes/authRoutes.js';
-import userRoutes from './routes/userRoutes.js';
+import userRoutes from './routes/user/userRoutes.js';
 import productRoutes from './routes/productRoutes.js';
 import inventoryRoutes from './routes/inventoryRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
@@ -57,6 +57,9 @@ connectDB();
 // Initialize Express
 const app = express();
 
+app.set('trust proxy', 1); // ✅ trust only first proxy (like Render)
+
+
 // Middlewares
 app.use(cors());
 app.use(express.json());
@@ -88,7 +91,6 @@ export { io };
 
 
 // Use Auth Routes
-app.use('/api/auth', authRoutes);
 
 // Use User Routes
 app.use('/api/users', userRoutes);
