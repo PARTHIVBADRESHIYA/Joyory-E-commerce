@@ -1,16 +1,23 @@
+// middlewares/ipWhitelist.js
 import dotenv from 'dotenv';
 dotenv.config();
 
-const allowedIPs = process.env.ALLOWED_IPS?.split(',').map(ip => ip.trim()) || [];
+// ✅ Define this helper function before using it
+const normalizeIP = ip => ip?.replace(/^::ffff:/, '').trim();
 
 export const ipWhitelistMiddleware = (req, res, next) => {
-    const ip =
+    const rawIP =
         req.headers['x-forwarded-for']?.split(',')[0] ||
         req.connection?.remoteAddress ||
         req.socket?.remoteAddress ||
         req.ip;
 
-    console.log("Incoming IP:", ip);
+    const ip = normalizeIP(rawIP); // Use after it's defined
+
+    const allowedIPs = process.env.ALLOWED_IPS?.split(',').map(ip => ip.trim()) || [];
+
+    console.log('✅ Allowed IPs:', allowedIPs);
+    console.log('✅ Incoming IP:', ip);
 
     if (allowedIPs.includes(ip)) {
         return next();
@@ -19,6 +26,6 @@ export const ipWhitelistMiddleware = (req, res, next) => {
     return res.status(403).json({
         success: false,
         message: 'Access denied: Unauthorized IP',
-        yourIP: ip
+        yourIP: ip,
     });
 };
