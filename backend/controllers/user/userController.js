@@ -20,69 +20,133 @@ const generateToken = (user) => {
 // ====================== USER SECTION ===================== //
 
 // @desc    User Signup (Customer only)
+// const userSignup = async (req, res) => {
+
+//     try {
+//         const { name, email, password, phone } = req.body;
+
+//         // Validate method
+//         if (!preferredOtpMethod || !['email', 'sms'].includes(preferredOtpMethod)) {
+//             return res.status(400).json({ message: 'Preferred OTP method must be email or sms' });
+//         }
+
+//         // const existing = await User.findOne({ email });
+//         // if (existing) return res.status(400).json({ message: 'Email already registered' });
+
+//         // // If user chooses SMS but phone is missing
+//         // if (preferredOtpMethod === 'sms' && !phone) {
+//         //     return res.status(400).json({ message: 'Phone number is required for SMS OTP' });
+//         // }
+
+//         // const plainOtp = generateOTP();
+//         // const hashedOtp = await bcrypt.hash(plainOtp, 10);
+
+//         // Save user
+//         const user = await User.create({
+//             name,
+//             email,
+//             phone,
+//             password,
+//             role: 'user',
+//             isManual: false,
+//             isVerified: false,
+//             // otp: {
+//             //     code: hashedOtp,
+//             //     expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+//             // }
+//         });
+
+//         // // Send OTP via selected method
+//         // if (preferredOtpMethod === 'email') {
+//         //     await sendEmail(email, 'Verify your email', `<p>Your verification OTP is: <b>${plainOtp}</b></p>`);
+//         // } else {
+//         //     try {
+//         //         await sendSms(phone, `Your verification OTP is: ${plainOtp}`);
+//         //     } catch (err) {
+//         //         return res.status(500).json({ message: 'Failed to send SMS', error: err.message });
+//         //     }
+//         // }
+
+//         // res.status(201).json({
+//         //     message: `Signup successful. Please verify your ${preferredOtpMethod} using the OTP sent.`
+//         // });
+
+
+//         return res.status(201).json({
+//             message: 'Signup successful. Proceed to OTP verification.',
+//             userId: user._id,
+//             email: user.email
+//         });
+
+//     } catch (err) {
+//         res.status(500).json({ message: 'Signup failed', error: err.message });
+//     }
+// };
+
+// 📌 User Signup
 const userSignup = async (req, res) => {
-
     try {
-        const { name, email, password, confirmPassword, phone, preferredOtpMethod } = req.body;
-
-        // Validate method
-        if (!preferredOtpMethod || !['email', 'sms'].includes(preferredOtpMethod)) {
-            return res.status(400).json({ message: 'Preferred OTP method must be email or sms' });
+        const { name, email, password, phone, preferredOtpMethod } = req.body;
+        if (!name || !email || !password) {
+            return res.status(400).json({ message: 'name, email and password are required' });
         }
 
         const existing = await User.findOne({ email });
         if (existing) return res.status(400).json({ message: 'Email already registered' });
 
-        // If user chooses SMS but phone is missing
-        if (preferredOtpMethod === 'sms' && !phone) {
-            return res.status(400).json({ message: 'Phone number is required for SMS OTP' });
-        }
+        const method = (preferredOtpMethod && ['email', 'sms'].includes(preferredOtpMethod.toLowerCase()))
+            ? preferredOtpMethod.toLowerCase()
+            : 'email';
+        const willUseSms = method === 'sms' && phone;
+        const actualMethod = willUseSms ? 'sms' : 'email';
 
         const plainOtp = generateOTP();
         const hashedOtp = await bcrypt.hash(plainOtp, 10);
+        const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Save user
         const user = await User.create({
             name,
             email,
             phone,
-            password,
+            password: hashedPassword,
             role: 'user',
-            isManual: false,
+            isManual: true,
             isVerified: false,
-            otp: {
-                code: hashedOtp,
-                expiresAt: new Date(Date.now() + 10 * 60 * 1000)
-            }
+            preferredOtpMethod: actualMethod,
+            otp: { code: hashedOtp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) }
         });
 
-        // Send OTP via selected method
-        if (preferredOtpMethod === 'email') {
-            await sendEmail(email, 'Verify your email', `<p>Your verification OTP is: <b>${plainOtp}</b></p>`);
-        } else {
-            try {
+        try {
+            if (actualMethod === 'sms') {
                 await sendSms(phone, `Your verification OTP is: ${plainOtp}`);
-            } catch (err) {
-                return res.status(500).json({ message: 'Failed to send SMS', error: err.message });
+            } else {
+                await sendEmail(email, 'Verify your account', `<p>Your verification OTP is: <b>${plainOtp}</b></p>`);
             }
+        } catch (err) {
+            console.error('OTP send failed:', err);
+            return res.status(500).json({
+                message: 'Signup succeeded but sending OTP failed. Please request OTP again.',
+                error: err.message
+            });
         }
 
-        res.status(201).json({
-            message: `Signup successful. Please verify your ${preferredOtpMethod} using the OTP sent.`
+        return res.status(201).json({
+            message: 'Signup successful. OTP sent.',
+            method: actualMethod,
+            email: user.email
         });
-
     } catch (err) {
+        console.error('Signup error:', err);
         res.status(500).json({ message: 'Signup failed', error: err.message });
     }
 };
-
-
 // @desc    User Login (5 attempts → 5min lock)
 const userLogin = async (req, res) => {
 
 
     try {
         const { email, password } = req.body;
+        
 
         const user = await User.findOne({ email });
         if (!user || user.role !== 'user') return res.status(401).json({ message: 'Invalid credentials' });
@@ -99,10 +163,6 @@ const userLogin = async (req, res) => {
             const s = Math.floor((remaining % 60000) / 1000);
             return res.status(403).json({ message: `Account locked. Try again in ${m}m ${s}s.` });
         }
-
-        console.log('Entered:', password);
-        console.log('Stored Hash:', user.password);
-
 
         const isMatch = await user.matchPassword(password);
         if (!isMatch) {

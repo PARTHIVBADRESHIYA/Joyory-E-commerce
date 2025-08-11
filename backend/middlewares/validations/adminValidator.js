@@ -38,14 +38,6 @@ export const adminSignupSchema = Joi.object({
             'string.min': 'Password must be at least 8 characters',
             'string.max': 'Password must be at most 50 characters',
             'any.required': 'Password is required'
-        }),
-
-    confirmPassword: Joi.any()
-        .valid(Joi.ref('password'))
-        .required()
-        .messages({
-            'any.only': 'Confirm password must match password',
-            'any.required': 'Confirm password is required'
         })
 });
 

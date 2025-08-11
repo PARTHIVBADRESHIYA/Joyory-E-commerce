@@ -24,7 +24,7 @@ const orderSchema = new mongoose.Schema({
     buyerDiscountAmount: { type: Number, default: 0 },
     shippingAddress: {
         type: Object, // or use a sub-schema if structured
-        required: true
+        required: false
     },
 
     amount: { type: Number, required: true },

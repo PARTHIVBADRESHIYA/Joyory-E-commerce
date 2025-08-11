@@ -48,3 +48,16 @@ export const otpLimiter = rateLimit({
         return req.body.email?.toLowerCase() || ipKeyGenerator(req);
     }
 });
+
+export const productListRateLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 30, // Allow 30 requests per minute
+    message: 'Too many product listing requests. Please slow down.',
+});
+
+// For `/api/user/products/:id` - single product detail
+export const productDetailRateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60, // Allow 60 requests per minute
+    message: 'Too many product detail requests. Please slow down.',
+});

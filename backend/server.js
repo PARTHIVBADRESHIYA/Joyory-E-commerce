@@ -43,6 +43,8 @@ import attributeRoutes from './routes/attributeRoutes.js';
 
 import testRoutes from "./routes/testRoutes.js";
 
+import { securityMiddleware } from './middlewares/security.js';
+
 
 //user side backend
 
@@ -56,6 +58,7 @@ connectDB();
 
 // Initialize Express
 const app = express();
+securityMiddleware(app);
 
 app.set('trust proxy', 1); // ✅ trust only first proxy (like Render)
 

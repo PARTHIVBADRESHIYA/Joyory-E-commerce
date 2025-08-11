@@ -11,8 +11,7 @@ router.post('/reset-password', resetPasswordWithOtp);
 // routes/auth.js
 router.post('/login-otp', loginWithOtp);
 
-router.post('/verify-email-otp', verifyEmailOtp);
+router.post('/verify-otp', verifyEmailOtp);
 
 export default router;
 
-//194187

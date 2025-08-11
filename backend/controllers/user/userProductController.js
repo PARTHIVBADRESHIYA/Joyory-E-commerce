@@ -62,23 +62,30 @@ export const getAllFilteredProducts = async (req, res) => {
             .skip(skip)
             .limit(perPage);
 
-        const cards = products.map(p => ({
-            _id: p._id,
-            name: p.name,
-            variant: p.variant,
-            price: p.price,
-            brand: p.brand,
-            category: p.category,
-            summary: p.summary || p.description?.slice(0, 100) || '',
-            status: p.status,
-            image: Array.isArray(p.images) && p.images.length > 0 ? p.images[0] : null,
-            shades: p.shadeOptions?.slice(0, 3) || [],
-            moreShadesCount: Math.max(0, (p.shadeOptions?.length || 0) - 3),
-            colorOptions: p.colorOptions || [],
-            commentsCount: p.commentsCount || 0,
-            avgRating: p.avgRating || 0
-        }));
+        const cards = products.map(p => {
+            const hasShades = p.shadeOptions && p.shadeOptions.length > 0;
 
+            return {
+                _id: p._id,
+                name: p.name,
+                variant: p.variant,
+                price: p.price,
+                brand: p.brand,
+                category: p.category,
+                summary: p.summary || p.description?.slice(0, 100) || '',
+                status: p.status,
+                image: p.images?.length > 0
+                    ? (p.images[0].startsWith('http') ? p.images[0] : `${process.env.BASE_URL}/${p.images[0]}`)
+                    : null,
+                colorOptions: p.colorOptions || [],
+                commentsCount: p.commentsCount || 0,
+                avgRating: p.avgRating || 0,
+                ...(hasShades && {
+                    shades: p.shadeOptions.slice(0, 3),
+                    moreShadesCount: Math.max(0, p.shadeOptions.length - 3)
+                })
+            };
+        });
         const totalPages = Math.ceil(total / perPage);
 
         res.status(200).json({

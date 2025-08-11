@@ -5,6 +5,91 @@ import Product from '../../../models/Product.js';
 import Affiliate from '../../../models/Affiliate.js';
 import mongoose from 'mongoose';
 
+import Razorpay from "razorpay";
+import crypto from "crypto";
+
+const razorpayInstance = new Razorpay({
+    key_id: process.env.RAZORPAY_KEY_ID,
+    key_secret: process.env.RAZORPAY_KEY_SECRET
+});
+
+// ✅ Create Razorpay Order
+export const createRazorpayOrder = async (req, res) => {
+    try {
+        const { amount, currency = "INR", receipt, orderId } = req.body;
+
+        if (!orderId || !amount) {
+            return res.status(400).json({ message: "Missing required fields" });
+        }
+
+        const options = {
+            amount: amount * 100, // Razorpay uses paise
+            currency,
+            receipt: receipt || `receipt_order_${orderId}`,
+            payment_capture: 1 // Auto-capture
+        };
+
+        const razorpayOrder = await razorpayInstance.orders.create(options);
+
+        res.status(200).json({
+            success: true,
+            razorpayOrderId: razorpayOrder.id,
+            amount: razorpayOrder.amount,
+            currency: razorpayOrder.currency,
+            key: process.env.RAZORPAY_KEY_ID,
+        });
+
+    } catch (err) {
+        res.status(500).json({ message: "Failed to create Razorpay order", error: err.message });
+    }
+};
+
+export const verifyRazorpayPayment = async (req, res) => {
+    try {
+        const {
+            razorpay_order_id,
+            razorpay_payment_id,
+            razorpay_signature,
+            orderId
+        } = req.body;
+
+        const body = razorpay_order_id + "|" + razorpay_payment_id;
+        const expectedSignature = crypto
+            .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+            .update(body.toString())
+            .digest("hex");
+
+        const isValid = expectedSignature === razorpay_signature;
+
+        if (!isValid) {
+            return res.status(400).json({ message: "Invalid payment signature" });
+        }
+
+        // ✅ Mark order as completed
+        const order = await Order.findById(orderId);
+        if (!order) return res.status(404).json({ message: "Order not found" });
+
+        order.status = "Completed";
+        order.paymentDate = new Date();
+        await order.save();
+
+        const method = await PaymentMethod.findOne({ name: "Razorpay" });
+
+        const payment = await Payment.create({
+            order: order._id,
+            method: method?._id,
+            status: "Completed",
+            transactionId: razorpay_payment_id,
+            amount: order.total,
+        });
+
+        res.status(200).json({ message: "Payment verified", payment });
+
+    } catch (err) {
+        res.status(500).json({ message: "Payment verification failed", error: err.message });
+    }
+};
+
 export const payForOrder = async (req, res) => {
     try {
         const order = req.order;

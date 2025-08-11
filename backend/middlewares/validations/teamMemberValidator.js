@@ -37,14 +37,6 @@ export const teamMemberSchema = Joi.object({
             'any.required': 'Password is required'
         }),
 
-    confirmPassword: Joi.any()
-        .valid(Joi.ref('password'))
-        .required()
-        .messages({
-            'any.only': 'Confirm password must match password',
-            'any.required': 'Confirm password is required'
-        }),
-
     role: Joi.string()
         .custom(isValidObjectId)
         .required()

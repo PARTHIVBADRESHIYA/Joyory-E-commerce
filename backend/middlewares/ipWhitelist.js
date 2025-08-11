@@ -16,16 +16,9 @@ export const ipWhitelistMiddleware = (req, res, next) => {
 
     const allowedIPs = process.env.ALLOWED_IPS?.split(',').map(ip => ip.trim()) || [];
 
-    console.log('✅ Allowed IPs:', allowedIPs);
-    console.log('✅ Incoming IP:', ip);
-
     if (allowedIPs.includes(ip)) {
         return next();
     }
+    return res.status(404).send('Not Found');
 
-    return res.status(403).json({
-        success: false,
-        message: 'Access denied: Unauthorized IP',
-        yourIP: ip,
-    });
 };

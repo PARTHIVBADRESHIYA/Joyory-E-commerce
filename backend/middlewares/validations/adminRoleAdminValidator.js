@@ -35,15 +35,7 @@ export const adminRoleAdminSchema = Joi.object({
             'string.min': 'Password must be at least 8 characters',
             'any.required': 'Password is required'
         }),
-
-    confirmPassword: Joi.any()
-        .valid(Joi.ref('password'))
-        .required()
-        .messages({
-            'any.only': 'Confirm password must match password',
-            'any.required': 'Confirm password is required'
-        }),
-
+        
     roleId: Joi.string()
         .custom(isValidObjectId)
         .required()
