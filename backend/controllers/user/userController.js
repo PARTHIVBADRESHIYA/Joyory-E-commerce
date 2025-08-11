@@ -142,8 +142,6 @@ const userSignup = async (req, res) => {
 };
 // @desc    User Login (5 attempts → 5min lock)
 const userLogin = async (req, res) => {
-
-
     try {
         const { email, password } = req.body;
         

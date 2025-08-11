@@ -16,7 +16,7 @@ const generateToken = (user) => {
 };
 
 // ====================== ADMIN SECTION ===================== //
-
+    
 const adminRegister = async (req, res) => {
     try {
         const { name, email, password } = req.body;

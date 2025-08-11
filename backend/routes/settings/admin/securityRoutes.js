@@ -6,12 +6,10 @@ import { otpLimiter } from "../../../middlewares/security/rateLimiter.js";
 
 const router = express.Router();
 
-router.post('/send-otp', otpLimiter,sendOtpToUser);
-router.post('/reset-password', resetPasswordWithOtp);
-// routes/auth.js
-router.post('/login-otp', loginWithOtp);
-
+router.post('/send-otp', otpLimiter,sendOtpToUser)
 router.post('/verify-otp', verifyEmailOtp);
+router.post('/reset-password', resetPasswordWithOtp);
+router.post('/login-otp', loginWithOtp);
 
 export default router;
 

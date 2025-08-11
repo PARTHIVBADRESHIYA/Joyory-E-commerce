@@ -21,7 +21,8 @@ const JWT_SECRET = process.env.JWT_SECRET;
 
 // Helper: Get correct user model
 const getUserByType = async (type, email) => {
-    switch (type) {
+    const userType = type || 'user'; // default to 'user' if type missing
+    switch (userType) {
         case 'admin': return Admin.findOne({ email });
         case 'roleAdmin': return AdminRoleAdmin.findOne({ email });
         case 'teamMember': return TeamMember.findOne({ email });
@@ -29,6 +30,7 @@ const getUserByType = async (type, email) => {
         default: return null;
     }
 };
+
 
 // 📌 Send OTP
 // 📌 Send OTP
