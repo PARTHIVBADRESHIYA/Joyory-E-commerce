@@ -83,7 +83,7 @@ export function securityMiddleware(app) {
         FRONTEND,
         "https://joyory.com",
         "https://admin.joyory.com",
-        "http://localhost:3000",
+        "http://localhost:5173",
     ];
     app.use(
         cors({
