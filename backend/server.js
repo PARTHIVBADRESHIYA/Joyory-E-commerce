@@ -66,7 +66,12 @@ app.set('trust proxy', 1); // ✅ trust only first proxy (like Render)
 
 
 // Middlewares
-app.use(cors());
+// app.use(cors());
+
+app.use(cors({
+    origin: true,
+    credentials: true
+}));
 app.use(express.json());
 
 
