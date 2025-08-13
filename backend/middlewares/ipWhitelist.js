@@ -7,18 +7,19 @@ const normalizeIP = ip => ip?.replace(/^::ffff:/, '').trim();
 
 export const ipWhitelistMiddleware = (req, res, next) => {
     const rawIP =
-        req.headers['x-forwarded-for']?.split(',')[0] ||
+        (req.headers['x-forwarded-for']?.split(',')[0]) ||
         req.connection?.remoteAddress ||
         req.socket?.remoteAddress ||
         req.ip;
 
-    const ip = normalizeIP(rawIP); // Use after it's defined
+    const clientIP = normalizeIP(rawIP);
 
-    const allowedIPs = process.env.ALLOWED_IPS?.split(',').map(ip => ip.trim()) || [];
+    const allowedList = process.env.ALLOWED_IPS?.split(',').map(i => i.trim()) || [];
 
-    if (allowedIPs.includes(ip)) {
-        return next();
-    }
+    // Allow partial (range) and exact matches
+    const isAllowed = allowedList.some(allowedIP => clientIP === allowedIP || clientIP.startsWith(allowedIP));
+    
+    if (isAllowed) return next();
+
     return res.status(404).send('Not Found');
-
 };

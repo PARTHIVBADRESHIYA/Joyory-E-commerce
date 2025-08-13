@@ -14,6 +14,7 @@ import { autoSendScheduledCampaigns } from './middlewares/utils/cron/autoSendCam
 import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/user/userRoutes.js';
 import productRoutes from './routes/productRoutes.js';
+import adminCategoryRoutes from './routes/categoryRoutes.js';
 import inventoryRoutes from './routes/inventoryRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
 import discountRoutes from './routes/discountRoutes.js';
@@ -51,6 +52,7 @@ import { securityMiddleware } from './middlewares/security.js';
 import userProductRoutes from "./routes/user/userProductRoutes.js";
 import userCartAndOrderRoutes from "./routes/user/userCartAndOrderRoutes.js";
 import userAddressRoutes from "./routes/user/userAddressRoutes.js";
+import userCategoryRoutes from "./routes/user/userCategoryRoutes.js";
 
 
 // Connect to MongoDB
@@ -99,7 +101,11 @@ export { io };
 app.use('/api/users', userRoutes);
 app.use("/api/admin", authRoutes);
 
+// Admin category routes (protected with admin auth if you have it)
+app.use('/api/admin/categories', adminCategoryRoutes);
 app.use('/api', productRoutes);
+
+
 
 app.use('/api/attributes', attributeRoutes);
 app.use('/api/inventory', inventoryRoutes);
@@ -160,6 +166,8 @@ app.use("/api", testRoutes);
 
 //user side backend
 
+// Public / user-facing category routes (category tree, get by slug, get products)
+app.use('/api/user/categories', userCategoryRoutes);
 app.use('/api/user/products', userProductRoutes);
 
 app.use('/api/user/cart', userCartAndOrderRoutes);

@@ -10,7 +10,7 @@ export const teamMemberLoginLimiter = rateLimit({
     legacyHeaders: false,
 });
 
-export const adminLoginLimiter = rateLimit({
+export const    adminLoginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
     max: 10, // max requests per windowMs
     message: 'Too many login attempts. Please try again after 15 minutes.',

@@ -24,13 +24,12 @@ import { addProductController } from './../controllers/productController.js';
 const router = express.Router();
 
 // 🔐 Apply IP lock to all admin routes
-router.use(ipWhitelistMiddleware);
 
 // ✅ Admin Register
 router.post('/register', validate(adminSignupSchema), adminRegister);
 
 // ✅ Admin Login
-router.post('/login', adminLoginLimiter, validate(adminLoginSchema), adminLogin);
+router.post('/login',ipWhitelistMiddleware, adminLoginLimiter, validate(adminLoginSchema), adminLogin);
 
 // ✅ Admin-only functionalities (requires authentication)
 router.post('/add-customer', verifyAdminOrTeamMember, manuallyAddCustomer);

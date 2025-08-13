@@ -1,15 +1,20 @@
 import Product from '../../models/Product.js';
 import Review from '../../models/Review.js';
 import User from '../../models/User.js';
+import Category from '../../models/Category.js';
+import { getDescendantCategoryIds } from '../../middlewares/utils/categoryUtils.js';
+import mongoose from 'mongoose';
 
-
+/**
+ * GET /products (Filtered list)
+ */
 export const getAllFilteredProducts = async (req, res) => {
     try {
         const {
             priceMin,
             priceMax,
             brand,
-            category,
+            category, // can be slug or ObjectId
             discount,
             preference,
             ingredients,
@@ -31,7 +36,30 @@ export const getAllFilteredProducts = async (req, res) => {
         const filter = {};
 
         if (brand) filter.brand = brand;
-        if (category) filter.category = category;
+
+        // ✅ Category filter — only if provided and valid
+        if (category && category.trim() !== '') {
+            let catDoc = null;
+
+            if (mongoose.Types.ObjectId.isValid(category)) {
+                catDoc = await Category.findById(category).lean();
+            } else {
+                catDoc = await Category.findOne({ slug: category.toLowerCase() }).lean();
+            }
+
+            if (catDoc?._id) {
+                const ids = await getDescendantCategoryIds(catDoc._id);
+                const validIds = ids.filter(id => mongoose.Types.ObjectId.isValid(id)).map(id => new mongoose.Types.ObjectId(id));
+
+                if (validIds.length) {
+                    filter.$or = [
+                        { categories: { $in: validIds } },
+                        { category: { $in: validIds } }
+                    ];
+                }
+            }
+        }
+
         if (color) filter.colorOptions = { $in: [color] };
         if (shade) filter.shadeOptions = { $in: [shade] };
 
@@ -41,7 +69,6 @@ export const getAllFilteredProducts = async (req, res) => {
             if (priceMax) filter.price.$lte = Number(priceMax);
         }
 
-        // Add all tag filters using $all
         const tagFilters = [
             skinType, formulation, makeupFinish, benefits, concern,
             skinTone, gender, age, conscious, preference, ingredients, discount
@@ -51,27 +78,49 @@ export const getAllFilteredProducts = async (req, res) => {
             filter.productTags = { $all: tagFilters };
         }
 
-        // Pagination setup
         const currentPage = Number(page);
         const perPage = Number(limit);
         const skip = (currentPage - 1) * perPage;
 
         const total = await Product.countDocuments(filter);
+
+        // ✅ Safe populate: only populate when category field is a valid ObjectId
         const products = await Product.find(filter)
             .sort({ createdAt: -1 })
             .skip(skip)
-            .limit(perPage);
+            .limit(perPage)
+            .lean();
+
+        // Manually attach category objects for valid ObjectId references
+        const categoryIds = [
+            ...new Set(
+                products
+                    .map(p => p.category)
+                    .filter(id => mongoose.Types.ObjectId.isValid(id))
+                    .map(id => String(id))
+            )
+        ];
+
+        const categoryMap = categoryIds.length
+            ? new Map(
+                (await Category.find({ _id: { $in: categoryIds } })
+                    .select('name slug')
+                    .lean()
+                ).map(c => [String(c._id), c])
+            )
+            : new Map();
 
         const cards = products.map(p => {
             const hasShades = p.shadeOptions && p.shadeOptions.length > 0;
-
             return {
                 _id: p._id,
                 name: p.name,
                 variant: p.variant,
                 price: p.price,
                 brand: p.brand,
-                category: p.category,
+                category: mongoose.Types.ObjectId.isValid(p.category)
+                    ? categoryMap.get(String(p.category)) || null
+                    : null,
                 summary: p.summary || p.description?.slice(0, 100) || '',
                 status: p.status,
                 image: p.images?.length > 0
@@ -86,6 +135,7 @@ export const getAllFilteredProducts = async (req, res) => {
                 })
             };
         });
+
         const totalPages = Math.ceil(total / perPage);
 
         res.status(200).json({
@@ -104,7 +154,9 @@ export const getAllFilteredProducts = async (req, res) => {
     }
 };
 
-
+/**
+ * GET /products/:id (Single product + reviews)
+ */
 export const getSingleProduct = async (req, res) => {
     try {
         const {
@@ -112,21 +164,28 @@ export const getSingleProduct = async (req, res) => {
             withPhotos = false,
             ratingFilter,
             page = 1,
-            limit = 5 // Reviews per page
+            limit = 5
         } = req.query;
 
-        // ✅ Increment views
+        // ✅ No populate to avoid cast error — we’ll attach manually
         const product = await Product.findByIdAndUpdate(
             req.params.id,
             { $inc: { views: 1 } },
-            { new: true }
+            { new: true, lean: true }
         );
 
         if (!product) {
             return res.status(404).json({ message: 'Product not found' });
         }
 
-        // ✅ Filter for main reviews
+        // Attach category if valid
+        let categoryObj = null;
+        if (mongoose.Types.ObjectId.isValid(product.category)) {
+            categoryObj = await Category.findById(product.category)
+                .select('name slug')
+                .lean();
+        }
+
         const reviewFilter = {
             productId: product._id,
             status: 'Active'
@@ -135,7 +194,6 @@ export const getSingleProduct = async (req, res) => {
         if (withPhotos === 'true') {
             reviewFilter.images = { $exists: true, $not: { $size: 0 } };
         }
-
         if (ratingFilter) {
             reviewFilter.rating = Number(ratingFilter);
         }
@@ -148,7 +206,6 @@ export const getSingleProduct = async (req, res) => {
         const perPage = Number(limit);
         const skip = (currentPage - 1) * perPage;
 
-        // ✅ Paginated reviews
         const reviews = await Review.find(reviewFilter)
             .populate('customer', 'name')
             .sort(sortBy)
@@ -157,17 +214,16 @@ export const getSingleProduct = async (req, res) => {
 
         const totalReviews = await Review.countDocuments(reviewFilter);
 
-        // ✅ Average Rating
         const allActiveReviews = await Review.find({
             productId: product._id,
             status: 'Active'
         });
+
         const totalRating = allActiveReviews.reduce((sum, r) => sum + r.rating, 0);
         const avgRating = allActiveReviews.length
             ? parseFloat((totalRating / allActiveReviews.length).toFixed(1))
             : 0;
 
-        // ✅ Ratings Breakdown
         const ratingsBreakdown = {
             Excellent: allActiveReviews.filter(r => r.rating === 5).length,
             VeryGood: allActiveReviews.filter(r => r.rating === 4).length,
@@ -176,7 +232,6 @@ export const getSingleProduct = async (req, res) => {
             Poor: allActiveReviews.filter(r => r.rating === 1).length
         };
 
-        // ⭐ Top 3 featured reviews (not paginated, separate)
         const featuredReviews = await Review.find({
             productId: product._id,
             status: 'Active',
@@ -186,35 +241,12 @@ export const getSingleProduct = async (req, res) => {
             .sort({ helpfulVotes: -1, createdAt: -1 })
             .limit(3);
 
-        const {
-            _id, name, variant, price, quantity, status,
-            brand, category, summary, description, features,
-            howToUse, shadeOptions, colorOptions, productTags,
-            images, commentsCount, views, createdAt
-        } = product;
-
         res.status(200).json({
-            _id,
-            name,
-            variant,
-            price,
-            quantity,
-            status,
-            brand,
-            category,
-            summary,
-            description,
-            features,
-            howToUse,
-            shadeOptions,
-            colorOptions,
-            productTags,
-            images,
+            ...product,
+            category: categoryObj,
             avgRating,
             commentsCount: allActiveReviews.length,
             ratingsBreakdown,
-            views,
-            createdAt,
             featuredReviews,
             reviews,
             pagination: {
@@ -231,4 +263,122 @@ export const getSingleProduct = async (req, res) => {
     }
 };
 
+/**
+ * GET /products/category/:slug
+ */
+export const getProductsByCategory = async (req, res) => {
+    try {
+        const { slug } = req.params;
+        let { page = 1, limit = 12, sort = 'recent' } = req.query;
+        page = Number(page);
+        limit = Number(limit);
 
+        // ✅ Find category by slug or id
+        let category = null;
+        if (mongoose.Types.ObjectId.isValid(slug)) {
+            category = await Category.findById(slug)
+                .select('name slug bannerImage thumbnailImage ancestors')
+                .lean();
+        } else {
+            category = await Category.findOne({ slug })
+                .select('name slug bannerImage thumbnailImage ancestors')
+                .lean();
+        }
+
+        if (!category) {
+            return res.status(404).json({ message: 'Category not found' });
+        }
+
+        // ✅ Get descendant category IDs
+        const ids = (await getDescendantCategoryIds(category._id))
+            .filter(id => mongoose.Types.ObjectId.isValid(id))
+            .map(id => new mongoose.Types.ObjectId(id));
+
+        ids.push(category._id);
+
+        const filter = {
+            $or: [
+                { categories: { $in: ids } },
+                { category: { $in: ids } }
+            ]
+        };
+
+        const total = await Product.countDocuments(filter);
+        const products = await Product.find(filter)
+            .sort(sort === 'recent' ? { createdAt: -1 } : { price: 1 })
+            .skip((page - 1) * limit)
+            .limit(limit)
+            .lean();
+
+        // Attach categories safely
+        const categoryIds = [
+            ...new Set(
+                products
+                    .map(p => p.category)
+                    .filter(id => mongoose.Types.ObjectId.isValid(id))
+                    .map(id => String(id))
+            )
+        ];
+        const categoryMap = categoryIds.length
+            ? new Map(
+                (await Category.find({ _id: { $in: categoryIds } })
+                    .select('name slug')
+                    .lean()
+                ).map(c => [String(c._id), c])
+            )
+            : new Map();
+
+        const cards = products.map(p => {
+            const hasShades = p.shadeOptions && p.shadeOptions.length > 0;
+            return {
+                _id: p._id,
+                name: p.name,
+                variant: p.variant,
+                price: p.price,
+                brand: p.brand,
+                category: mongoose.Types.ObjectId.isValid(p.category)
+                    ? categoryMap.get(String(p.category)) || null
+                    : null,
+                summary: p.summary || p.description?.slice(0, 100) || '',
+                status: p.status,
+                image: p.images?.length > 0
+                    ? (p.images[0].startsWith('http') ? p.images[0] : `${process.env.BASE_URL}/${p.images[0]}`)
+                    : null,
+                colorOptions: p.colorOptions || [],
+                commentsCount: p.commentsCount || 0,
+                avgRating: p.avgRating || 0,
+                ...(hasShades && {
+                    shades: p.shadeOptions.slice(0, 3),
+                    moreShadesCount: Math.max(0, p.shadeOptions.length - 3)
+                })
+            };
+        });
+
+        // ✅ Breadcrumb
+        const ancestorIds = (category.ancestors || [])
+            .filter(id => mongoose.Types.ObjectId.isValid(id))
+            .map(id => new mongoose.Types.ObjectId(id));
+
+        const ancestors = ancestorIds.length
+            ? await Category.find({ _id: { $in: ancestorIds } })
+                .sort({ createdAt: 1 })
+                .select('name slug')
+            : [];
+
+        res.status(200).json({
+            category,
+            breadcrumb: ancestors,
+            products: cards,
+            pagination: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit),
+                hasMore: page < Math.ceil(total / limit)
+            }
+        });
+    } catch (err) {
+        console.error('getProductsByCategory error:', err);
+        res.status(500).json({ message: err.message });
+    }
+};

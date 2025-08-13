@@ -14,3 +14,4 @@ router.get('/summary', getSupportSummary);
 router.patch('/status/:id', updateTicketStatus);
 
 export default router;
+

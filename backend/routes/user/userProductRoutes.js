@@ -1,5 +1,5 @@
 import express from 'express';
-import { getAllFilteredProducts, getSingleProduct } from '../../controllers/user/userProductController.js';
+import { getAllFilteredProducts, getSingleProduct,getProductsByCategory  } from '../../controllers/user/userProductController.js';
 import {
     productListRateLimiter,
     productDetailRateLimiter
@@ -31,6 +31,7 @@ const cacheMiddleware = (req, res, next) => {
 };
 
 router.get('/', productListRateLimiter, cacheMiddleware, validate(productQuerySchema), getAllFilteredProducts); // /api/user/products
+router.get('/category/:slug', getProductsByCategory);
 router.get('/:id', productDetailRateLimiter, validate(productDetailQuerySchema), getSingleProduct);    // /api/user/products/:id
 
 

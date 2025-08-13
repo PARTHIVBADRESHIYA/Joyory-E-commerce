@@ -10,7 +10,12 @@ const productSchema = new mongoose.Schema({
     thresholdValue: { type: Number, required: true },
     expiryDate: Date,
     brand: String,
-    category: String,
+    // backward-compatible single category (optional)
+   category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category' }, // final category (e.g. Eyeliner)
+categoryHierarchy: [ // full path
+    { type: mongoose.Schema.Types.ObjectId, ref: 'Category' }
+],
+
     description: String,
     summary: String, // for card preview
     features: String, // optional
@@ -30,14 +35,14 @@ const productSchema = new mongoose.Schema({
     avgRating: { type: Number, default: 0 },
     commentsCount: { type: Number, default: 0 },
     totalRatings: { type: Number, default: 0 },
-    
+
     ratingsBreakdown: {
-    Excellent: { type: Number, default: 0 },
-    VeryGood: { type: Number, default: 0 },
-    Average: { type: Number, default: 0 },
-    Good: { type: Number, default: 0 },
-    Poor: { type: Number, default: 0 }
-}
+        Excellent: { type: Number, default: 0 },
+        VeryGood: { type: Number, default: 0 },
+        Average: { type: Number, default: 0 },
+        Good: { type: Number, default: 0 },
+        Poor: { type: Number, default: 0 }
+    }
 
 }, { timestamps: true });
 
