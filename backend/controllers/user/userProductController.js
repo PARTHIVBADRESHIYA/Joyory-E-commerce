@@ -268,7 +268,7 @@ export const getSingleProduct = async (req, res) => {
  */
 export const getProductsByCategory = async (req, res) => {
     try {
-        const { slug } = req.params;
+        const slug = req.params.slug.toLowerCase(); // normalize
         let { page = 1, limit = 12, sort = 'recent' } = req.query;
         page = Number(page);
         limit = Number(limit);

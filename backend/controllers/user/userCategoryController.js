@@ -43,35 +43,3 @@ export const getCategoryTree = async (req, res) => {
 
 
 
-export const getCategoryByIdOrSlug = async (req, res) => {
-    try {
-        const identifier = req.params.slugOrId;
-        let category;
-
-        if (mongoose.isValidObjectId(identifier)) {
-            category = await Category.findById(identifier)
-                .select('name slug bannerImage thumbnailImage ancestors');
-        } else {
-            category = await Category.findOne({ slug: identifier })
-                .select('name slug bannerImage thumbnailImage ancestors');
-        }
-
-
-        if (!category) return res.status(404).json({ message: 'Category not found' });
-
-        let ancestors = [];
-        ancestors = allObjectIds
-            ? await Category.find({ _id: { $in: category.ancestors } })
-                .sort({ createdAt: 1 })
-                .select('name slug bannerImage thumbnailImage')
-            : await Category.find({ slug: { $in: category.ancestors } })
-                .sort({ createdAt: 1 })
-                .select('name slug bannerImage thumbnailImage');
-
-        res.json({ category, breadcrumb: ancestors });
-    } catch (err) {
-        console.error("❌ getCategoryByIdOrSlug error:", err);
-        res.status(500).json({ message: "Server error", error: err.message });
-    }
-};
-

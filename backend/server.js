@@ -167,8 +167,8 @@ app.use("/api", testRoutes);
 //user side backend
 
 // Public / user-facing category routes (category tree, get by slug, get products)
-app.use('/api/user/categories', userCategoryRoutes);
 app.use('/api/user/products', userProductRoutes);
+app.use('/api/user/categories', userCategoryRoutes);
 
 app.use('/api/user/cart', userCartAndOrderRoutes);
 

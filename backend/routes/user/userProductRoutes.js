@@ -31,7 +31,7 @@ const cacheMiddleware = (req, res, next) => {
 };
 
 router.get('/', productListRateLimiter, cacheMiddleware, validate(productQuerySchema), getAllFilteredProducts); // /api/user/products
-router.get('/category/:slug', getProductsByCategory);
+router.get('/category/:slug/products', getProductsByCategory);
 router.get('/:id', productDetailRateLimiter, validate(productDetailQuerySchema), getSingleProduct);    // /api/user/products/:id
 
 
