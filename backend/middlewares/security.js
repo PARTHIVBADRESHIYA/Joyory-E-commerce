@@ -85,15 +85,32 @@ export function securityMiddleware(app) {
         "https://admin.joyory.com",
         "http://localhost:5173",
     ];
-    app.use(
-        cors({
-            origin: function (origin, callback) {
-                if (!origin || allowedOrigins.includes(origin)) callback(null, true);
-                else callback(new Error("Not allowed by CORS"));
-            },
-            credentials: true,
-        })
-    );
+    if (process.env.NODE_ENV !== "production") {
+        // Development mode — allow any origin that requests
+        app.use(
+            cors({
+                origin: true, // dynamically reflect origin
+                credentials: true,
+            })
+        );
+    } else {
+        // Production — restrict to allowedOrigins list
+        app.use(
+            cors({
+                origin: allowedOrigins,
+                credentials: true,
+            })
+        );
+    }
+    // app.use(
+    //     cors({
+    //         origin: function (origin, callback) {
+    //             if (!origin || allowedOrigins.includes(origin)) callback(null, true);
+    //             else callback(new Error("Not allowed by CORS"));
+    //         },
+    //         credentials: true,
+    //     })
+    // );
 
     /** Rate limiting */
     app.use(
@@ -106,45 +123,45 @@ export function securityMiddleware(app) {
         })
     );
 
-/** CSRF setup - only enable in production & for non-API routes */
-if (process.env.NODE_ENV === "production") {
-    const csrfProtection = csrf({
-        cookie: {
-            httpOnly: true,
-            secure: true,
-            sameSite: "strict",
-        },
-    });
+    /** CSRF setup - only enable in production & for non-API routes */
+    if (process.env.NODE_ENV === "production") {
+        const csrfProtection = csrf({
+            cookie: {
+                httpOnly: true,
+                secure: true,
+                sameSite: "strict",
+            },
+        });
 
-    app.use((req, res, next) => {
-        // Skip CSRF for API calls (JWT auth) or safe HTTP methods
-        if (
-            req.path.startsWith("/api/") ||
-            ["GET", "HEAD", "OPTIONS"].includes(req.method)
-        ) {
-            return next();
-        }
-        return csrfProtection(req, res, next);
-    });
-
-    // Set CSRF token cookie for browser clients
-    app.use((req, res, next) => {
-        try {
-            if (!req.path.startsWith("/api/")) {
-                res.cookie("XSRF-TOKEN", req.csrfToken(), {
-                    httpOnly: false, // readable by frontend JS
-                    secure: true,
-                    sameSite: "strict",
-                });
+        app.use((req, res, next) => {
+            // Skip CSRF for API calls (JWT auth) or safe HTTP methods
+            if (
+                req.path.startsWith("/api/") ||
+                ["GET", "HEAD", "OPTIONS"].includes(req.method)
+            ) {
+                return next();
             }
-        } catch (err) {
-            // Ignore if no CSRF token is available for this route
-        }
-        next();
-    });
-} else {
-    console.warn("⚠ CSRF protection disabled in development mode");
-}
+            return csrfProtection(req, res, next);
+        });
+
+        // Set CSRF token cookie for browser clients
+        app.use((req, res, next) => {
+            try {
+                if (!req.path.startsWith("/api/")) {
+                    res.cookie("XSRF-TOKEN", req.csrfToken(), {
+                        httpOnly: false, // readable by frontend JS
+                        secure: true,
+                        sameSite: "strict",
+                    });
+                }
+            } catch (err) {
+                // Ignore if no CSRF token is available for this route
+            }
+            next();
+        });
+    } else {
+        console.warn("⚠ CSRF protection disabled in development mode");
+    }
 
 }
 
