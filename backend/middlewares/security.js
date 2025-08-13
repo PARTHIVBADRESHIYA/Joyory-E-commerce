@@ -28,7 +28,7 @@ export function securityMiddleware(app) {
                 "default-src": ["'self'"],
                 "script-src": ["'self'", "'unsafe-inline'", FRONTEND, "https://checkout.razorpay.com"],
                 "connect-src": ["'self'", FRONTEND, "https://api.razorpay.com"],
-                "img-src": ["'self'", "data:", FRONTEND, CLOUDINARY_DOMAIN],
+                "img-src": ["'self'", "data:", FRONTEND, CLOUDINARY_DOMAIN,"https://*"],
                 "style-src": ["'self'", "'unsafe-inline'", FRONTEND, "https://fonts.googleapis.com"],
                 "font-src": ["'self'", "https://fonts.gstatic.com"],
                 "frame-src": ["'self'", "https://checkout.razorpay.com"],

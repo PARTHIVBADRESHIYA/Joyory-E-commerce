@@ -89,10 +89,12 @@ export const getCategories = async (req, res) => {
 export const updateCategory = async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, description, parentId, bannerImage, thumbnailImage } = req.body;
+        const { name, description, parentId, thumbnailImage } = req.body;
 
         const category = await Category.findById(id);
-        if (!category) return res.status(404).json({ message: 'Category not found' });
+        if (!category) {
+            return res.status(404).json({ message: 'Category not found' });
+        }
 
         // Handle parent change
         if (parentId && parentId !== String(category.parent)) {
@@ -124,13 +126,28 @@ export const updateCategory = async (req, res) => {
             await updateDescendants(category._id, category.ancestors);
         }
 
+        // Name change
         if (name && name !== category.name) {
             category.name = name;
             category.slug = await generateUniqueSlug(name);
         }
-        if (description !== undefined) category.description = description;
-        if (bannerImage !== undefined) category.bannerImage = bannerImage;
-        if (thumbnailImage !== undefined) category.thumbnailImage = thumbnailImage;
+
+        if (description !== undefined) {
+            category.description = description;
+        }
+
+        // ✅ Handle file upload for bannerImage
+        if (req.file && req.file.path) {
+            category.bannerImage = req.file.path; // Cloudinary secure URL
+        } else if (req.body.bannerImage !== undefined) {
+            // If no file uploaded but text URL provided
+            category.bannerImage = req.body.bannerImage;
+        }
+
+        // ✅ Handle thumbnail image
+        if (thumbnailImage !== undefined) {
+            category.thumbnailImage = thumbnailImage;
+        }
 
         await category.save();
         res.json({ message: 'Category updated', category });
@@ -139,6 +156,7 @@ export const updateCategory = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
+
 
 // Delete category
 export const deleteCategory = async (req, res) => {

@@ -464,12 +464,22 @@ const updateProductById = async (req, res) => {
 
         // ✅ Validate new category if updated
         if (updateData.category) {
-            const categoryDoc = await Category.findById(updateData.category);
-            if (!categoryDoc) {
-                return res.status(400).json({ message: 'Invalid category ID' });
+            let categoryDoc;
+
+            // Check if value is a valid ObjectId
+            if (mongoose.Types.ObjectId.isValid(updateData.category)) {
+                categoryDoc = await Category.findById(updateData.category);
+            } else {
+                categoryDoc = await Category.findOne({ name: updateData.category });
             }
+
+            if (!categoryDoc) {
+                return res.status(400).json({ message: 'Invalid category (ID or name not found)' });
+            }
+
             updateData.category = categoryDoc._id;
         }
+
 
         const updated = await Product.findByIdAndUpdate(id, updateData, { new: true });
 

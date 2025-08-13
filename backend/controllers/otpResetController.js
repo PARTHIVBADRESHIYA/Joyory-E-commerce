@@ -30,9 +30,6 @@ const getUserByType = async (type, email) => {
         default: return null;
     }
 };
-
-
-// 📌 Send OTP
 // 📌 Send OTP
 export const sendOtpToUser = async (req, res) => {
     const { error } = sendOtpSchema.validate(req.body, { allowUnknown: true });
@@ -43,15 +40,21 @@ export const sendOtpToUser = async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     const now = new Date();
+    // Rate limit: max 3 OTPs in last 10 minutes
     user.otpRequests = (user.otpRequests || []).filter(ts => new Date(ts) > now - 10 * 60 * 1000);
     if (user.otpRequests.length >= 3) {
         return res.status(429).json({ message: 'Too many OTP requests. Try again later.' });
     }
 
+    // Generate + hash OTP
     const otp = generateOTP();
     const hashedOtp = await bcrypt.hash(otp, 10);
 
-    user.otp = { code: hashedOtp, expiresAt: new Date(Date.now() + 10 * 60 * 1000), attemptsLeft: 3 };
+    user.otp = {
+        code: hashedOtp,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000), // expires in 10 mins
+        attemptsLeft: 3
+    };
     user.otpRequests.push(now);
     await user.save();
 
@@ -64,7 +67,7 @@ export const sendOtpToUser = async (req, res) => {
             if (!user.phone) return res.status(400).json({ message: 'Phone not available for SMS' });
             await sendSms(user.phone, `Your OTP is: ${otp}`);
         } else {
-            await sendEmail(user.email, 'OTP for Login/Reset', `<p>Your OTP is: <b>${otp}</b></p>`);
+            await sendEmail(user.email, 'OTP for Login/Verification', `<p>Your OTP is: <b>${otp}</b></p>`);
         }
         return res.status(200).json({ message: `OTP sent via ${method.toUpperCase()}` });
     } catch (e) {
@@ -135,11 +138,11 @@ export const resetPasswordWithOtp = async (req, res) => {
         return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
     }
 
-    // if (user.otp.attemptsLeft <= 0) {
-    //     user.otp = undefined;
-    //     await user.save();
-    //     return res.status(403).json({ message: 'Too many incorrect attempts. Request a new OTP.' });
-    // }
+    if (user.otp.attemptsLeft <= 0) {
+        user.otp = undefined;
+        await user.save();
+        return res.status(403).json({ message: 'Too many incorrect attempts. Request a new OTP.' });
+    }
 
     const isValid = await bcrypt.compare(otp, user.otp.code);
     if (!isValid) {
@@ -155,25 +158,42 @@ export const resetPasswordWithOtp = async (req, res) => {
     return res.status(200).json({ message: 'Password reset successful' });
 };
 
-// 📌 Verify Email OTP
+// Verify OTP
 export const verifyEmailOtp = async (req, res) => {
     const { error } = verifyEmailOtpSchema.validate(req.body, { allowUnknown: true });
     if (error) return res.status(400).json({ message: error.details[0].message });
 
     const { email, otp } = req.body;
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: email.trim().toLowerCase() });
     if (!user) return res.status(404).json({ message: 'User not found' });
     if (user.isVerified) return res.status(400).json({ message: 'User already verified' });
 
+    // Check OTP existence & expiry
     if (!user.otp?.code || new Date() > new Date(user.otp.expiresAt)) {
+        user.otp = undefined;
+        await user.save();
         return res.status(400).json({ message: 'OTP expired or not requested' });
     }
 
-    const isValid = await bcrypt.compare(otp, user.otp.code);
-    if (!isValid) return res.status(401).json({ message: 'Invalid OTP' });
+    // Check attempts
+    if (user.otp.attemptsLeft <= 0) {
+        user.otp = undefined;
+        await user.save();
+        return res.status(429).json({ message: 'Too many invalid attempts. Request a new OTP.' });
+    }
 
+    // Validate OTP
+    const isValid = await bcrypt.compare(otp, user.otp.code);
+    if (!isValid) {
+        user.otp.attemptsLeft -= 1;
+        await user.save();
+        return res.status(401).json({ message: `Invalid OTP. ${user.otp.attemptsLeft} attempts left.` });
+    }
+
+    // Success: verify user & clear OTP data
     user.isVerified = true;
     user.otp = undefined;
+    user.otpRequests = [];
     await user.save();
 
     return res.status(200).json({ message: 'Email verified successfully. You can now login.' });

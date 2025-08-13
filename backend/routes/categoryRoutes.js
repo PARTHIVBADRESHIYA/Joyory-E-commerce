@@ -1,3 +1,4 @@
+// categoryRoutes.js
 import express from 'express';
 import {
     addCategory,
@@ -6,13 +7,28 @@ import {
     deleteCategory
 } from '../controllers/categoryController.js';
 import { verifyAdminOrTeamMember } from '../middlewares/authMiddleware.js';
+import { uploadCategoryBanner, uploadCategoryThumbnail } from '../middlewares/upload.js';
 
 const router = express.Router();
 
-// Category routes
+// Add category with banner + thumbnail upload
+router.post(
+    '/',
+    verifyAdminOrTeamMember,
+    uploadCategoryBanner.single('bannerImage'),
+    addCategory
+);
 
-router.post('/',verifyAdminOrTeamMember, addCategory);
-router.get('/',verifyAdminOrTeamMember, getCategories);
-router.put('/:id',verifyAdminOrTeamMember, updateCategory);
-router.delete('/:id',verifyAdminOrTeamMember, deleteCategory);
+router.get('/', verifyAdminOrTeamMember, getCategories);
+
+// Update category (optional banner image update)
+router.put(
+    '/:id',
+    verifyAdminOrTeamMember,
+    uploadCategoryBanner.single('bannerImage'),
+    updateCategory
+);
+
+router.delete('/:id', verifyAdminOrTeamMember, deleteCategory);
+
 export default router;
