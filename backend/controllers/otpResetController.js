@@ -135,11 +135,11 @@ export const resetPasswordWithOtp = async (req, res) => {
         return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
     }
 
-    if (user.otp.attemptsLeft <= 0) {
-        user.otp = undefined;
-        await user.save();
-        return res.status(403).json({ message: 'Too many incorrect attempts. Request a new OTP.' });
-    }
+    // if (user.otp.attemptsLeft <= 0) {
+    //     user.otp = undefined;
+    //     await user.save();
+    //     return res.status(403).json({ message: 'Too many incorrect attempts. Request a new OTP.' });
+    // }
 
     const isValid = await bcrypt.compare(otp, user.otp.code);
     if (!isValid) {

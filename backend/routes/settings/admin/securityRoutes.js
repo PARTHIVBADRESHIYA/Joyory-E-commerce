@@ -6,7 +6,7 @@ import { otpLimiter } from "../../../middlewares/security/rateLimiter.js";
 
 const router = express.Router();
 
-router.post('/send-otp', otpLimiter,sendOtpToUser)
+router.post('/send-otp',sendOtpToUser)
 router.post('/verify-otp', verifyEmailOtp);
 router.post('/reset-password', resetPasswordWithOtp);
 router.post('/login-otp', loginWithOtp);
