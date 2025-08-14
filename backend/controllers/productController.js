@@ -14,6 +14,14 @@ import mongoose from 'mongoose';
 //             quantity, expiryDate
 //         } = req.body;
 
+//         // ✅ Prevent duplicate product names
+//         const existingProduct = await Product.findOne({ name: name.trim() });
+//         if (existingProduct) {
+//             return res.status(400).json({
+//                 message: `Product with name "${name}" already exists`
+//             });
+//         }
+
 //         // ✅ Ensure at least one category provided
 //         if (!category && (!categories || categories.length === 0)) {
 //             return res.status(400).json({ message: 'Category is required' });
@@ -27,26 +35,39 @@ import mongoose from 'mongoose';
 //             finalCategories = [category];
 //         }
 
-//         // ✅ Validate category IDs
-//         const foundCategories = await Category.find({ _id: { $in: finalCategories } });
-//         if (foundCategories.length !== finalCategories.length) {
+//         // ✅ Convert category names to ObjectIds if needed
+//         const resolvedCategories = [];
+//         for (let cat of finalCategories) {
+//             if (mongoose.Types.ObjectId.isValid(cat)) {
+//                 resolvedCategories.push(cat);
+//             } else {
+//                 const foundCat = await Category.findOne({ name: cat });
+//                 if (!foundCat) {
+//                     return res.status(400).json({ message: `Category "${cat}" not found` });
+//                 }
+//                 resolvedCategories.push(foundCat._id);
+//             }
+//         }
+//         // ✅ Validate all resolved IDs exist
+//         const foundCategories = await Category.find({ _id: { $in: resolvedCategories } });
+//         if (foundCategories.length !== resolvedCategories.length) {
 //             return res.status(400).json({ message: 'One or more category IDs are invalid' });
 //         }
 
-//         // ✅ Build category hierarchy from leaf to root
+//         // ✅ Build category hierarchy from leaf to root (based on first category)
 //         const buildCategoryHierarchy = async (leafCategoryId) => {
 //             let hierarchy = [];
 //             let current = await Category.findById(leafCategoryId);
 
 //             while (current) {
-//                 hierarchy.unshift(current._id); // Add to start
+//                 hierarchy.unshift(current._id);
 //                 if (!current.parent) break;
 //                 current = await Category.findById(current.parent);
 //             }
 //             return hierarchy;
 //         };
 
-//         const categoryHierarchy = await buildCategoryHierarchy(finalCategories[0]);
+//         const categoryHierarchy = await buildCategoryHierarchy(resolvedCategories[0]);
 
 //         // ✅ Helper functions
 //         const parseArray = (input) => {
@@ -58,14 +79,36 @@ import mongoose from 'mongoose';
 //             }
 //         };
 
-//         const getAttributeOptions = async (name) => {
-//             const attr = await ProductAttribute.findOne({ name, status: 'Active' });
+
+//         // Helper to get attribute options for given category
+//         const getAttributeOptions = async (name, categoryId) => {
+//             // Get category name from ID
+//             const categoryDoc = await Category.findById(categoryId);
+//             const categoryName = categoryDoc?.name;
+
+//             // Find attributes matching category name or global
+//             const attr = await ProductAttribute.findOne({
+//                 name,
+//                 status: 'Active',
+//                 $or: [
+//                     { categories: { $size: 0 } },    // global attributes
+//                     { categories: categoryName }     // match by category name
+//                 ]
+//             });
+
 //             return attr?.options || [];
 //         };
 
-//         // ✅ Fetch attributes
-//         const shadeOptions = await getAttributeOptions('Shade');
-//         const colorOptions = await getAttributeOptions('Color');
+
+//         // In addProductController
+//         const categoryDoc = await Category.findById(resolvedCategories[0]);
+//         const categoryName = categoryDoc?.name;
+
+//         const mainCategoryId = resolvedCategories[0];
+//         const shadeOptions = await getAttributeOptions('Shade', mainCategoryId);
+//         const colorOptions = await getAttributeOptions('Color', mainCategoryId);
+
+
 //         const productTags = parseArray(req.body.productTags);
 
 //         // ✅ Numeric checks
@@ -113,8 +156,8 @@ import mongoose from 'mongoose';
 //         // ✅ Stock status
 //         const status =
 //             parsedQuantity === 0 ? 'Out of stock' :
-//             parsedQuantity < thresholdValue ? 'Low stock' :
-//             'In-stock';
+//                 parsedQuantity < thresholdValue ? 'Low stock' :
+//                     'In-stock';
 
 //         // ✅ Create product
 //         const product = new Product({
@@ -131,9 +174,9 @@ import mongoose from 'mongoose';
 //             expiryDate,
 //             images,
 //             brand,
-//             category: finalCategories[0],         // Main category
-//             categories: finalCategories,          // Provided categories
-//             categoryHierarchy,                    // Full path [root → leaf]
+//             category: resolvedCategories[0],    // Main category
+//             categories: resolvedCategories,     // All categories
+//             categoryHierarchy,                  // Full hierarchy
 //             status,
 //             productTags,
 //             shadeOptions,
@@ -165,6 +208,14 @@ const addProductController = async (req, res) => {
             quantity, expiryDate
         } = req.body;
 
+        // ✅ Prevent duplicate product names
+        const existingProduct = await Product.findOne({ name: name.trim() });
+        if (existingProduct) {
+            return res.status(400).json({
+                message: `Product with name "${name}" already exists`
+            });
+        }
+
         // ✅ Ensure at least one category provided
         if (!category && (!categories || categories.length === 0)) {
             return res.status(400).json({ message: 'Category is required' });
@@ -178,15 +229,24 @@ const addProductController = async (req, res) => {
             finalCategories = [category];
         }
 
-        // ✅ Convert category names to ObjectIds if needed
+        // ✅ Resolve category names → ObjectIds
         const resolvedCategories = [];
         for (let cat of finalCategories) {
-            if (mongoose.Types.ObjectId.isValid(cat)) {
-                resolvedCategories.push(cat);
+            if (!cat) continue;
+
+            // Trim spaces & normalize case
+            const trimmedCat = String(cat).trim();
+
+            if (mongoose.Types.ObjectId.isValid(trimmedCat)) {
+                resolvedCategories.push(trimmedCat);
             } else {
-                const foundCat = await Category.findOne({ name: cat });
+                // Case-insensitive category name search
+                const foundCat = await Category.findOne({
+                    name: { $regex: `^${trimmedCat}$`, $options: 'i' }
+                });
+
                 if (!foundCat) {
-                    return res.status(400).json({ message: `Category "${cat}" not found` });
+                    return res.status(400).json({ message: `Category "${trimmedCat}" not found` });
                 }
                 resolvedCategories.push(foundCat._id);
             }
@@ -198,11 +258,10 @@ const addProductController = async (req, res) => {
             return res.status(400).json({ message: 'One or more category IDs are invalid' });
         }
 
-        // ✅ Build category hierarchy from leaf to root (based on first category)
+        // ✅ Build category hierarchy from leaf to root
         const buildCategoryHierarchy = async (leafCategoryId) => {
             let hierarchy = [];
             let current = await Category.findById(leafCategoryId);
-
             while (current) {
                 hierarchy.unshift(current._id);
                 if (!current.parent) break;
@@ -210,10 +269,9 @@ const addProductController = async (req, res) => {
             }
             return hierarchy;
         };
-
         const categoryHierarchy = await buildCategoryHierarchy(resolvedCategories[0]);
 
-        // ✅ Helper functions
+        // ✅ Helper to parse arrays
         const parseArray = (input) => {
             try {
                 if (typeof input === 'string') return JSON.parse(input);
@@ -223,14 +281,26 @@ const addProductController = async (req, res) => {
             }
         };
 
-        const getAttributeOptions = async (name) => {
-            const attr = await ProductAttribute.findOne({ name, status: 'Active' });
+        // ✅ Helper to get attribute options by category
+        const getAttributeOptions = async (name, categoryId) => {
+            const categoryDoc = await Category.findById(categoryId);
+            const categoryName = categoryDoc?.name;
+            const attr = await ProductAttribute.findOne({
+                name,
+                status: 'Active',
+                $or: [
+                    { categories: { $size: 0 } },
+                    { categories: categoryName }
+                ]
+            });
             return attr?.options || [];
         };
 
-        // ✅ Fetch attributes
-        const shadeOptions = await getAttributeOptions('Shade');
-        const colorOptions = await getAttributeOptions('Color');
+        // ✅ Get shade & color options
+        const mainCategoryId = resolvedCategories[0];
+        const shadeOptions = await getAttributeOptions('Shade', mainCategoryId);
+        const colorOptions = await getAttributeOptions('Color', mainCategoryId);
+
         const productTags = parseArray(req.body.productTags);
 
         // ✅ Numeric checks
@@ -296,9 +366,9 @@ const addProductController = async (req, res) => {
             expiryDate,
             images,
             brand,
-            category: resolvedCategories[0],    // Main category
-            categories: resolvedCategories,     // All categories
-            categoryHierarchy,                  // Full hierarchy
+            category: resolvedCategories[0], // main category
+            categories: resolvedCategories,
+            categoryHierarchy,
             status,
             productTags,
             shadeOptions,
@@ -322,7 +392,6 @@ const addProductController = async (req, res) => {
         });
     }
 };
-
 
 
 // GET ALL PRODUCTS (supports nested category filtering)
@@ -495,4 +564,48 @@ const updateProductById = async (req, res) => {
     }
 };
 
-export { addProductController, getAllProducts, updateProductStock, updateProductById };
+const deleteProduct = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const deleted = await Product.findByIdAndDelete(id);
+        if (!deleted) return res.status(404).json({ message: 'Product not found' });
+        res.status(200).json({ message: 'Product deleted successfully', product: deleted });
+    } catch (error) {
+        res.status(500).json({ message: 'Failed to delete product', error: error.message });
+    }
+}
+
+const getSingleProductById = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // ✅ Validate ObjectId format
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: 'Invalid product ID format' });
+        }
+
+        // ✅ Find product and populate category names
+        const product = await Product.findById(id)
+            .populate('category', 'name slug')
+            .populate('categoryHierarchy', 'name slug')
+            .lean();
+
+        if (!product) {
+            return res.status(404).json({ message: '❌ Product not found' });
+        }
+
+        res.status(200).json({
+            message: '✅ Product fetched successfully',
+            product
+        });
+
+    } catch (error) {
+        console.error("❌ Error fetching single product:", error);
+        res.status(500).json({
+            message: 'Failed to fetch product',
+            error: error.message
+        });
+    }
+};
+
+export { addProductController, getSingleProductById, getAllProducts, updateProductStock, updateProductById, deleteProduct };

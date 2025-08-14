@@ -112,28 +112,26 @@ export const getAllFilteredProducts = async (req, res) => {
 
         const cards = products.map(p => {
             const hasShades = p.shadeOptions && p.shadeOptions.length > 0;
-            return {
-                _id: p._id,
-                name: p.name,
-                variant: p.variant,
-                price: p.price,
-                brand: p.brand,
-                category: mongoose.Types.ObjectId.isValid(p.category)
-                    ? categoryMap.get(String(p.category)) || null
-                    : null,
-                summary: p.summary || p.description?.slice(0, 100) || '',
-                status: p.status,
-                image: p.images?.length > 0
-                    ? (p.images[0].startsWith('http') ? p.images[0] : `${process.env.BASE_URL}/${p.images[0]}`)
-                    : null,
-                colorOptions: p.colorOptions || [],
-                commentsCount: p.commentsCount || 0,
-                avgRating: p.avgRating || 0,
-                ...(hasShades && {
-                    shades: p.shadeOptions.slice(0, 3),
-                    moreShadesCount: Math.max(0, p.shadeOptions.length - 3)
-                })
-            };
+                    return {
+                        _id: p._id,
+                        name: p.name,
+                        variant: p.variant,
+                        price: p.price,
+                        brand: p.brand,
+                        category: mongoose.Types.ObjectId.isValid(p.category)
+                            ? categoryMap.get(String(p.category)) || null
+                            : null,
+                        summary: p.summary || p.description?.slice(0, 100) || '',
+                        status: p.status,
+                        image: p.images?.length > 0
+                            ? (p.images[0].startsWith('http') ? p.images[0] : `${process.env.BASE_URL}/${p.images[0]}`)
+                            : null,
+                        colorOptions: p.colorOptions || [],
+                        shadeOptions: p.shadeOptions || [], // ✅ return full shades array
+                        commentsCount: p.commentsCount || 0,
+                        avgRating: p.avgRating || 0
+                    };
+
         });
 
         const totalPages = Math.ceil(total / perPage);
@@ -159,15 +157,6 @@ export const getAllFilteredProducts = async (req, res) => {
  */
 export const getSingleProduct = async (req, res) => {
     try {
-        const {
-            sort = 'recent',
-            withPhotos = false,
-            ratingFilter,
-            page = 1,
-            limit = 5
-        } = req.query;
-
-        // ✅ No populate to avoid cast error — we’ll attach manually
         const product = await Product.findByIdAndUpdate(
             req.params.id,
             { $inc: { views: 1 } },
@@ -178,7 +167,7 @@ export const getSingleProduct = async (req, res) => {
             return res.status(404).json({ message: 'Product not found' });
         }
 
-        // Attach category if valid
+        // Category name
         let categoryObj = null;
         if (mongoose.Types.ObjectId.isValid(product.category)) {
             categoryObj = await Category.findById(product.category)
@@ -186,38 +175,11 @@ export const getSingleProduct = async (req, res) => {
                 .lean();
         }
 
-        const reviewFilter = {
-            productId: product._id,
-            status: 'Active'
-        };
-
-        if (withPhotos === 'true') {
-            reviewFilter.images = { $exists: true, $not: { $size: 0 } };
-        }
-        if (ratingFilter) {
-            reviewFilter.rating = Number(ratingFilter);
-        }
-
-        const sortBy = sort === 'helpful'
-            ? { helpfulVotes: -1, createdAt: -1 }
-            : { createdAt: -1 };
-
-        const currentPage = Number(page);
-        const perPage = Number(limit);
-        const skip = (currentPage - 1) * perPage;
-
-        const reviews = await Review.find(reviewFilter)
-            .populate('customer', 'name')
-            .sort(sortBy)
-            .skip(skip)
-            .limit(perPage);
-
-        const totalReviews = await Review.countDocuments(reviewFilter);
-
+        // Calculate rating & review count
         const allActiveReviews = await Review.find({
             productId: product._id,
             status: 'Active'
-        });
+        }).select('rating');
 
         const totalRating = allActiveReviews.reduce((sum, r) => sum + r.rating, 0);
         const avgRating = allActiveReviews.length
@@ -232,33 +194,28 @@ export const getSingleProduct = async (req, res) => {
             Poor: allActiveReviews.filter(r => r.rating === 1).length
         };
 
-        const featuredReviews = await Review.find({
-            productId: product._id,
-            status: 'Active',
-            featured: true
-        })
-            .populate('customer', 'name')
-            .sort({ helpfulVotes: -1, createdAt: -1 })
-            .limit(3);
-
+        // ✅ Response with only share details
         res.status(200).json({
-            ...product,
+            _id: product._id,
+            name: product.name,
+            variant: product.variant,
+            brand: product.brand,
+            price: product.price,
+            mrp: product.buyingPrice,
+            discountPercent: product.mrp
+                ? Math.round(((product.mrp - product.price) / product.mrp) * 100)
+                : 0,
             category: categoryObj,
+            shadeOptions: product.shadeOptions || [],
+            colorOptions: product.colorOptions || [],
+            image: product.images?.[0] || null,
             avgRating,
-            commentsCount: allActiveReviews.length,
-            ratingsBreakdown,
-            featuredReviews,
-            reviews,
-            pagination: {
-                total: totalReviews,
-                currentPage,
-                totalPages: Math.ceil(totalReviews / perPage),
-                hasMore: currentPage * perPage < totalReviews
-            }
+            totalRatings: allActiveReviews.length,
+            ratingsBreakdown
         });
 
     } catch (err) {
-        console.error("❌ getSingleProduct error:", err);
+        console.error("❌ getSingleProductShare error:", err);
         res.status(500).json({ message: 'Server error', error: err.message });
     }
 };
@@ -268,7 +225,7 @@ export const getSingleProduct = async (req, res) => {
  */
 export const getProductsByCategory = async (req, res) => {
     try {
-        const slug = req.params.slug.toLowerCase(); // normalize
+        const slug = req.params.slug.toLowerCase();
         let { page = 1, limit = 12, sort = 'recent' } = req.query;
         page = Number(page);
         limit = Number(limit);
@@ -328,31 +285,26 @@ export const getProductsByCategory = async (req, res) => {
             )
             : new Map();
 
-        const cards = products.map(p => {
-            const hasShades = p.shadeOptions && p.shadeOptions.length > 0;
-            return {
-                _id: p._id,
-                name: p.name,
-                variant: p.variant,
-                price: p.price,
-                brand: p.brand,
-                category: mongoose.Types.ObjectId.isValid(p.category)
-                    ? categoryMap.get(String(p.category)) || null
-                    : null,
-                summary: p.summary || p.description?.slice(0, 100) || '',
-                status: p.status,
-                image: p.images?.length > 0
-                    ? (p.images[0].startsWith('http') ? p.images[0] : `${process.env.BASE_URL}/${p.images[0]}`)
-                    : null,
-                colorOptions: p.colorOptions || [],
-                commentsCount: p.commentsCount || 0,
-                avgRating: p.avgRating || 0,
-                ...(hasShades && {
-                    shades: p.shadeOptions.slice(0, 3),
-                    moreShadesCount: Math.max(0, p.shadeOptions.length - 3)
-                })
-            };
-        });
+        // ✅ Map products and return full shadeOptions
+        const cards = products.map(p => ({
+            _id: p._id,
+            name: p.name,
+            variant: p.variant,
+            price: p.price,
+            brand: p.brand,
+            category: mongoose.Types.ObjectId.isValid(p.category)
+                ? categoryMap.get(String(p.category)) || null
+                : null,
+            summary: p.summary || p.description?.slice(0, 100) || '',
+            status: p.status,
+            image: p.images?.length > 0
+                ? (p.images[0].startsWith('http') ? p.images[0] : `${process.env.BASE_URL}/${p.images[0]}`)
+                : null,
+            colorOptions: p.colorOptions || [],
+            shadeOptions: p.shadeOptions || [], // ✅ Always return full shades array
+            commentsCount: p.commentsCount || 0,
+            avgRating: p.avgRating || 0
+        }));
 
         // ✅ Breadcrumb
         const ancestorIds = (category.ancestors || [])
@@ -382,3 +334,4 @@ export const getProductsByCategory = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
+

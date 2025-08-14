@@ -42,6 +42,12 @@ export const addCategory = async (req, res) => {
             return res.status(400).json({ message: 'Name required' });
         }
 
+        // 🚫 Check case-insensitive duplicate
+        const existingCategory = await Category.findOne({ name: { $regex: `^${name}$`, $options: 'i' } });
+        if (existingCategory) {
+            return res.status(400).json({ message: 'Category name already exists' });
+        }
+
         let parent = null;
         let ancestors = [];
 
@@ -96,6 +102,17 @@ export const updateCategory = async (req, res) => {
             return res.status(404).json({ message: 'Category not found' });
         }
 
+        // 🚫 Check for duplicate name (case-insensitive) excluding current category
+        if (name && name.toLowerCase() !== category.name.toLowerCase()) {
+            const duplicate = await Category.findOne({
+                name: { $regex: `^${name}$`, $options: 'i' },
+                _id: { $ne: id }
+            });
+            if (duplicate) {
+                return res.status(400).json({ message: 'Category name already exists' });
+            }
+        }
+
         // Handle parent change
         if (parentId && parentId !== String(category.parent)) {
             const resolvedId = await resolveParentId(parentId);
@@ -140,7 +157,6 @@ export const updateCategory = async (req, res) => {
         if (req.file && req.file.path) {
             category.bannerImage = req.file.path; // Cloudinary secure URL
         } else if (req.body.bannerImage !== undefined) {
-            // If no file uploaded but text URL provided
             category.bannerImage = req.body.bannerImage;
         }
 
@@ -156,7 +172,6 @@ export const updateCategory = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
-
 
 // Delete category
 export const deleteCategory = async (req, res) => {
