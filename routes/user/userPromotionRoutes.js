@@ -13,4 +13,5 @@ router.get('/active', getActivePromotionsForUsers);
 // Get full product listing for a promotion
 router.get('/:id/products', getPromotionProducts);
 
+
 export default router;
