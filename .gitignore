@@ -1,0 +1,9 @@
+node_modules
+
+
+
+
+
+.env
+.env.*   # e.g. .env.local, .env.production
+".env" 
