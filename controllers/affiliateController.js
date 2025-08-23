@@ -129,6 +129,7 @@ export const trackCustomReferralClick = async (req, res) => {
 
 
 
+
 export const getAllAffiliates = async (req, res) => {
     const affiliates = await Affiliate.find().populate('user');
     res.json(affiliates);
