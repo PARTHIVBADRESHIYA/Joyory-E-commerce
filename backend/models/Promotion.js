@@ -27,7 +27,7 @@ const promotionSchema = new mongoose.Schema(
             enum: ["all", "new", "existing"],
             default: "all",
         },
-
+        images: [{ type: String }],// 🔁 Add this for multi-images
         // Scope: product/category
         scope: { type: String, enum: ["category", "product"], default: "product" },
 

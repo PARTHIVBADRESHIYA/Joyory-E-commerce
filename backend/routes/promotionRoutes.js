@@ -1,18 +1,20 @@
-import express from "express";
-import {
-  createPromotion,
-  updatePromotion,
-  deletePromotion,
-  getPromotionSummary,
-  getPromotionList,
-} from "../controllers/promotionController.js";
+    import express from "express";
+    import {
+      createPromotion,
+      updatePromotion,
+      deletePromotion,
+      getPromotionSummary,
+      getPromotionList,
+    } from "../controllers/promotionController.js";
 
-const router = express.Router();
+    import { uploadProduct } from '../middlewares/upload.js';
 
-router.post("/", createPromotion);          // Create new promotion
-router.put("/:id", updatePromotion);        // Update promotion
-router.delete("/:id", deletePromotion);     // Delete promotion
-router.get("/summary", getPromotionSummary);
-router.get("/", getPromotionList);
+    const router = express.Router();
 
-export default router;
+    router.post("/",uploadProduct.array('images', 5), createPromotion);          // Create new promotion
+    router.put("/:id",uploadProduct.array('images', 5), updatePromotion);        // Update promotion
+    router.delete("/:id", deletePromotion);     // Delete promotion
+    router.get("/summary", getPromotionSummary);
+    router.get("/", getPromotionList);
+
+    export default router;
