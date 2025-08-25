@@ -43,7 +43,7 @@ function escapeRegex(str = '') {
 /* --------------------------- CONTROLLERS --------------------------- */
 /**
  * GET /api/promotions/active
- * Home page → list active promotions as cards (title, images, discount label, endDate, countdown)
+ * Home page → list active promotions as cards (title, image, discount label, endDate, countdown)
  */
 export const getActivePromotionsForUsers = async (req, res) => {
     try {
@@ -245,7 +245,7 @@ export const getPromotionProducts = async (req, res) => {
                 $project: {
                     name: 1,
                     brand: 1,
-                    imagess: 1,
+                    images: 1,
                     mrp: '$mrpEff',
                     price: '$discountedPrice',
                     discount: '$discountAmount',
@@ -269,7 +269,7 @@ export const getPromotionProducts = async (req, res) => {
         const products = (aggResult?.data ?? []).map((p) => ({
             _id: p._id,
             name: p.name,
-            images: Array.isArray(p.imagess) && p.imagess.length ? p.imagess[0] : '',
+            image: Array.isArray(p.images) && p.images.length ? p.images[0] : '',
             brand: p.brand || '',
             price: Math.round(p.price ?? 0),
             mrp: Math.round(p.mrp ?? 0),
@@ -297,7 +297,7 @@ export const getPromotionProducts = async (req, res) => {
                     addDiscountFieldsStage,
                     {
                         $project: {
-                            name: 1, brand: 1, imagess: 1,
+                            name: 1, brand: 1, images: 1,
                             mrp: '$mrpEff', price: '$discountedPrice',
                             discount: '$discountAmount', discountPercent: 1, createdAt: 1,
                         }
@@ -310,7 +310,7 @@ export const getPromotionProducts = async (req, res) => {
                 const mapped = fallback.map((p) => ({
                     _id: p._id,
                     name: p.name,
-                    images: Array.isArray(p.imagess) && p.imagess.length ? p.imagess[0] : '',
+                    image: Array.isArray(p.images) && p.images.length ? p.images[0] : '',
                     brand: p.brand || '',
                     price: Math.round(p.price ?? 0),
                     mrp: Math.round(p.mrp ?? 0),
