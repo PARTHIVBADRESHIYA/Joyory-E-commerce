@@ -142,28 +142,39 @@ export const getProfileImage = async (req, res) => {
 
 //--------------------------------------------------------------Addresses---------------------------------------------------------------//
 
-
 // Add Address
 export const addUserAddress = async (req, res) => {
     try {
         const user = await User.findById(req.user._id);
         if (!user) return res.status(404).json({ message: 'User not found' });
 
-        // Check for duplicate
+        // Normalize values (trim, lowercase for consistency)
+        const { pincode, addressLine1, city, state, houseNumber } = req.body;
+        const normalized = {
+            pincode: String(pincode).trim(),
+            addressLine1: addressLine1.trim().toLowerCase(),
+            city: city.trim().toLowerCase(),
+            state: state.trim().toLowerCase(),
+            houseNumber: houseNumber ? houseNumber.trim().toLowerCase() : ""
+        };
+
+        // Check for duplicate (all key fields must match)
         const exists = user.addresses.some(addr =>
-            addr.pincode === req.body.pincode &&
-            addr.addressLine1 === req.body.addressLine1 &&
-            addr.city === req.body.city &&
-            addr.state === req.body.state);
+            String(addr.pincode).trim() === normalized.pincode &&
+            addr.addressLine1.trim().toLowerCase() === normalized.addressLine1 &&
+            addr.city.trim().toLowerCase() === normalized.city &&
+            addr.state.trim().toLowerCase() === normalized.state &&
+            (addr.houseNumber ? addr.houseNumber.trim().toLowerCase() : "") === normalized.houseNumber
+        );
 
         if (exists) {
-            return res.status(400).json({ message: 'This address already exists' });
+            return res.status(400).json({ message: '❌ This address already exists, please add a unique one' });
         }
 
         user.addresses.push(req.body);
         await user.save();
 
-        res.status(201).json({ message: 'Address added', addresses: user.addresses });
+        res.status(201).json({ message: '✅ Address added', addresses: user.addresses });
     } catch (err) {
         res.status(500).json({ message: 'Failed to add address', error: err.message });
     }
@@ -178,22 +189,46 @@ export const updateUserAddress = async (req, res) => {
         const address = user.addresses.id(req.params.id);
         if (!address) return res.status(404).json({ message: 'Address not found' });
 
-        // Check if new updated values already exist in another address
-        const exists = user.addresses.some(addr =>
-            addr.id !== req.params.id &&
-            addr.pincode === req.body.pincode &&
-            addr.addressLine1 === req.body.addressLine1 &&
-            addr.city === req.body.city &&
-            addr.state === req.body.state);
+        const { pincode, addressLine1, city, state, houseNumber } = req.body;
+        const normalized = {
+            pincode: String(pincode).trim(),
+            addressLine1: addressLine1.trim().toLowerCase(),
+            city: city.trim().toLowerCase(),
+            state: state.trim().toLowerCase(),
+            houseNumber: houseNumber ? houseNumber.trim().toLowerCase() : ""
+        };
 
-        if (exists) {
-            return res.status(400).json({ message: 'This address already exists, please use another address' });
+        // ✅ Check if user is trying to update with exact same existing address
+        const isSameAsCurrent = 
+            String(address.pincode).trim() === normalized.pincode &&
+            address.addressLine1.trim().toLowerCase() === normalized.addressLine1 &&
+            address.city.trim().toLowerCase() === normalized.city &&
+            address.state.trim().toLowerCase() === normalized.state &&
+            (address.houseNumber ? address.houseNumber.trim().toLowerCase() : "") === normalized.houseNumber;
+
+        if (isSameAsCurrent) {
+            return res.status(400).json({ message: "⚠️ This is already your current address. Enter different details to update." });
         }
 
+        // ✅ Check for duplicate with other saved addresses
+        const exists = user.addresses.some(addr =>
+            addr._id.toString() !== req.params.id &&
+            String(addr.pincode).trim() === normalized.pincode &&
+            addr.addressLine1.trim().toLowerCase() === normalized.addressLine1 &&
+            addr.city.trim().toLowerCase() === normalized.city &&
+            addr.state.trim().toLowerCase() === normalized.state &&
+            (addr.houseNumber ? addr.houseNumber.trim().toLowerCase() : "") === normalized.houseNumber
+        );
+
+        if (exists) {
+            return res.status(400).json({ message: '❌ This address already exists in your list. Please update with unique details.' });
+        }
+
+        // ✅ Safe update
         Object.assign(address, req.body);
         await user.save();
 
-        res.status(200).json({ message: 'Address updated', addresses: user.addresses });
+        res.status(200).json({ message: '✅ Address updated successfully', addresses: user.addresses });
     } catch (err) {
         res.status(500).json({ message: 'Failed to update address', error: err.message });
     }
@@ -208,12 +243,11 @@ export const deleteUserAddress = async (req, res) => {
         user.addresses.pull({ _id: req.params.id });
         await user.save();
 
-        res.status(200).json({ message: 'Address deleted', addresses: user.addresses });
+        res.status(200).json({ message: '✅ Address deleted', addresses: user.addresses });
     } catch (err) {
         res.status(500).json({ message: 'Failed to delete address', error: err.message });
     }
 };
-
 
 // Get All Addresses
 export const getUserAddresses = async (req, res) => {
@@ -226,6 +260,7 @@ export const getUserAddresses = async (req, res) => {
         res.status(500).json({ message: "Failed to fetch addresses", error: err.message });
     }
 };
+
 
 
 //------------------------------------------------------------------------------verification---------------------------------------------------------------//
