@@ -273,8 +273,13 @@ app.use(cors());
 app.use(express.json());
 
 // 🔹 Cron jobs
-startTrackingJob();
-cron.schedule('*/10 * * * *', autoSendScheduledCampaigns); // runs every 10 mins
+function initializeCronJobs() {
+    startTrackingJob();
+    cron.schedule('*/10 * * * *', autoSendScheduledCampaigns);
+}
+
+initializeCronJobs();
+
 
 // 🔹 Socket.IO setup
 const server = http.createServer(app);
@@ -337,7 +342,7 @@ app.use('/api/security', securityRoutes);
 app.use('/api/comments', commentRoutes);
 
 app.use('/api', testRoutes);
-    
+
 // 🔹 Webhooks (Razorpay + Shiprocket)
 app.use("/api/webhooks", webhookRoutes);
 

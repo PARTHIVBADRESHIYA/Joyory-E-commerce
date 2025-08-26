@@ -14,178 +14,6 @@ const razorpay = new Razorpay({
     key_secret: process.env.RAZORPAY_KEY_SECRET
 });
 
-// export const createRazorpayOrder = async (req, res) => {
-//     try {
-//         const { orderId } = req.body;
-
-//         if (!orderId) {
-//             return res.status(400).json({ message: "orderId is required" });
-//         }
-
-//         const order = await Order.findById(orderId);
-//         if (!order) {
-//             return res.status(404).json({ message: "Order not found" });
-//         }
-
-//         // Amount in paise ➝ multiply by 100
-//         const amountInPaise = order.amount * 100;
-
-//         const razorpayOrder = await razorpay.orders.create({
-//             amount: amountInPaise,
-//             currency: "INR",
-//             receipt: order.orderId
-//         });
-
-//         // Save the Razorpay orderId in the DB
-//         order.razorpayOrderId = razorpayOrder.id;
-//         await order.save();
-
-//         return res.status(200).json({
-//             message: "✅ Razorpay order created",
-//             razorpayOrderId: razorpayOrder.id,
-//             amount: order.amount
-//         });
-//     } catch (err) {
-//         console.error("🔥 Error creating Razorpay order:", err);
-//         res.status(500).json({ message: "Failed to create Razorpay order", error: err.message });
-//     }
-// };
-
-
-
-// export const verifyRazorpayPayment = async (req, res) => {
-//     try {
-//         const { orderId, razorpay_order_id, razorpay_payment_id, razorpay_signature, shippingAddress } = req.body;
-
-//         if (!orderId || !razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-//             return res.status(400).json({ message: "Missing required payment fields" });
-//         }
-
-//         // 🔍 Find order with user + products
-//         const order = await Order.findById(orderId)
-//             .populate("user")
-//             .populate("products.productId");
-
-//         if (!order) return res.status(404).json({ message: "Order not found" });
-
-//         // ✅ Idempotency check
-//         if (order.paid) {
-//             return res.status(200).json({ message: "Order already verified & paid" });
-//         }
-
-//         // ✅ Order match
-//         if (order.razorpayOrderId && order.razorpayOrderId !== razorpay_order_id) {
-//             return res.status(400).json({ message: "Order mismatch" });
-//         }
-
-//         // ✅ Signature verification
-//         const signBody = `${razorpay_order_id}|${razorpay_payment_id}`;
-//         const expectedSignature = crypto
-//             .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-//             .update(signBody)
-//             .digest("hex");
-
-//         if (expectedSignature !== razorpay_signature) {
-//             return res.status(400).json({ message: "❌ Invalid signature / payment failed" });
-//         }
-
-//         // ✅ Fetch payment from Razorpay
-//         const rpPayment = await razorpay.payments.fetch(razorpay_payment_id);
-//         if (rpPayment.status !== "captured") {
-//             return res.status(400).json({ message: `Payment not captured (status: ${rpPayment.status})` });
-//         }
-
-//         // ✅ Amount check
-//         const paidAmountInInr = rpPayment.amount / 100;
-//         if (paidAmountInInr !== order.amount) {
-//             return res.status(400).json({ message: "Amount mismatch" });
-//         }
-
-//         // ✅ Deduct stock after payment
-//         for (const item of order.products) {
-//             const product = await Product.findById(item.productId._id);
-//             if (!product) continue;
-
-//             if (product.quantity < item.quantity) {
-//                 return res.status(400).json({ message: `❌ Insufficient stock for ${product.name}` });
-//             }
-
-//             product.quantity -= item.quantity;
-//             product.sales = (product.sales || 0) + item.quantity;
-
-//             product.status =
-//                 product.quantity <= 0
-//                     ? "Out of stock"
-//                     : product.quantity < product.thresholdValue
-//                         ? "Low stock"
-//                         : "In-stock";
-
-//             await product.save();
-//         }
-
-//         // ✅ Mark order as paid
-//         order.paid = true;
-//         order.paymentStatus = "success";
-//         order.paymentMethod = "Razorpay";
-//         order.transactionId = razorpay_payment_id;
-//         order.razorpayOrderId = razorpay_order_id;
-
-//         // ✅ Attach shipping address if passed from frontend
-//         if (shippingAddress) {
-//             order.shippingAddress = shippingAddress;
-//         }
-
-//         // ✅ Save Payment record
-//         await Payment.create({
-//             order: order._id,
-//             method: rpPayment.method || "Razorpay",
-//             status: "Completed",
-//             transactionId: razorpay_payment_id,
-//             amount: order.amount,
-//             cardHolderName: rpPayment.card ? rpPayment.card.name : undefined,
-//             cardNumber: rpPayment.card ? rpPayment.card.last4 : undefined,
-//             expiryDate: rpPayment.card
-//                 ? `${rpPayment.card.expiry_month}/${rpPayment.card.expiry_year}`
-//                 : undefined,
-//             isActive: true,
-//         });
-
-//         // ✅ Clear user cart after success
-//         const user = await User.findById(order.user._id);
-//         if (user) {
-//             user.cart = [];
-//             await user.save();
-//         }
-
-//         // ✅ Shiprocket Integration
-//         try {
-//             const shipment = await createShiprocketOrder(order);
-//             order.shipment = {
-//                 shipment_id: shipment.shipment_id,
-//                 awb_code: shipment.awb_code,
-//                 courier: shipment.courier_company_id,
-//                 tracking_url: shipment.tracking_url,
-//                 status: "Created",
-//             };
-//         } catch (shipErr) {
-//             console.error("❌ Shiprocket error:", shipErr.response?.data || shipErr.message);
-//         }
-
-//         await order.save();
-
-//         return res.status(200).json({
-//             message: "✅ Payment verified, stock updated, order paid & shipment created",
-//             paymentMethod: rpPayment.method,
-//             shipment: order.shipment || null,
-//         });
-//     } catch (err) {
-//         console.error("🔥 Error verifying Razorpay payment:", err.response?.data || err.message);
-//         res.status(500).json({ message: "Failed to verify payment", error: err.message });
-//     }
-// };
-
-
-
 export const createRazorpayOrder = async (req, res) => {
     try {
         const { orderId } = req.body;
@@ -262,6 +90,207 @@ export const createRazorpayOrder = async (req, res) => {
         });
     }
 };
+
+
+// export const verifyRazorpayPayment = async (req, res) => {
+//     try {
+//         const {
+//             orderId,
+//             razorpay_order_id,
+//             razorpay_payment_id,
+//             razorpay_signature,
+//             shippingAddress,
+//         } = req.body;
+
+//         console.log("📥 Incoming payment verification request:", req.body);
+
+//         if (!orderId || !razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+//             console.error("❌ Missing fields:", { orderId, razorpay_order_id, razorpay_payment_id, razorpay_signature });
+//             return res.status(400).json({ step: "FIELD_VALIDATION", message: "Missing required payment fields" });
+//         }
+
+//         // 🔍 Find order with user + products
+//         const order = await Order.findById(orderId)
+//             .populate("user")
+//             .populate("products.productId");
+
+//         if (!order) {
+//             console.error("❌ Order not found:", orderId);
+//             return res.status(404).json({ step: "ORDER_FETCH", message: "Order not found" });
+//         }
+
+//         // ✅ Idempotency check
+//         if (order.paid) {
+//             console.warn("⚠️ Order already paid:", order._id);
+//             return res.status(200).json({ step: "IDEMPOTENCY", message: "Order already verified & paid", order });
+//         }
+
+//         // ✅ Order match
+//         if (order.razorpayOrderId && order.razorpayOrderId !== razorpay_order_id) {
+//             console.error("❌ Razorpay Order ID mismatch", { expected: order.razorpayOrderId, got: razorpay_order_id });
+//             return res.status(400).json({ step: "ORDER_MATCH", message: "Order mismatch" });
+//         }
+
+//         // ✅ Signature verification
+//         const signBody = `${razorpay_order_id}|${razorpay_payment_id}`;
+//         const expectedSignature = crypto
+//             .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+//             .update(signBody)
+//             .digest("hex");
+
+//         if (expectedSignature !== razorpay_signature) {
+//             console.error("❌ Invalid signature", { expectedSignature, got: razorpay_signature });
+//             return res.status(400).json({ step: "SIGNATURE", message: "Invalid signature / payment failed" });
+//         }
+//         console.log("✅ Signature verified");
+
+//         // ✅ Fetch payment from Razorpay
+//         let rpPayment;
+//         try {
+//             rpPayment = await razorpay.payments.fetch(razorpay_payment_id);
+//             console.log("✅ Razorpay payment fetched:", rpPayment);
+//         } catch (fetchErr) {
+//             console.error("❌ Error fetching Razorpay payment:", fetchErr);
+//             return res.status(500).json({ step: "RAZORPAY_FETCH", message: "Failed to fetch payment from Razorpay", error: fetchErr.message });
+//         }
+
+//         if (rpPayment.status !== "captured") {
+//             console.error("❌ Payment not captured:", rpPayment.status);
+//             return res.status(400).json({ step: "PAYMENT_STATUS", message: `Payment not captured (status: ${rpPayment.status})` });
+//         }
+
+//         // ✅ Amount check
+//         const paidAmountInInr = rpPayment.amount / 100;
+//         if (paidAmountInInr !== order.amount) {
+//             console.error("❌ Amount mismatch", { razorpayAmount: paidAmountInInr, orderAmount: order.amount });
+//             return res.status(400).json({ step: "AMOUNT_CHECK", message: "Amount mismatch" });
+//         }
+
+//         // ✅ Deduct stock after payment
+//         for (const item of order.products) {
+//             const product = await Product.findById(item.productId._id);
+//             if (!product) {
+//                 console.warn("⚠️ Product not found:", item.productId._id);
+//                 continue;
+//             }
+
+//             if (product.quantity < item.quantity) {
+//                 console.error("❌ Insufficient stock:", { product: product.name, available: product.quantity, requested: item.quantity });
+//                 return res.status(400).json({ step: "STOCK_CHECK", message: `Insufficient stock for ${product.name}` });
+//             }
+
+//             product.quantity -= item.quantity;
+//             product.sales = (product.sales || 0) + item.quantity;
+
+//             product.status =
+//                 product.quantity <= 0
+//                     ? "Out of stock"
+//                     : product.quantity < product.thresholdValue
+//                         ? "Low stock"
+//                         : "In-stock";
+
+//             await product.save();
+//             console.log(`✅ Stock updated for product ${product.name}`);
+//         }
+
+//         // ✅ Mark order as paid
+//         order.paid = true;
+//         order.paymentStatus = "success";
+//         order.paymentMethod = "Razorpay";
+//         order.transactionId = razorpay_payment_id;
+//         order.razorpayOrderId = razorpay_order_id;
+//         order.orderStatus = "Processing";
+
+//         if (shippingAddress) {
+//             order.shippingAddress = shippingAddress;
+//         }
+
+//         // ✅ Save Payment record
+//         try {
+//             await Payment.create({
+//                 order: order._id,
+//                 method: rpPayment.method || "Razorpay",
+//                 status: "Completed",
+//                 transactionId: razorpay_payment_id,
+//                 amount: order.amount,
+//                 cardHolderName: rpPayment.card ? rpPayment.card.name : undefined,
+//                 cardNumber: rpPayment.card ? rpPayment.card.last4 : undefined,
+//                 expiryDate: rpPayment.card
+//                     ? `${rpPayment.card.expiry_month}/${rpPayment.card.expiry_year}`
+//                     : undefined,
+//                 isActive: true,
+//             });
+//             console.log("✅ Payment record saved");
+//         } catch (paymentErr) {
+//             console.error("❌ Error saving Payment record:", paymentErr);
+//         }
+
+//         // ✅ Clear user cart
+//         try {
+//             const user = await User.findById(order.user._id);
+//             if (user) {
+//                 user.cart = [];
+//                 await user.save();
+//                 console.log("✅ User cart cleared");
+//             }
+//         } catch (userErr) {
+//             console.error("❌ Error clearing user cart:", userErr);
+//         }
+
+//         // ✅ Shiprocket Integration
+//         try {
+//             const shipment = await createShiprocketOrder(order);
+//             order.shipment = {
+//                 shipment_id: shipment.shipment_id,
+//                 awb_code: shipment.awb_code,
+//                 courier_name: shipment.courier_name,       // 👈 new field
+//                 courier: shipment.courier_company_id,
+//                 tracking_url: shipment.tracking_url,
+//                 status: "Created",
+//             };
+//             console.log("✅ Shiprocket order created:", order.shipment);
+//         } catch (shipErr) {
+//             console.error("❌ Shiprocket error:", shipErr.response?.data || shipErr.message);
+//         }
+
+//         // ✅ Tracking history
+//         if (!order.trackingHistory) order.trackingHistory = [];
+//         order.trackingHistory.push(
+//             {
+//                 status: "Payment Successful",
+//                 timestamp: new Date(),
+//                 location: "Online Payment - Razorpay",
+//             },
+//             {
+//                 status: "Processing",
+//                 timestamp: new Date(),
+//                 location: "Store",
+//             }
+//         );
+
+//         await order.save();
+//         console.log("✅ Order updated successfully");
+
+//         return res.status(200).json({
+//             success: true,
+//             step: "COMPLETE",
+//             message: "Payment verified, stock updated, order paid & shipment created",
+//             paymentMethod: rpPayment.method,
+//             shipment: order.shipment || null,
+//             order,
+//         });
+
+//     } catch (err) {
+//         console.error("🔥 Fatal error verifying Razorpay payment:", err);
+//         res.status(500).json({
+//             message: "Failed to verify payment",
+//             error: err.message,
+//             stack: err.stack,
+//             details: err.response?.data || null
+//         });
+
+//     }
+// };
 
 
 export const verifyRazorpayPayment = async (req, res) => {
@@ -371,10 +400,22 @@ export const verifyRazorpayPayment = async (req, res) => {
         order.paymentMethod = "Razorpay";
         order.transactionId = razorpay_payment_id;
         order.razorpayOrderId = razorpay_order_id;
-        order.orderStatus = "Processing";
 
+        // 🔧 FIX: Only set to Processing if it’s still pending/unset
+        if (!order.orderStatus || order.orderStatus === "Pending") {
+            order.orderStatus = "Processing";
+        }
+
+        // ✅ Fix: Ensure shippingAddress is always set before Shiprocket call
         if (shippingAddress) {
             order.shippingAddress = shippingAddress;
+        } else if (!order.shippingAddress) {
+            order.shippingAddress = {
+                addressLine: "Default Address",
+                city: "Unknown",
+                state: "Unknown",
+                pincode: "000000",
+            };
         }
 
         // ✅ Save Payment record
@@ -415,7 +456,7 @@ export const verifyRazorpayPayment = async (req, res) => {
             order.shipment = {
                 shipment_id: shipment.shipment_id,
                 awb_code: shipment.awb_code,
-                courier_name: shipment.courier_name,       // 👈 new field
+                courier_name: shipment.courier_name,
                 courier: shipment.courier_company_id,
                 tracking_url: shipment.tracking_url,
                 status: "Created",
@@ -434,7 +475,7 @@ export const verifyRazorpayPayment = async (req, res) => {
                 location: "Online Payment - Razorpay",
             },
             {
-                status: "Processing",
+                status: order.orderStatus, // 🔧 use actual current status
                 timestamp: new Date(),
                 location: "Store",
             }
@@ -460,9 +501,9 @@ export const verifyRazorpayPayment = async (req, res) => {
             stack: err.stack,
             details: err.response?.data || null
         });
-
     }
 };
+
 
 
 export const payForOrder = async (req, res) => {

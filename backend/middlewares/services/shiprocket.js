@@ -133,8 +133,6 @@
 //     return shipmentDetails;
 // }
 
-
-
 // services/shiprocket.js
 import axios from "axios";
 import Order from "../../models/Order.js";
@@ -221,7 +219,7 @@ export async function createShiprocketOrder(order) {
     }
 
     try {
-        // ⚡ Do not send courier_id if auto-assign
+        // ⚡ Auto-assign courier
         awbRes = await axios.post(
             "https://apiv2.shiprocket.in/v1/external/courier/assign/awb",
             { shipment_id: shipmentId },
@@ -233,7 +231,8 @@ export async function createShiprocketOrder(order) {
         throw new Error(`Shiprocket AWB assignment failed: ${JSON.stringify(err.response?.data || err.message)}`);
     }
 
-    const shipmentDetails = {
+    // ✅ Build shipment details
+    let shipmentDetails = {
         shiprocket_order_id: shiprocketOrderId,
         shipment_id: shipmentId,
         awb_code: awbRes.data?.response?.awb_code || null,
@@ -242,14 +241,27 @@ export async function createShiprocketOrder(order) {
         tracking_url: awbRes.data?.response?.awb_code
             ? `https://shiprocket.co/tracking/${awbRes.data.response.awb_code}`
             : null,
-        status: awbRes.data?.status === 200 ? "Created" : "Failed",
+        status: awbRes.data?.response?.awb_code ? "Awaiting Pickup" : "Created",
         assignedAt: new Date()
     };
+
+    // ✅ If AWB assigned but tracking_url missing → fetch from Shiprocket API
+    if (!shipmentDetails.tracking_url && shipmentDetails.awb_code) {
+        try {
+            const trackRes = await axios.get(
+                `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${shipmentDetails.awb_code}`,
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            shipmentDetails.tracking_url = trackRes.data?.tracking_data?.track_url || null;
+        } catch (trackErr) {
+            console.warn("⚠️ Tracking URL not yet available for AWB:", shipmentDetails.awb_code);
+        }
+    }
 
     // Step 3: Save shipment details + update order status
     const update = {
         shipment: shipmentDetails,
-        orderStatus: shipmentDetails.status === "Created" ? "Shipped" : "Processing"
+        orderStatus: shipmentDetails.status === "Awaiting Pickup" ? "Shipped" : "Processing"
     };
 
     await Order.findByIdAndUpdate(order._id, update);
