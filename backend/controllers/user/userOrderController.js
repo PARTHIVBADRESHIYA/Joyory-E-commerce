@@ -329,141 +329,131 @@ export const getUserOrders = async (req, res) => {
 // };
 
 export const initiateOrderFromCart = async (req, res) => {
-  try {
-    if (!req.user || !req.user._id) {
-      return res.status(401).json({ message: 'Unauthorized' });
-    }
-
-    const user = await User.findById(req.user._id).populate('cart.product');
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    const validCartItems = (user.cart || []).filter(item => item.product);
-    if (!validCartItems.length) {
-      return res.status(400).json({ message: 'Cart is empty' });
-    }
-
-    // Build cart items for client response
-    const cartItems = validCartItems.map(item => {
-      const product = item.product;
-      const displayImage =
-        product.image ||
-        (Array.isArray(product.images) && product.images.length ? product.images[0] : null);
-
-      return {
-        productId: product._id,
-        name: product.name,
-        image: displayImage,
-        quantity: item.quantity,
-        price: product.price,
-        subTotal: product.price * item.quantity
-      };
-    });
-
-    // Build cart for pricing/discounts
-    const cartForDiscount = validCartItems.map(i => ({
-      productId: String(i.product._id),
-      qty: i.quantity
-    }));
-    const products = await fetchProductsForCart(cartForDiscount);
-    const lines = pickCartProducts(products, cartForDiscount).filter(
-      line => line && line.product
-    );
-
-    const subtotal = cartSubtotal(lines);
-
-    // Reserve discount
-    let discountAmount = 0;
-    let discountCode = null;
-    let discountId = null;
-    const discountCodeInput = req.body.discountCode || req.query.discount;
-    if (discountCodeInput) {
-      try {
-        const { success, discount, priced } = await reserveDiscountUsage({
-          code: discountCodeInput.trim(),
-          userId: req.user._id,
-          cart: cartForDiscount
-        });
-        if (success) {
-          discountAmount = priced.discountAmount;
-          discountCode = discount.code;
-          discountId = discount._id;
+    try {
+        if (!req.user || !req.user._id) {
+            return res.status(401).json({ message: 'Unauthorized' });
         }
-      } catch (err) {
-        return res.status(400).json({ message: err.message });
-      }
+
+        const user = await User.findById(req.user._id).populate('cart.product');
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        const validCartItems = (user.cart || []).filter(item => item.product);
+        if (!validCartItems.length) {
+            return res.status(400).json({ message: 'Cart is empty' });
+        }
+
+        // Build cart items for response & subtotal
+        const cartItems = validCartItems.map(item => {
+            const product = item.product;
+            const displayImage =
+                product.image ||
+                (Array.isArray(product.images) && product.images.length ? product.images[0] : null);
+
+            return {
+                productId: product._id,
+                name: product.name,
+                image: displayImage,
+                quantity: item.quantity,
+                price: product.price,
+                subTotal: product.price * item.quantity
+            };
+        });
+
+        // ✅ Use cartItems directly for subtotal
+        const subtotal = cartItems.reduce((acc, item) => acc + item.subTotal, 0);
+
+        // Reserve discount
+        let discountAmount = 0;
+        let discountCode = null;
+        let discountId = null;
+        const discountCodeInput = req.body.discountCode || req.query.discount;
+        if (discountCodeInput) {
+            try {
+                const { success, discount, priced } = await reserveDiscountUsage({
+                    code: discountCodeInput.trim(),
+                    userId: req.user._id,
+                    cart: cartItems.map(i => ({ productId: i.productId, qty: i.quantity }))
+                });
+                if (success) {
+                    discountAmount = priced.discountAmount;
+                    discountCode = discount.code;
+                    discountId = discount._id;
+                }
+            } catch (err) {
+                return res.status(400).json({ message: err.message });
+            }
+        }
+
+        // Affiliate/referral
+        let buyerDiscountAmount = 0;
+        let affiliateId = null;
+        if (req.query.ref) {
+            const affiliate = await Affiliate.findOne({
+                referralCode: req.query.ref,
+                status: 'approved'
+            });
+            if (affiliate) {
+                buyerDiscountAmount = Math.round(subtotal * 0.1);
+                affiliateId = affiliate._id;
+            }
+        }
+
+        const finalAmount = Math.max(0, subtotal - discountAmount - buyerDiscountAmount);
+
+        // Generate order numbers
+        const latestOrder = await Order.findOne().sort({ createdAt: -1 });
+        const nextOrderNumber = latestOrder ? latestOrder.orderNumber + 1 : 1001;
+        const orderId = `ORDER-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+        // Save order
+        const newOrder = new Order({
+            products: cartItems.map(item => ({
+                productId: item.productId,
+                quantity: item.quantity,
+                price: item.price
+            })),
+            orderId,
+            orderNumber: nextOrderNumber,
+            user: user._id,
+            customerName: user.name,
+            date: new Date(),
+            status: 'Pending',
+            orderType: 'Online',
+            amount: finalAmount,
+            discount: discountId || null,
+            discountCode: discountCode || null,
+            discountAmount,
+            buyerDiscountAmount,
+            affiliate: affiliateId || null,
+            paid: false,
+            paymentStatus: 'pending'
+        });
+
+        await newOrder.save();
+
+        return res.status(200).json({
+            message: '✅ Order initiated',
+            orderId: newOrder._id,
+            displayOrderId: newOrder.orderId,
+            cart: cartItems, // ✅ consistent with getCartSummary
+            subtotal,
+            discountAmount,
+            buyerDiscountAmount,
+            finalAmount,
+            appliedDiscount: discountCode || null,
+            savingsBreakdown: {
+                fromCoupon: discountAmount,
+                fromReferral: buyerDiscountAmount,
+                totalSavings: discountAmount + buyerDiscountAmount
+            }
+        });
+    } catch (err) {
+        console.error('initiateOrderFromCart error:', err);
+        return res
+            .status(500)
+            .json({ message: 'Failed to initiate order', error: err.message });
     }
-
-    // Affiliate/referral
-    let buyerDiscountAmount = 0;
-    let affiliateId = null;
-    if (req.query.ref) {
-      const affiliate = await Affiliate.findOne({
-        referralCode: req.query.ref,
-        status: 'approved'
-      });
-      if (affiliate) {
-        buyerDiscountAmount = Math.round(subtotal * 0.1);
-        affiliateId = affiliate._id;
-      }
-    }
-
-    const finalAmount = Math.max(0, subtotal - discountAmount - buyerDiscountAmount);
-
-    // Generate order numbers
-    const latestOrder = await Order.findOne().sort({ createdAt: -1 });
-    const nextOrderNumber = latestOrder ? latestOrder.orderNumber + 1 : 1001;
-    const orderId = `ORDER-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
-    // Save order
-    const newOrder = new Order({
-      products: lines.map(line => ({
-        productId: line.product._id,
-        quantity: line.qty,
-        price: line.product.price
-      })),
-      orderId,
-      orderNumber: nextOrderNumber,
-      user: user._id,
-      customerName: user.name,
-      date: new Date(),
-      status: 'Pending',
-      orderType: 'Online',
-      amount: finalAmount,
-      discount: discountId || null,
-      discountCode: discountCode || null,
-      discountAmount,
-      buyerDiscountAmount,
-      affiliate: affiliateId || null,
-      paid: false,
-      paymentStatus: 'pending'
-    });
-
-    await newOrder.save();
-
-    return res.status(200).json({
-      message: '✅ Order initiated',
-      orderId: newOrder._id,
-      displayOrderId: newOrder.orderId,
-      cart: cartItems, // ✅ added cart like getCartSummary
-      subtotal,
-      discountAmount,
-      buyerDiscountAmount,
-      finalAmount,
-      appliedDiscount: discountCode || null,
-      savingsBreakdown: {
-        fromCoupon: discountAmount,
-        fromReferral: buyerDiscountAmount,
-        totalSavings: discountAmount + buyerDiscountAmount
-      }
-    });
-  } catch (err) {
-    console.error('initiateOrderFromCart error:', err);
-    return res
-      .status(500)
-      .json({ message: 'Failed to initiate order', error: err.message });
-  }
 };
-
 
 
 export const getOrderTracking = async (req, res) => {

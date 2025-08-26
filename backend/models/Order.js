@@ -11,7 +11,7 @@ const orderSchema = new mongoose.Schema({
     ],
     orderId: { type: String, required: true, unique: true },
     orderNumber: { type: Number, required: true, unique: true },
-    customOrderId: { type: String, required: true, unique: true },
+    customOrderId: { type: String, index: true, sparse: true },
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }, // 👈 Add this
     date: { type: Date, required: true },
     customerName: { type: String, required: true },
