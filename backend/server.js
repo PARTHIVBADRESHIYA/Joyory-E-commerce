@@ -253,6 +253,7 @@ import userProfileRoutes from './routes/user/profile/userProfileRoutes.js';
 import userPromotionRoutes from './routes/user/userPromotionRoutes.js';
 import userVideoRoutes from './routes/user/userVideoRoutes.js';
 import userBrandRoutes from './routes/user/userBrandRoutes.js';
+import userDiscountRoutes from './routes/user/userDiscountRoutes.js';
 
 // Connect to MongoDB
 connectDB();
@@ -352,6 +353,7 @@ app.use('/api/user/profile', userProfileRoutes);
 app.use('/api/user/promotions', userPromotionRoutes);
 app.use('/api/user/videos', userVideoRoutes);
 app.use('/api/user/brands', userBrandRoutes);
+app.use('/api/user/discounts', userDiscountRoutes);
 
 // Example route
 app.get('/', (req, res) => {
