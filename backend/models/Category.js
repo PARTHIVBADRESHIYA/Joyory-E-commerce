@@ -20,6 +20,12 @@ const categorySchema = new mongoose.Schema({
         ref: 'Category',
         default: null
     },
+    brands: [
+        {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Brand"
+        }
+    ],
     bannerImage: { type: String, default: null },
     thumbnailImage: { type: String, default: null }
     ,// URL for top banner

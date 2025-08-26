@@ -242,6 +242,7 @@ import securityRoutes from './routes/settings/admin/securityRoutes.js';
 import attributeRoutes from './routes/attributeRoutes.js';
 import testRoutes from './routes/testRoutes.js';
 import videoRoutes from './routes/videoRoutes.js';
+import brandRoutes from './routes/brandRoutes.js';
 
 // User side
 import userProductRoutes from './routes/user/userProductRoutes.js';
@@ -251,9 +252,11 @@ import recommendationRoutes from './routes/user/recommendationRoutes.js';
 import userProfileRoutes from './routes/user/profile/userProfileRoutes.js';
 import userPromotionRoutes from './routes/user/userPromotionRoutes.js';
 import userVideoRoutes from './routes/user/userVideoRoutes.js';
+import userBrandRoutes from './routes/user/userBrandRoutes.js';
 
 // Connect to MongoDB
 connectDB();
+
 
 const app = express();
 app.set('trust proxy', 1);
@@ -337,6 +340,9 @@ app.use('/api', testRoutes);
 // 🔹 Webhooks (Razorpay + Shiprocket)
 app.use("/api/webhooks", webhookRoutes);
 
+// 🔹 Brands
+app.use('/api/brands', brandRoutes);
+
 // User side
 app.use('/api/user/products', userProductRoutes);
 app.use('/api/user/categories', userCategoryRoutes);
@@ -345,6 +351,7 @@ app.use('/api/user/recommendations', recommendationRoutes);
 app.use('/api/user/profile', userProfileRoutes);
 app.use('/api/user/promotions', userPromotionRoutes);
 app.use('/api/user/videos', userVideoRoutes);
+app.use('/api/user/brands', userBrandRoutes);
 
 // Example route
 app.get('/', (req, res) => {

@@ -9,13 +9,17 @@ const productSchema = new mongoose.Schema({
     quantity: { type: Number, required: true },
     thresholdValue: { type: Number, required: true },
     expiryDate: Date,
-    brand: String,
+    // in Product model
+    brand: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Brand",
+        required: true
+    },
     // backward-compatible single category (optional)
     category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true }, // final category (e.g. Eyeliner)
     categoryHierarchy: [ // full path
         { type: mongoose.Schema.Types.ObjectId, ref: 'Category' }
     ],
-
     description: String,
     summary: String, // for card preview
     features: String, // optional   
@@ -45,6 +49,12 @@ const productSchema = new mongoose.Schema({
     }
 
 }, { timestamps: true });
+
+
+// models/Product.js (add after schema definition)
+productSchema.index({ brand: 1 });
+productSchema.index({ brand: 1, category: 1 });
+productSchema.index({ createdAt: -1 });
 
 
 export default mongoose.model('Product', productSchema);

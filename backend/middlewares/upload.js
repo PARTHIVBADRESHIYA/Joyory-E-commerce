@@ -43,3 +43,4 @@ export const uploadBlogImage = makeCloudinaryUploader('blogs', 1);
 export const uploadCommentImage = makeCloudinaryUploader('comments', 1);
 export const uploadCategory = makeCloudinaryUploader('categories', 2);
 export const uploaduserProfile = makeCloudinaryUploader('users', 1);
+export const uploadBrand = makeCloudinaryUploader("brands", 2); 

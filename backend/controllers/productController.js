@@ -210,6 +210,7 @@ const addProductController = async (req, res) => {
 
         // ✅ Prevent duplicate product names
         const existingProduct = await Product.findOne({ name: name.trim() });
+        
         if (existingProduct) {
             return res.status(400).json({
                 message: `Product with name "${name}" already exists`
