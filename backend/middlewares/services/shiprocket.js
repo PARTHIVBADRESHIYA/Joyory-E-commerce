@@ -138,21 +138,35 @@ import axios from "axios";
 import Order from "../../models/Order.js";
 
 let shiprocketToken = null;
+let tokenExpiry = null;
 
-// ✅ Get / Cache Shiprocket Token
+// 🔑 Get & cache Shiprocket token
 export async function getShiprocketToken() {
-    if (shiprocketToken) return shiprocketToken;
+    if (shiprocketToken && tokenExpiry && new Date() < tokenExpiry) {
+        return shiprocketToken;
+    }
 
-    const res = await axios.post("https://apiv2.shiprocket.in/v1/external/auth/login", {
-        email: process.env.SHIPROCKET_EMAIL,
-        password: process.env.SHIPROCKET_PASSWORD
-    });
+    try {
+        const res = await axios.post(
+            "https://apiv2.shiprocket.in/v1/external/auth/login",
+            {
+                email: process.env.SHIPROCKET_EMAIL,
+                password: process.env.SHIPROCKET_PASSWORD
+            }
+        );
 
-    shiprocketToken = res.data.token;
-    return shiprocketToken;
+        shiprocketToken = res.data.token;
+        // Shiprocket tokens usually last ~24 hrs
+        tokenExpiry = new Date(new Date().getTime() + 23 * 60 * 60 * 1000);
+
+        return shiprocketToken;
+    } catch (err) {
+        console.error("❌ Shiprocket Auth Failed:", err.response?.data || err.message);
+        throw new Error("Failed to authenticate with Shiprocket");
+    }
 }
 
-// ✅ Create Order + Assign Courier
+// 🚚 Create order & assign courier
 export async function createShiprocketOrder(order) {
     const token = await getShiprocketToken();
 
@@ -168,11 +182,11 @@ export async function createShiprocketOrder(order) {
         throw new Error("❌ No products found in order for Shiprocket");
     }
 
-    // Step 1: Build Shiprocket payload
+    // 📝 Shiprocket payload
     const shipmentData = {
         order_id: order._id.toString(),
-        order_date: new Date(order.createdAt).toISOString().slice(0, 19).replace("T", " "), // Shiprocket expects YYYY-MM-DD HH:mm:ss
-        pickup_location: process.env.SHIPROCKET_PICKUP || "Primary", // must match EXACT pickup nickname
+        order_date: new Date(order.createdAt).toISOString().slice(0, 19).replace("T", " "),
+        pickup_location: process.env.SHIPROCKET_PICKUP || "Primary", // must match dashboard pickup nickname
         billing_customer_name: order.customerName || order.user?.name || "Guest",
         billing_last_name: "",
         billing_address: order.shippingAddress.addressLine,
@@ -199,13 +213,14 @@ export async function createShiprocketOrder(order) {
 
     let orderRes, awbRes;
 
+    // Step 1: Create order
     try {
         orderRes = await axios.post(
             "https://apiv2.shiprocket.in/v1/external/orders/create/adhoc",
             shipmentData,
             { headers: { Authorization: `Bearer ${token}` } }
         );
-        console.log("🚚 Shiprocket Order Response:", orderRes.data);
+        console.log("🚚 Shiprocket Order Created:", orderRes.data);
     } catch (err) {
         console.error("❌ Shiprocket Order Create Failed:", err.response?.data || err.message);
         throw new Error(`Shiprocket order creation failed: ${JSON.stringify(err.response?.data || err.message)}`);
@@ -218,14 +233,14 @@ export async function createShiprocketOrder(order) {
         throw new Error("❌ No shipment_id returned from Shiprocket");
     }
 
+    // Step 2: Auto-assign courier
     try {
-        // ⚡ Auto-assign courier
         awbRes = await axios.post(
             "https://apiv2.shiprocket.in/v1/external/courier/assign/awb",
             { shipment_id: shipmentId },
             { headers: { Authorization: `Bearer ${token}` } }
         );
-        console.log("📦 Shiprocket AWB Response:", awbRes.data);
+        console.log("📦 AWB Assigned:", awbRes.data);
     } catch (err) {
         console.error("❌ Shiprocket AWB Assign Failed:", err.response?.data || err.message);
         throw new Error(`Shiprocket AWB assignment failed: ${JSON.stringify(err.response?.data || err.message)}`);
@@ -241,11 +256,11 @@ export async function createShiprocketOrder(order) {
         tracking_url: awbRes.data?.response?.awb_code
             ? `https://shiprocket.co/tracking/${awbRes.data.response.awb_code}`
             : null,
-        status: awbRes.data?.response?.awb_code ? "Awaiting Pickup" : "Created",
+        status: awbRes.data?.response?.awb_code ? "Awaiting Pickup" : "Processing",
         assignedAt: new Date()
     };
 
-    // ✅ If AWB assigned but tracking_url missing → fetch from Shiprocket API
+    // Step 3: Ensure tracking URL
     if (!shipmentDetails.tracking_url && shipmentDetails.awb_code) {
         try {
             const trackRes = await axios.get(
@@ -258,15 +273,14 @@ export async function createShiprocketOrder(order) {
         }
     }
 
-    // Step 3: Save shipment details + update order status
+    // Step 4: Save to DB & update status
     const update = {
         shipment: shipmentDetails,
-        orderStatus: shipmentDetails.status === "Awaiting Pickup" ? "Shipped" : "Processing"
+        orderStatus: shipmentDetails.status
     };
 
     await Order.findByIdAndUpdate(order._id, update);
 
-    // Return both responses for debugging
     return {
         shipmentDetails,
         rawResponses: {
