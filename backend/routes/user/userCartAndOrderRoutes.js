@@ -10,7 +10,8 @@ import {
 import {
     getUserOrders,
     initiateOrderFromCart,
-    getOrderTracking
+    getOrderTracking,
+    testShiprocket
 } from '../../controllers/user/userOrderController.js';
 
 import { protect } from '../../middlewares/authMiddleware.js';
@@ -34,5 +35,5 @@ router.get('/orders', protect, getUserOrders);
 // routes/orderRoutes.js
 router.get("/tracking/:id", protect, getOrderTracking);
 
-
+router.post("/test-shiprocket", testShiprocket);
 export default router;

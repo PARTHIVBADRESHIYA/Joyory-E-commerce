@@ -1,7 +1,9 @@
 import Payment from '../../../models/settings/payments/Payment.js';
 import Order from '../../../models/Order.js';
 import { encrypt, decrypt } from '../../../middlewares/utils/encryption.js';
-import { createShiprocketOrder } from "../../../middlewares/services/shiprocket.js";
+// import { createShiprocketOrder } from "../../../middlewares/services/shiprocket.js";
+import { createShipment } from "../../../middlewares/services/shippingProvider.js";
+
 import Product from '../../../models/Product.js';
 import Affiliate from '../../../models/Affiliate.js';
 import mongoose from 'mongoose';
@@ -656,7 +658,7 @@ export const verifyRazorpayPayment = async (req, res) => {
         // STEP 10: Mark order as paid
         order.paid = true;
         order.paymentStatus = "success";
-        order.paymentMethod = "Razorpay";
+        order.paymentMethod === "COD" ? "COD" : "Prepaid"
         order.transactionId = razorpay_payment_id;
         order.razorpayOrderId = razorpay_order_id;
         order.orderStatus = "Processing";
@@ -700,7 +702,8 @@ export const verifyRazorpayPayment = async (req, res) => {
         // STEP 13: Shiprocket Integration
         let shiprocketRes = null;
         try {
-            shiprocketRes = await createShiprocketOrder(order); // my updated version returns { shipmentDetails, rawResponses }
+            // shiprocketRes = await createShiprocketOrder(order); // my updated version returns { shipmentDetails, rawResponses }
+            shiprocketRes = await createShipment(order);
             order.shipment = shiprocketRes.shipmentDetails;
             console.log("✅ Shiprocket order created:", order.shipment);
         } catch (shipErr) {

@@ -44,7 +44,7 @@ export const razorpayWebhook = async (req, res) => {
             if (!order.paid) {
                 order.paid = true;
                 order.paymentStatus = "success";
-                order.paymentMethod = "Razorpay";
+                order.paymentMethod  === "COD" ? "COD" : "Prepaid"
                 order.transactionId = payment.id;
                 order.orderStatus = "Paid";
                 await order.save();

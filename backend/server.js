@@ -434,6 +434,7 @@ import testRoutes from './routes/testRoutes.js';
 import videoRoutes from './routes/videoRoutes.js';
 import brandRoutes from './routes/brandRoutes.js';
 import testPickUpRoutes from './routes/testPickUpRoutes.js';
+import mockShippingRoutes from './routes/mockShippingRoutes.js';
 // User side
 import userProductRoutes from './routes/user/userProductRoutes.js';
 import userCartAndOrderRoutes from './routes/user/userCartAndOrderRoutes.js';
@@ -557,6 +558,9 @@ app.use("/api/webhooks", webhookRoutes);
 app.use('/api/brands', brandRoutes);
 app.use("/api/test", testPickUpRoutes);
 
+if ((process.env.SHIPPING_PROVIDER || "mock").toLowerCase() === "mock") {
+    app.use("/api/shipping", mockShippingRoutes);
+}
 
 // User side
 app.use('/api/user/products', userProductRoutes);

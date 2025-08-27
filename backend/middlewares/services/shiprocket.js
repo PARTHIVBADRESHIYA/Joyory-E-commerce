@@ -428,9 +428,6 @@
 
 
 
-
-
-
 // services/shiprocket.js
 import axios from "axios";
 import Order from "../../models/Order.js";
@@ -439,8 +436,8 @@ let shiprocketToken = null;
 let tokenExpiry = null;
 
 // 🔑 Get & cache Shiprocket token
-export async function getShiprocketToken() {
-    if (shiprocketToken && tokenExpiry && new Date() < tokenExpiry) {
+export async function getShiprocketToken(forceRefresh = false) {
+    if (!forceRefresh && shiprocketToken && tokenExpiry && new Date() < tokenExpiry) {
         return shiprocketToken;
     }
 
@@ -454,11 +451,36 @@ export async function getShiprocketToken() {
         );
 
         shiprocketToken = res.data.token;
-        tokenExpiry = new Date(new Date().getTime() + 23 * 60 * 60 * 1000); // valid 23 hrs
+        tokenExpiry = new Date(Date.now() + 23 * 60 * 60 * 1000); // valid 23 hrs
+        console.log("✅ [Shiprocket] Token refreshed");
         return shiprocketToken;
     } catch (err) {
         console.error("❌ Shiprocket Auth Failed:", err.response?.data || err.message);
         throw new Error("Failed to authenticate with Shiprocket");
+    }
+}
+
+// 📌 Helper to retry once if Unauthorized
+async function shiprocketRequest(url, method, data, token) {
+    try {
+        return await axios({
+            url,
+            method,
+            data,
+            headers: { Authorization: `Bearer ${token}` }
+        });
+    } catch (err) {
+        if (err.response?.status === 401) {
+            console.warn("⚠️ [Shiprocket] Unauthorized. Retrying with new token...");
+            const freshToken = await getShiprocketToken(true);
+            return await axios({
+                url,
+                method,
+                data,
+                headers: { Authorization: `Bearer ${freshToken}` }
+            });
+        }
+        throw err;
     }
 }
 
@@ -513,12 +535,13 @@ export async function createShiprocketOrder(order) {
 
     // STEP 1: Create Shiprocket order
     try {
-        orderRes = await axios.post(
+        orderRes = await shiprocketRequest(
             "https://apiv2.shiprocket.in/v1/external/orders/create/adhoc",
+            "post",
             shipmentData,
-            { headers: { Authorization: `Bearer ${token}` } }
+            token
         );
-        console.log("🚚 [Shiprocket] Order Created Response:", JSON.stringify(orderRes.data, null, 2));
+        console.log("🚚 [Shiprocket] Order Created:", JSON.stringify(orderRes.data, null, 2));
     } catch (err) {
         console.error("❌ [Shiprocket] Order Create Failed:", err.response?.data || err.message);
         throw new Error(`Shiprocket order creation failed → ${JSON.stringify(err.response?.data || err.message)}`);
@@ -546,12 +569,13 @@ export async function createShiprocketOrder(order) {
 
     // STEP 2: Assign AWB
     try {
-        awbRes = await axios.post(
+        awbRes = await shiprocketRequest(
             "https://apiv2.shiprocket.in/v1/external/courier/assign/awb",
+            "post",
             { shipment_id: shipmentId },
-            { headers: { Authorization: `Bearer ${token}` } }
+            token
         );
-        console.log("📦 [Shiprocket] AWB Assign Response:", JSON.stringify(awbRes.data, null, 2));
+        console.log("📦 [Shiprocket] AWB Assigned:", JSON.stringify(awbRes.data, null, 2));
     } catch (err) {
         console.error("❌ [Shiprocket] AWB Assign Failed:", err.response?.data || err.message);
         return {

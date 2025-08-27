@@ -1,3 +1,5 @@
+import express from "express";
+import mongoose from "mongoose";
 import Order from '../../models/Order.js';
 import User from '../../models/User.js';
 import Affiliate from '../../models/Affiliate.js';
@@ -11,7 +13,7 @@ import {
     reserveDiscountUsage
 } from "../../controllers/user/userDiscountController.js"; // import helpers
 import axios from "axios";
-import { getShiprocketToken } from "../../middlewares/services/shiprocket.js"; // helper to fetch token
+import { getShiprocketToken, createShiprocketOrder } from "../../middlewares/services/shiprocket.js"; // helper to fetch token
 // helper to normalize statuses
 function mapShipmentStatus(status) {
     if (!status) return "Pending";
@@ -517,5 +519,38 @@ export const getOrderTracking = async (req, res) => {
             message: "Failed to fetch order tracking",
             error: err.message,
         });
+    }
+};
+
+
+
+// 🚀 Test Shiprocket Integration
+export const testShiprocket = async (req, res) => {
+    try {
+        const { id, orderId } = req.body; // accept both _id and orderId
+
+        let order = null;
+
+        if (id && mongoose.Types.ObjectId.isValid(id)) {
+            order = await Order.findById(id).populate("products.productId user");
+        }
+
+        if (!order && orderId) {
+            order = await Order.findOne({ orderId }).populate("products.productId user");
+        }
+
+        if (!order) {
+            return res.status(404).json({
+                error: "Order not found",
+                tried: { id, orderId }
+            });
+        }
+
+        const shipment = await createShiprocketOrder(order);
+        return res.json(shipment);
+
+    } catch (err) {
+        console.error("❌ Shiprocket Test Error:", err.message);
+        return res.status(500).json({ error: err.message });
     }
 };
