@@ -13,7 +13,7 @@ const productSchema = new mongoose.Schema({
     brand: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Brand",
-        required: true
+        required: false
     },
     // backward-compatible single category (optional)
     category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true }, // final category (e.g. Eyeliner)
