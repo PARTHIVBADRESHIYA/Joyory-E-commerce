@@ -433,7 +433,7 @@ import attributeRoutes from './routes/attributeRoutes.js';
 import testRoutes from './routes/testRoutes.js';
 import videoRoutes from './routes/videoRoutes.js';
 import brandRoutes from './routes/brandRoutes.js';
-
+import testPickUpRoutes from './routes/testPickUpRoutes.js';
 // User side
 import userProductRoutes from './routes/user/userProductRoutes.js';
 import userCartAndOrderRoutes from './routes/user/userCartAndOrderRoutes.js';
@@ -555,6 +555,8 @@ app.use("/api/webhooks", webhookRoutes);
 
 // 🔹 Brands
 app.use('/api/brands', brandRoutes);
+app.use("/api/test", testPickUpRoutes);
+
 
 // User side
 app.use('/api/user/products', userProductRoutes);
