@@ -26,28 +26,22 @@ async function trackShipments() {
                     { headers: { Authorization: `Bearer ${token}` } }
                 );
 
+                console.log(`📦 [Shiprocket] Tracking response for Order ${order._id}:`, JSON.stringify(res.data, null, 2));
+
                 const trackingData = res.data.tracking_data;
                 if (trackingData) {
                     const currentStatus = trackingData.shipment_status;
                     order.shipment.status = currentStatus || order.shipment.status;
-                    order.shipment.tracking_url =
-                        trackingData.track_url || order.shipment.tracking_url;
+                    order.shipment.tracking_url = trackingData.track_url || order.shipment.tracking_url;
 
-                    // 🔹 Sync with order.orderStatus
                     if (currentStatus) {
                         const lower = currentStatus.toLowerCase();
-                        if (lower.includes("in transit") || lower.includes("shipped")) {
-                            order.orderStatus = "Shipped";
-                        } else if (lower.includes("out for delivery")) {
-                            order.orderStatus = "Out for Delivery";
-                        } else if (lower.includes("delivered")) {
-                            order.orderStatus = "Delivered";
-                        } else if (lower.includes("cancelled")) {
-                            order.orderStatus = "Cancelled";
-                        }
+                        if (lower.includes("in transit") || lower.includes("shipped")) order.orderStatus = "Shipped";
+                        else if (lower.includes("out for delivery")) order.orderStatus = "Out for Delivery";
+                        else if (lower.includes("delivered")) order.orderStatus = "Delivered";
+                        else if (lower.includes("cancelled")) order.orderStatus = "Cancelled";
                     }
 
-                    // 🔹 Append to tracking history
                     if (!order.trackingHistory) order.trackingHistory = [];
                     order.trackingHistory.push({
                         status: currentStatus || "Unknown",
@@ -56,13 +50,10 @@ async function trackShipments() {
                     });
 
                     await order.save();
-                    console.log(`✅ [Shiprocket] Order ${order.orderId} → ${order.orderStatus}`);
+                    console.log(`✅ [Shiprocket] Order ${order._id} updated → ${order.orderStatus}`);
                 }
             } catch (innerErr) {
-                console.error(
-                    `❌ [Shiprocket] Error tracking order ${order.orderId}:`,
-                    innerErr.response?.data || innerErr.message
-                );
+                console.error(`❌ [Shiprocket] Error tracking order ${order._id}:`, innerErr.response?.data || innerErr.message);
             }
         }
     } catch (err) {
