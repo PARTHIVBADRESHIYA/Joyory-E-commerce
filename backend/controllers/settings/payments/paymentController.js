@@ -697,21 +697,40 @@ export const verifyRazorpayPayment = async (req, res) => {
             console.error("❌ Error clearing user cart:", userErr);
         }
 
-        // STEP 13: Shiprocket Integration
+        // // STEP 13: Shiprocket Integration
+        // let shiprocketRes = null;
+        // try {
+        //     shiprocketRes = await createShiprocketOrder(order); // my updated version returns { shipmentDetails, rawResponses }
+        //     order.shipment = shiprocketRes.shipmentDetails;
+        //     console.log("✅ Shiprocket order created:", order.shipment);
+        // } catch (shipErr) {
+        //     console.error("❌ Shiprocket error:", shipErr.response?.data || shipErr.message);
+        //     return res.status(502).json({
+        //         step: "SHIPROCKET",
+        //         success: false,
+        //         message: "Shiprocket order creation failed",
+        //         error: shipErr.message,
+        //         details: shipErr.response?.data || null
+        //     });
+        // }
+
+
+
+        // STEP 13: Shiprocket Integration (Non-blocking)
         let shiprocketRes = null;
         try {
-            shiprocketRes = await createShiprocketOrder(order); // my updated version returns { shipmentDetails, rawResponses }
+            shiprocketRes = await createShiprocketOrder(order); // returns { shipmentDetails, rawResponses }
             order.shipment = shiprocketRes.shipmentDetails;
             console.log("✅ Shiprocket order created:", order.shipment);
         } catch (shipErr) {
             console.error("❌ Shiprocket error:", shipErr.response?.data || shipErr.message);
-            return res.status(502).json({
-                step: "SHIPROCKET",
-                success: false,
-                message: "Shiprocket order creation failed",
-                error: shipErr.message,
-                details: shipErr.response?.data || null
-            });
+
+            // Mark shipping as pending but don't fail the payment
+            order.shipment = {
+                status: "Unshipped",
+                error: shipErr.response?.data?.message || shipErr.message
+            };
+            console.warn("⚠️ Payment success but Shiprocket failed → order marked as Processing, shipment pending.");
         }
 
         // STEP 14: Tracking history
@@ -727,7 +746,9 @@ export const verifyRazorpayPayment = async (req, res) => {
         return res.status(200).json({
             step: "COMPLETE",
             success: true,
-            message: "Payment verified, stock updated, order paid & shipment created",
+            message: shiprocketRes
+                ? "Payment verified, stock updated, order paid & shipment created"
+                : "Payment verified, stock updated, order paid (shipment pending)",
             paymentMethod: rpPayment.method,
             order,
             debug: {
@@ -735,6 +756,7 @@ export const verifyRazorpayPayment = async (req, res) => {
                 shiprocket: shiprocketRes?.rawResponses || null
             }
         });
+
 
     } catch (err) {
         console.error("🔥 Fatal error verifying Razorpay payment:", err);
