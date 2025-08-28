@@ -435,6 +435,10 @@ import videoRoutes from './routes/videoRoutes.js';
 import brandRoutes from './routes/brandRoutes.js';
 import testPickUpRoutes from './routes/testPickUpRoutes.js';
 import mockShippingRoutes from './routes/mockShippingRoutes.js';
+import shadeFinderRoutes from './routes/shadeFinderRoutes.js';
+
+
+
 // User side
 import userProductRoutes from './routes/user/userProductRoutes.js';
 import userCartAndOrderRoutes from './routes/user/userCartAndOrderRoutes.js';
@@ -445,6 +449,7 @@ import userPromotionRoutes from './routes/user/userPromotionRoutes.js';
 import userVideoRoutes from './routes/user/userVideoRoutes.js';
 import userBrandRoutes from './routes/user/userBrandRoutes.js';
 import userDiscountRoutes from './routes/user/userDiscountRoutes.js';
+import userShadeFinderRoutes from './routes/user/userShadeFinderRoutes.js';
 
 // Connect to MongoDB
 connectDB();
@@ -551,6 +556,8 @@ app.use('/api/comments', commentRoutes);
 
 app.use('/api', testRoutes);
 
+app.use('/api/shadefinder', shadeFinderRoutes);
+
 // 🔹 Webhooks (Razorpay + Shiprocket)
 app.use("/api/webhooks", webhookRoutes);
 
@@ -562,6 +569,8 @@ if ((process.env.SHIPPING_PROVIDER || "mock").toLowerCase() === "mock") {
     app.use("/api/shipping", mockShippingRoutes);
 }
 
+
+
 // User side
 app.use('/api/user/products', userProductRoutes);
 app.use('/api/user/categories', userCategoryRoutes);
@@ -572,6 +581,7 @@ app.use('/api/user/promotions', userPromotionRoutes);
 app.use('/api/user/videos', userVideoRoutes);
 app.use('/api/user/brands', userBrandRoutes);
 app.use('/api/user/discounts', userDiscountRoutes);
+app.use('/api/user/shadefinder', userShadeFinderRoutes);
 
 // Example route
 app.get('/', (req, res) => {

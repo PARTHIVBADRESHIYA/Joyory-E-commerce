@@ -5,7 +5,7 @@ import ProductAttribute from '../models/ProductAttribute.js';
 import Category from '../models/Category.js'; // new import
 import mongoose from 'mongoose';
 
-// ADD PRODUCT
+
 // const addProductController = async (req, res) => {
 //     try {
 //         const {
@@ -16,6 +16,7 @@ import mongoose from 'mongoose';
 
 //         // ✅ Prevent duplicate product names
 //         const existingProduct = await Product.findOne({ name: name.trim() });
+        
 //         if (existingProduct) {
 //             return res.status(400).json({
 //                 message: `Product with name "${name}" already exists`
@@ -35,30 +36,39 @@ import mongoose from 'mongoose';
 //             finalCategories = [category];
 //         }
 
-//         // ✅ Convert category names to ObjectIds if needed
+//         // ✅ Resolve category names → ObjectIds
 //         const resolvedCategories = [];
 //         for (let cat of finalCategories) {
-//             if (mongoose.Types.ObjectId.isValid(cat)) {
-//                 resolvedCategories.push(cat);
+//             if (!cat) continue;
+
+//             // Trim spaces & normalize case
+//             const trimmedCat = String(cat).trim();
+
+//             if (mongoose.Types.ObjectId.isValid(trimmedCat)) {
+//                 resolvedCategories.push(trimmedCat);
 //             } else {
-//                 const foundCat = await Category.findOne({ name: cat });
+//                 // Case-insensitive category name search
+//                 const foundCat = await Category.findOne({
+//                     name: { $regex: `^${trimmedCat}$`, $options: 'i' }
+//                 });
+
 //                 if (!foundCat) {
-//                     return res.status(400).json({ message: `Category "${cat}" not found` });
+//                     return res.status(400).json({ message: `Category "${trimmedCat}" not found` });
 //                 }
 //                 resolvedCategories.push(foundCat._id);
 //             }
 //         }
+
 //         // ✅ Validate all resolved IDs exist
 //         const foundCategories = await Category.find({ _id: { $in: resolvedCategories } });
 //         if (foundCategories.length !== resolvedCategories.length) {
 //             return res.status(400).json({ message: 'One or more category IDs are invalid' });
 //         }
 
-//         // ✅ Build category hierarchy from leaf to root (based on first category)
+//         // ✅ Build category hierarchy from leaf to root
 //         const buildCategoryHierarchy = async (leafCategoryId) => {
 //             let hierarchy = [];
 //             let current = await Category.findById(leafCategoryId);
-
 //             while (current) {
 //                 hierarchy.unshift(current._id);
 //                 if (!current.parent) break;
@@ -66,10 +76,9 @@ import mongoose from 'mongoose';
 //             }
 //             return hierarchy;
 //         };
-
 //         const categoryHierarchy = await buildCategoryHierarchy(resolvedCategories[0]);
 
-//         // ✅ Helper functions
+//         // ✅ Helper to parse arrays
 //         const parseArray = (input) => {
 //             try {
 //                 if (typeof input === 'string') return JSON.parse(input);
@@ -79,35 +88,25 @@ import mongoose from 'mongoose';
 //             }
 //         };
 
-
-//         // Helper to get attribute options for given category
+//         // ✅ Helper to get attribute options by category
 //         const getAttributeOptions = async (name, categoryId) => {
-//             // Get category name from ID
 //             const categoryDoc = await Category.findById(categoryId);
 //             const categoryName = categoryDoc?.name;
-
-//             // Find attributes matching category name or global
 //             const attr = await ProductAttribute.findOne({
 //                 name,
 //                 status: 'Active',
 //                 $or: [
-//                     { categories: { $size: 0 } },    // global attributes
-//                     { categories: categoryName }     // match by category name
+//                     { categories: { $size: 0 } },
+//                     { categories: categoryName }
 //                 ]
 //             });
-
 //             return attr?.options || [];
 //         };
 
-
-//         // In addProductController
-//         const categoryDoc = await Category.findById(resolvedCategories[0]);
-//         const categoryName = categoryDoc?.name;
-
+//         // ✅ Get shade & color options
 //         const mainCategoryId = resolvedCategories[0];
 //         const shadeOptions = await getAttributeOptions('Shade', mainCategoryId);
 //         const colorOptions = await getAttributeOptions('Color', mainCategoryId);
-
 
 //         const productTags = parseArray(req.body.productTags);
 
@@ -174,9 +173,9 @@ import mongoose from 'mongoose';
 //             expiryDate,
 //             images,
 //             brand,
-//             category: resolvedCategories[0],    // Main category
-//             categories: resolvedCategories,     // All categories
-//             categoryHierarchy,                  // Full hierarchy
+//             category: resolvedCategories[0], // main category
+//             categories: resolvedCategories,
+//             categoryHierarchy,
 //             status,
 //             productTags,
 //             shadeOptions,
@@ -200,6 +199,15 @@ import mongoose from 'mongoose';
 //         });
 //     }
 // };
+
+
+
+
+
+
+
+
+
 const addProductController = async (req, res) => {
     try {
         const {
@@ -210,7 +218,6 @@ const addProductController = async (req, res) => {
 
         // ✅ Prevent duplicate product names
         const existingProduct = await Product.findOne({ name: name.trim() });
-        
         if (existingProduct) {
             return res.status(400).json({
                 message: `Product with name "${name}" already exists`
@@ -234,18 +241,14 @@ const addProductController = async (req, res) => {
         const resolvedCategories = [];
         for (let cat of finalCategories) {
             if (!cat) continue;
-
-            // Trim spaces & normalize case
             const trimmedCat = String(cat).trim();
 
             if (mongoose.Types.ObjectId.isValid(trimmedCat)) {
                 resolvedCategories.push(trimmedCat);
             } else {
-                // Case-insensitive category name search
                 const foundCat = await Category.findOne({
                     name: { $regex: `^${trimmedCat}$`, $options: 'i' }
                 });
-
                 if (!foundCat) {
                     return res.status(400).json({ message: `Category "${trimmedCat}" not found` });
                 }
@@ -281,26 +284,6 @@ const addProductController = async (req, res) => {
                 return [input];
             }
         };
-
-        // ✅ Helper to get attribute options by category
-        const getAttributeOptions = async (name, categoryId) => {
-            const categoryDoc = await Category.findById(categoryId);
-            const categoryName = categoryDoc?.name;
-            const attr = await ProductAttribute.findOne({
-                name,
-                status: 'Active',
-                $or: [
-                    { categories: { $size: 0 } },
-                    { categories: categoryName }
-                ]
-            });
-            return attr?.options || [];
-        };
-
-        // ✅ Get shade & color options
-        const mainCategoryId = resolvedCategories[0];
-        const shadeOptions = await getAttributeOptions('Shade', mainCategoryId);
-        const colorOptions = await getAttributeOptions('Color', mainCategoryId);
 
         const productTags = parseArray(req.body.productTags);
 
@@ -346,6 +329,32 @@ const addProductController = async (req, res) => {
             }
         }
 
+        // ✅ Handle foundationVariants → auto fill shadeOptions & colorOptions
+        let foundationVariants = [];
+        let shadeOptions = [];
+        let colorOptions = [];
+
+        if (req.body.foundationVariants) {
+            let variants = req.body.foundationVariants;
+            if (typeof variants === "string") {
+                try {
+                    variants = JSON.parse(variants);
+                } catch (err) {
+                    console.warn("⚠️ Could not parse foundationVariants JSON:", err.message);
+                    variants = [];
+                }
+            }
+            if (Array.isArray(variants)) {
+                foundationVariants = variants.map(v => ({
+                    ...v,
+                    isActive: v.isActive !== false, // default true
+                    createdAt: new Date()
+                }));
+                shadeOptions = foundationVariants.map(v => v.shadeName).filter(Boolean);
+                colorOptions = foundationVariants.map(v => v.hex).filter(Boolean);
+            }
+        }
+
         // ✅ Stock status
         const status =
             parsedQuantity === 0 ? 'Out of stock' :
@@ -374,6 +383,7 @@ const addProductController = async (req, res) => {
             productTags,
             shadeOptions,
             colorOptions,
+            foundationVariants,
             sales: 0,
             views: 0,
             commentsCount: 0,
@@ -393,6 +403,10 @@ const addProductController = async (req, res) => {
         });
     }
 };
+
+
+
+
 
 
 // GET ALL PRODUCTS (supports nested category filtering)
@@ -486,6 +500,84 @@ const updateProductStock = async (req, res) => {
     }
 };
 
+// const updateProductById = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+
+//         const parseArray = (input) => {
+//             try {
+//                 if (typeof input === 'string') return JSON.parse(input);
+//                 return Array.isArray(input) ? input : [input];
+//             } catch {
+//                 return [input];
+//             }
+//         };
+
+//         const updateData = { ...req.body };
+
+//         if (req.body.price) updateData.price = Number(req.body.price);
+//         if (req.body.buyingPrice) updateData.buyingPrice = Number(req.body.buyingPrice);
+//         if (req.body.quantity) updateData.quantity = Number(req.body.quantity);
+//         if (req.body.thresholdValue) updateData.thresholdValue = Number(req.body.thresholdValue);
+
+//         if (req.body.shadeOptions) updateData.shadeOptions = parseArray(req.body.shadeOptions);
+//         if (req.body.colorOptions) updateData.colorOptions = parseArray(req.body.colorOptions);
+//         if (req.body.productTags) updateData.productTags = parseArray(req.body.productTags);
+
+//         if (req.files?.length > 0) {
+//             updateData.images = req.files.map(file => file.path);
+//         } else if (req.body.images || req.body.imageUrls) {
+//             let raw = req.body.images || req.body.imageUrls;
+//             try {
+//                 if (typeof raw === 'string') raw = JSON.parse(raw);
+//             } catch (err) {
+//                 console.warn("⚠️ Could not parse imageUrls:", raw);
+//             }
+//             updateData.images = Array.isArray(raw) ? raw : [raw];
+//         }
+
+//         if (updateData.quantity !== undefined && updateData.thresholdValue !== undefined) {
+//             if (updateData.quantity === 0) {
+//                 updateData.status = 'Out of stock';
+//             } else if (updateData.quantity < updateData.thresholdValue) {
+//                 updateData.status = 'Low stock';
+//             } else {
+//                 updateData.status = 'In-stock';
+//             }
+//         }
+
+//         // ✅ Validate new category if updated
+//         if (updateData.category) {
+//             let categoryDoc;
+
+//             // Check if value is a valid ObjectId
+//             if (mongoose.Types.ObjectId.isValid(updateData.category)) {
+//                 categoryDoc = await Category.findById(updateData.category);
+//             } else {
+//                 categoryDoc = await Category.findOne({ name: updateData.category });
+//             }
+
+//             if (!categoryDoc) {
+//                 return res.status(400).json({ message: 'Invalid category (ID or name not found)' });
+//             }
+
+//             updateData.category = categoryDoc._id;
+//         }
+
+
+//         const updated = await Product.findByIdAndUpdate(id, updateData, { new: true });
+
+//         if (!updated) {
+//             return res.status(404).json({ message: '❌ Product not found' });
+//         }
+
+//         res.status(200).json({ message: '✅ Product updated successfully', product: updated });
+
+//     } catch (error) {
+//         console.error("❌ Product update error:", error);
+//         res.status(500).json({ message: 'Failed to update product', error: error.message });
+//     }
+// };
 const updateProductById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -510,6 +602,7 @@ const updateProductById = async (req, res) => {
         if (req.body.colorOptions) updateData.colorOptions = parseArray(req.body.colorOptions);
         if (req.body.productTags) updateData.productTags = parseArray(req.body.productTags);
 
+        // ✅ Handle images
         if (req.files?.length > 0) {
             updateData.images = req.files.map(file => file.path);
         } else if (req.body.images || req.body.imageUrls) {
@@ -522,6 +615,7 @@ const updateProductById = async (req, res) => {
             updateData.images = Array.isArray(raw) ? raw : [raw];
         }
 
+        // ✅ Auto status based on stock
         if (updateData.quantity !== undefined && updateData.thresholdValue !== undefined) {
             if (updateData.quantity === 0) {
                 updateData.status = 'Out of stock';
@@ -532,11 +626,9 @@ const updateProductById = async (req, res) => {
             }
         }
 
-        // ✅ Validate new category if updated
+        // ✅ Validate category if updated
         if (updateData.category) {
             let categoryDoc;
-
-            // Check if value is a valid ObjectId
             if (mongoose.Types.ObjectId.isValid(updateData.category)) {
                 categoryDoc = await Category.findById(updateData.category);
             } else {
@@ -550,7 +642,28 @@ const updateProductById = async (req, res) => {
             updateData.category = categoryDoc._id;
         }
 
+        // ✅ Sync shadeOptions & colorOptions from foundationVariants
+        if (req.body.foundationVariants) {
+            let variants = req.body.foundationVariants;
+            if (typeof variants === "string") {
+                try {
+                    variants = JSON.parse(variants);
+                } catch (err) {
+                    console.warn("⚠️ Could not parse foundationVariants JSON:", err.message);
+                    variants = [];
+                }
+            }
 
+            if (Array.isArray(variants)) {
+                updateData.foundationVariants = variants;
+
+                // Auto-fill shadeOptions & colorOptions
+                updateData.shadeOptions = variants.map(v => v.shadeName).filter(Boolean);
+                updateData.colorOptions = variants.map(v => v.hex).filter(Boolean);
+            }
+        }
+
+        // ✅ Update product
         const updated = await Product.findByIdAndUpdate(id, updateData, { new: true });
 
         if (!updated) {

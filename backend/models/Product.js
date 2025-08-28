@@ -1,5 +1,22 @@
- // models/Product.js
+// models/Product.js
 import mongoose from 'mongoose';
+
+const foundationVariantSchema = new mongoose.Schema({
+    // Note: unique on sub-docs is not enforced by MongoDB; enforce uniqueness at app level if needed
+    sku: { type: String, required: true },             // brand SKU for that shade
+    shadeName: { type: String, required: true },       // "102 Warm Ivory"
+    familyKey: { type: String, required: false },      // maps to ShadeFamily.key (e.g. "ivory-pink")
+    toneKeys: [{ type: String }],                      // ["fair","light"]
+    undertoneKeys: [{ type: String }],                 // ["warm","neutral"]
+    hex: { type: String },                             // swatch hex for UI
+    lab: { L: Number, a: Number, b: Number },          // optional color space
+    images: [{ type: String }],
+    stock: { type: Number, default: 0 },
+    isActive: { type: Boolean, default: true },
+    createdAt: { type: Date, default: Date.now }
+}, { _id: false }); // if you prefer each variant to have its own _id, remove _id:false
+
+
 
 const productSchema = new mongoose.Schema({
     name: { type: String, required: true, unique: true },
@@ -29,6 +46,13 @@ const productSchema = new mongoose.Schema({
     productTags: [String], // for product tag select
     shadeOptions: [{ type: String }],
     colorOptions: [{ type: String }],
+
+
+    // new fields for shade finder
+    formulation: { type: String, index: true }, // "liquid","stick","powder"
+    foundationVariants: [foundationVariantSchema], // only used for foundation category products
+
+
     status: { type: String, enum: ['In-stock', 'Low stock', 'Out of stock'], default: 'In-stock' },
     sales: { type: Number, default: 0 },
     views: { type: Number, default: 0 },
@@ -55,6 +79,14 @@ const productSchema = new mongoose.Schema({
 productSchema.index({ brand: 1 });
 productSchema.index({ brand: 1, category: 1 });
 productSchema.index({ createdAt: -1 });
+
+
+
+// shade finder indexes (helpful for queries)
+productSchema.index({ category: 1, formulation: 1 });
+productSchema.index({ "foundationVariants.familyKey": 1 });
+productSchema.index({ "foundationVariants.toneKeys": 1 });
+productSchema.index({ "foundationVariants.undertoneKeys": 1 });
 
 
 export default mongoose.model('Product', productSchema);
