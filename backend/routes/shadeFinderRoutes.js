@@ -133,7 +133,7 @@ router.put("/products/:productId/shades", isAdmin, assignShadesToProduct);
 // ----------------- Formulations -----------------
 
 router.post("/formulations",isAdmin,uploadFormulations.fields([{ name: "image", maxCount: 1 }]), createFormulation);
-router.get("/formulations",isAdmin, getFormulationsAdmin);
+router.get("/formulations", getFormulationsAdmin);
 router.put("/formulations/:id", isAdmin,uploadFormulations.fields([{ name: "image", maxCount: 1 }]),updateFormulation);
 router.delete("/formulations/:id", deleteFormulation);
 router.get("/formulations-overview", getAllFormulationsOverview);
