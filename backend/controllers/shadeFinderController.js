@@ -1,6 +1,7 @@
 import Tone from "../models/shade/Tone.js";
 import Undertone from "../models/shade/Undertone.js";
 import ShadeFamily from "../models/shade/Family.js";
+import Formulation from "../models/shade/Formulation.js";
 import Product from "../models/Product.js";
 
 // ----------- TONE CRUD -----------
@@ -179,10 +180,65 @@ export const assignShadesToProduct = async (req, res) => {
 
 
 // ----------- FORMULATION OVERVIEW (Admin) -----------
-export const getAllFormulationsAdmin = async (req, res) => {
+
+// ----------- CREATE -----------
+export const createFormulation = async (req, res) => {
     try {
-        // distinct will return all unique formulations present in Product collection
-        const formulations = await Product.distinct("formulation");
+        const { key, name, order } = req.body;
+        const image = req.files?.image?.[0]?.path || null;
+
+        const formulation = await Formulation.create({ key, name, order, image });
+        res.status(201).json({ success: true, formulation });
+    } catch (err) {
+        res.status(400).json({ success: false, message: err.message });
+    }
+};
+
+// ----------- GET (Admin) -----------
+export const getFormulationsAdmin = async (req, res) => {
+    try {
+        const formulations = await Formulation.find().sort({ order: 1 });
+        res.json({ success: true, formulations });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+// ----------- UPDATE -----------
+export const updateFormulation = async (req, res) => {
+    try {
+        const update = { ...req.body };
+        if (req.files?.image?.[0]) update.image = req.files.image[0].path;
+
+        const formulation = await Formulation.findByIdAndUpdate(req.params.id, update, { new: true });
+        if (!formulation) return res.status(404).json({ success: false, message: "Formulation not found" });
+
+        res.json({ success: true, formulation });
+    } catch (err) {
+        res.status(400).json({ success: false, message: err.message });
+    }
+};
+
+// ----------- DELETE -----------
+export const deleteFormulation = async (req, res) => {
+    try {
+        const formulation = await Formulation.findByIdAndDelete(req.params.id);
+        if (!formulation) return res.status(404).json({ success: false, message: "Formulation not found" });
+
+        res.json({ success: true, message: "Formulation deleted" });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+// ----------- LINK TO PRODUCTS (Overview) -----------
+export const getAllFormulationsOverview = async (req, res) => {
+    try {
+        // Distinct formulation ObjectIds from products
+        const formulationIds = await Product.distinct("formulation", { formulation: { $ne: null } });
+
+        // Fetch actual formulations by those ids
+        const formulations = await Formulation.find({ _id: { $in: formulationIds } }).sort({ order: 1 });
 
         res.json({ success: true, formulations });
     } catch (err) {

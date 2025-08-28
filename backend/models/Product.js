@@ -49,7 +49,14 @@ const productSchema = new mongoose.Schema({
 
 
     // new fields for shade finder
-    formulation: { type: String, index: true }, // "liquid","stick","powder"
+    // models/Product.js
+
+    formulation: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Formulation",
+        required: false,
+        index: true
+    },
     foundationVariants: [foundationVariantSchema], // only used for foundation category products
 
 

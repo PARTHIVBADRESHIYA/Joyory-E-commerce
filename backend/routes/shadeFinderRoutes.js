@@ -68,11 +68,11 @@ import {
     createTone, getTonesAdmin, updateTone, deleteTone,
     createUndertone, getUndertonesAdmin, updateUndertone, deleteUndertone,
     createFamily, getFamiliesAdmin, updateFamily, deleteFamily,
-    getAllShadesAdmin, assignShadesToProduct,getAllFormulationsAdmin
+    getAllShadesAdmin, assignShadesToProduct,createFormulation,getFormulationsAdmin,updateFormulation,deleteFormulation,getAllFormulationsOverview
 } from "../controllers/shadeFinderController.js";
 
 import { isAdmin } from "../middlewares/authMiddleware.js";
-import { uploadTones, uploadUndertones, uploadFamilies } from "../middlewares/upload.js";
+import { uploadTones, uploadUndertones, uploadFamilies ,uploadFormulations} from "../middlewares/upload.js";
 
 const router = express.Router();
 
@@ -131,7 +131,11 @@ router.get("/all", isAdmin, getAllShadesAdmin);
 router.put("/products/:productId/shades", isAdmin, assignShadesToProduct);
 
 // ----------------- Formulations -----------------
-router.get("/formulations", isAdmin, getAllFormulationsAdmin);
 
+router.post("/formulations",isAdmin,uploadFormulations.fields([{ name: "image", maxCount: 1 }]), createFormulation);
+router.get("/formulations",isAdmin, getFormulationsAdmin);
+router.put("/formulations/:id", isAdmin,uploadFormulations.fields([{ name: "image", maxCount: 1 }]),updateFormulation);
+router.delete("/formulations/:id", deleteFormulation);
+router.get("/formulations-overview", getAllFormulationsOverview);
 
 export default router;
