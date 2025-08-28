@@ -68,7 +68,7 @@ import {
     createTone, getTonesAdmin, updateTone, deleteTone,
     createUndertone, getUndertonesAdmin, updateUndertone, deleteUndertone,
     createFamily, getFamiliesAdmin, updateFamily, deleteFamily,
-    getAllShadesAdmin, assignShadesToProduct
+    getAllShadesAdmin, assignShadesToProduct,getAllFormulationsAdmin
 } from "../controllers/shadeFinderController.js";
 
 import { isAdmin } from "../middlewares/authMiddleware.js";
@@ -129,5 +129,9 @@ router.get("/all", isAdmin, getAllShadesAdmin);
 
 // ----------------- Assign shades -----------------
 router.put("/products/:productId/shades", isAdmin, assignShadesToProduct);
+
+// ----------------- Formulations -----------------
+router.get("/formulations", isAdmin, getAllFormulationsAdmin);
+
 
 export default router;

@@ -40,6 +40,12 @@ const userSchema = new mongoose.Schema({
             quantity: {
                 type: Number,
                 default: 1,
+            },
+            selectedVariant: {
+                sku: String,
+                shadeName: String,
+                hex: String,
+                image: String
             }
         }
     ],
@@ -74,7 +80,13 @@ const userSchema = new mongoose.Schema({
             ref: "Product"
         }
     ],
-
+    // 🆕 track selected shade/variant
+    selectedVariant: {
+        sku: String,
+        shadeName: String,
+        hex: String,
+        image: String
+    },
 
     createdBy: {
         type: String,

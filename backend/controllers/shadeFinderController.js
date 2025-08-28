@@ -175,3 +175,17 @@ export const assignShadesToProduct = async (req, res) => {
         res.status(400).json({ success: false, message: err.message });
     }
 };
+
+
+
+// ----------- FORMULATION OVERVIEW (Admin) -----------
+export const getAllFormulationsAdmin = async (req, res) => {
+    try {
+        // distinct will return all unique formulations present in Product collection
+        const formulations = await Product.distinct("formulation");
+
+        res.json({ success: true, formulations });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};

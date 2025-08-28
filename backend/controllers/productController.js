@@ -16,7 +16,7 @@ import mongoose from 'mongoose';
 
 //         // ✅ Prevent duplicate product names
 //         const existingProduct = await Product.findOne({ name: name.trim() });
-        
+
 //         if (existingProduct) {
 //             return res.status(400).json({
 //                 message: `Product with name "${name}" already exists`
@@ -722,4 +722,35 @@ const getSingleProductById = async (req, res) => {
     }
 };
 
-export { addProductController, getSingleProductById, getAllProducts, updateProductStock, updateProductById, deleteProduct };
+
+
+const updateVariantImages = async (req, res) => {
+    try {
+        const { id, sku } = req.params;
+
+        // If multer-cloudinary is used, uploaded file URLs are available in req.files
+        const uploadedImages = req.files.map(file => file.path);
+
+        // Update only that foundationVariant's images
+        const product = await Product.findOneAndUpdate(
+            { _id: id, "foundationVariants.sku": sku },
+            {
+                $set: { "foundationVariants.$.images": uploadedImages } // replace existing images
+            },
+            { new: true }
+        );
+
+        if (!product) {
+            return res.status(404).json({ message: "❌ Product or variant not found" });
+        }
+
+        res.status(200).json({
+            message: "✅ Variant images updated successfully",
+            product
+        });
+    } catch (err) {
+        console.error("updateVariantImages error:", err);
+        res.status(500).json({ message: "Failed to update variant images", error: err.message });
+    }
+};
+export { addProductController, getSingleProductById, getAllProducts, updateProductStock, updateProductById, deleteProduct, updateVariantImages };
