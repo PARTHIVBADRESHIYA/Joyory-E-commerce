@@ -1141,15 +1141,18 @@ export const getProductWithRelated = async (req, res) => {
 
 
 
+
 // 🔥 Top Categories (most popular categories – based on product count)
 export const getTopCategories = async (req, res) => {
     try {
-        const BASE_SLUGS = ["lipcare", "eyecare", "facecare", "fragrance"];
+        const BASE_SLUGS = ['lipcare', 'eyecare', 'facecare', 'fragrance'];
 
+        // 1️⃣ Get base categories
         const baseCategories = await Category.find({ slug: { $in: BASE_SLUGS } })
-            .select("name slug thumbnailImage")
+            .select('name slug thumbnailImage')
             .lean();
 
+        // 2️⃣ Aggregate orders to get top-selling categories
         const topFromOrders = await Order.aggregate([
             { $unwind: "$items" },
             {
@@ -1168,22 +1171,25 @@ export const getTopCategories = async (req, res) => {
                 }
             },
             { $sort: { totalOrders: -1 } },
-            { $limit: 10 }
+            { $limit: 10 } // get more than needed in case some are duplicates
         ]);
 
         const orderedCategoryIds = topFromOrders.map(o => o._id);
 
+        // 3️⃣ Get category docs for ordered categories
         const orderedCategories = await Category.find({ _id: { $in: orderedCategoryIds } })
             .select("name slug thumbnailImage")
             .lean();
 
+        // 4️⃣ Merge base + dynamic categories (avoid duplicate slugs)
         const mergedMap = new Map();
+
         baseCategories.forEach(c => {
             mergedMap.set(c.slug, {
                 _id: c._id,
                 name: c.name,
                 slug: c.slug,
-                image: c.thumbnailImage ? normalizeImages([c.thumbnailImage])[0] : null,
+                image: c.thumbnailImage || null,
                 _sortValue: 0
             });
         });
@@ -1194,20 +1200,29 @@ export const getTopCategories = async (req, res) => {
                 _id: c._id,
                 name: c.name,
                 slug: c.slug,
-                image: c.thumbnailImage ? normalizeImages([c.thumbnailImage])[0] : null,
+                image: c.thumbnailImage || null,
                 _sortValue: totalOrders
             });
         });
 
+        // 5️⃣ Sort by totalOrders and limit to top 6
         const result = Array.from(mergedMap.values())
             .sort((a, b) => b._sortValue - a._sortValue)
             .slice(0, 6)
-            .map(({ _sortValue, ...rest }) => rest);
+            .map(({ _sortValue, ...rest }) => rest); // remove _sortValue from final result
 
-        res.status(200).json({ success: true, categories: result });
+        res.status(200).json({
+            success: true,
+            categories: result
+        });
+
     } catch (err) {
         console.error("🔥 Failed to fetch top categories:", err);
-        res.status(500).json({ success: false, message: "Failed to fetch top categories", error: err.message });
+        res.status(500).json({
+            success: false,
+            message: "Failed to fetch top categories",
+            error: err.message
+        });
     }
 };
 

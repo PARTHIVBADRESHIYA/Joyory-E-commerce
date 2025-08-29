@@ -6,7 +6,8 @@ import {
     getProductsByCategory,
     getTopSellingProducts,
     getProductWithRelated,
-    getTopCategories,getProductsBySkinType
+    getTopCategories,
+    getProductsBySkinType
 } from "../../controllers/user/userProductController.js";
 
 import {
@@ -24,6 +25,7 @@ import { protect } from "../../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
+// ✅ Filtered product list
 router.get(
     "/",
     productListRateLimiter,
@@ -32,21 +34,20 @@ router.get(
     getAllFilteredProducts
 );
 
-router.get(
-    "/:slug",
-    cacheMiddleware,
-    validate(productQuerySchema),
-    getProductsBySkinType
-);
-
-router.get("/category/:slug/products", getProductsByCategory);
-
+// ✅ Top sellers & top categories (static routes first!)
 router.get("/top-sellers", getTopSellingProducts);
-
 router.get("/top-categories", getTopCategories);
 
+// ✅ Product by category
+router.get("/category/:slug/products", getProductsByCategory);
+
+// ✅ Products by skin type (use a distinct prefix to avoid conflicts)
+router.get("/skintype/:slug", cacheMiddleware, validate(productQuerySchema), getProductsBySkinType);
+
+// ✅ Related product info
 router.get("/top-sellers/:id", getProductWithRelated);
 
+// ✅ Single product details (dynamic routes last!)
 router.get(
     "/:id",
     productDetailRateLimiter,
