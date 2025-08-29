@@ -7,7 +7,9 @@ import {
     getTopSellingProducts,
     getProductWithRelated,
     getTopCategories,
-    getProductsBySkinType
+    getProductsBySkinType,
+    getTopSellingProductsByCategory ,
+    getAllSkinTypes
 } from "../../controllers/user/userProductController.js";
 
 import {
@@ -35,6 +37,8 @@ router.get(
 );
 
 // ✅ Top sellers & top categories (static routes first!)
+router.get("/top-selling-by-category", getTopSellingProductsByCategory);
+router.get("/skin-types", getAllSkinTypes);
 router.get("/top-sellers", getTopSellingProducts);
 router.get("/top-categories", getTopCategories);
 

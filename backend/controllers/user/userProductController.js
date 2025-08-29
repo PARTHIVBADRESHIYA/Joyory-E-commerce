@@ -631,8 +631,10 @@ import Product from '../../models/Product.js';
 import User from '../../models/User.js';
 import Review from '../../models/Review.js';
 import Order from '../../models/Order.js';
+import SkinType from '../../models/SkinType.js';
 import Category from '../../models/Category.js';
-import { getDescendantCategoryIds } from '../../middlewares/utils/categoryUtils.js';
+import { getDescendantCategoryIds ,getCategoryFallbackChain} from '../../middlewares/utils/categoryUtils.js';
+import {getRecommendedProducts } from '../../middlewares/utils/recommendationService.js';
 import mongoose from 'mongoose';
 
 // 🔧 Centralized helper for shades/colors
@@ -1095,6 +1097,143 @@ export const getTopSellingProducts = async (req, res) => {
     }
 };
 
+// 🔥 Top Selling Products By Category or Specific Category (for recommendations)
+// export const getTopSellingProductsByCategory = async (req, res) => {
+//     try {
+//         const { limit = 3, categorySlug } = req.query; // categorySlug = optional filter
+
+//         // Build filter (only products with sales > 0)
+//         const productFilter = { sales: { $gt: 0 } };
+
+//         // 1️⃣ If user wants only one category
+//         let categoryDoc = null;
+//         if (categorySlug) {
+//             categoryDoc = await Category.findOne({ slug: categorySlug })
+//                 .select("_id name slug thumbnailImage")
+//                 .lean();
+
+//             if (!categoryDoc) {
+//                 return res.status(404).json({
+//                     success: false,
+//                     message: "Category not found"
+//                 });
+//             }
+
+//             productFilter.category = categoryDoc._id;
+//         }
+
+//         // 2️⃣ Fetch products
+//         const soldProducts = await Product.find(productFilter)
+//             .sort({ sales: -1 })
+//             .populate("category", "name slug thumbnailImage")
+//             .select("name image images foundationVariants shadeOptions colorOptions sales category")
+//             .lean();
+
+//         if (!soldProducts.length) {
+//             return res.status(200).json({ success: true, categories: [] });
+//         }
+
+//         // 3️⃣ Group by category (same logic as before)
+//         const categoryMap = new Map();
+
+//         soldProducts.forEach(p => {
+//             if (!p.category) return;
+
+//             const shadeOptions = (p.foundationVariants?.length > 0)
+//                 ? p.foundationVariants.map(v => v.shadeName).filter(Boolean)
+//                 : (p.shadeOptions || []);
+
+//             const colorOptions = (p.foundationVariants?.length > 0)
+//                 ? p.foundationVariants.map(v => v.hex).filter(Boolean)
+//                 : (p.colorOptions || []);
+
+//             const productData = {
+//                 _id: p._id,
+//                 name: p.name,
+//                 sales: p.sales,
+//                 image: p.image || (p.images?.[0] || null),
+//                 shadeOptions,
+//                 colorOptions
+//             };
+
+//             if (!categoryMap.has(p.category.slug)) {
+//                 categoryMap.set(p.category.slug, {
+//                     category: {
+//                         _id: p.category._id,
+//                         name: p.category.name,
+//                         slug: p.category.slug,
+//                         image: p.category.thumbnailImage || null
+//                     },
+//                     products: []
+//                 });
+//             }
+
+//             categoryMap.get(p.category.slug).products.push(productData);
+//         });
+
+//         // 4️⃣ Sort products within each category
+//         const categories = Array.from(categoryMap.values()).map(cat => {
+//             cat.products = cat.products
+//                 .sort((a, b) => b.sales - a.sales)
+//                 .slice(0, Number(limit));
+//             return cat;
+//         });
+
+//         // 5️⃣ Sort categories (only needed in global mode)
+//         if (!categorySlug) {
+//             categories.sort((a, b) => {
+//                 const topA = a.products[0]?.sales || 0;
+//                 const topB = b.products[0]?.sales || 0;
+//                 return topB - topA;
+//             });
+//         }
+
+//         res.status(200).json({
+//             success: true,
+//             categories
+//         });
+
+//     } catch (error) {
+//         console.error("🔥 Failed to fetch top selling products by category:", error);
+//         res.status(500).json({
+//             success: false,
+//             message: "Failed to fetch top selling products by category",
+//             error: error.message
+//         });
+//     }
+// };
+
+
+
+
+
+export const getTopSellingProductsByCategory = async (req, res) => {
+    try {
+        const { limit = 3, categorySlug } = req.query;
+
+        // ✅ Use global recommendation system
+        const { products, category, message } = await getRecommendedProducts({
+            categorySlug,
+            limit
+        });
+
+        return res.status(200).json({
+            success: true,
+            category,
+            message,
+            products
+        });
+    } catch (error) {
+        console.error("🔥 Failed to fetch top selling products:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch top selling products",
+            error: error.message
+        });
+    }
+};
+
+
 
 // 🔥 Product Details + Related
 export const getProductWithRelated = async (req, res) => {
@@ -1227,25 +1366,44 @@ export const getTopCategories = async (req, res) => {
 };
 
 
-// GET /products/skintype/:slug
+ // GET /products/skintype/:slug
 export const getProductsBySkinType = async (req, res) => {
     try {
-        const skinTypeSlug = req.params.slug.toLowerCase(); // e.g. 'sensitive-skin'
-        let { page = 1, limit = 12, sort = "recent" } = req.query;
+        const skinTypeSlug = req.params.slug.toLowerCase();
+        let { page = 1, limit = 12, sort = "recent", categorySlug } = req.query;
 
         page = Number(page) || 1;
         limit = Number(limit) || 12;
 
-        // ✅ Build filter (products tagged with this skin type)
-        const filter = { productTags: { $in: [skinTypeSlug] } };
+        // ✅ 1. Find skinType ObjectId
+        const skinTypeDoc = await SkinType.findOne({ slug: skinTypeSlug }).lean();
+        if (!skinTypeDoc) {
+            return res.status(404).json({ message: `Skin type '${skinTypeSlug}' not found.` });
+        }
 
-        // ✅ Sorting logic
-        let sortOption = { createdAt: -1 }; // default recent
+        // ✅ 2. Build category chain (if categorySlug passed)
+        let categoriesToCheck = [];
+        if (categorySlug) {
+            const baseCategory = await Category.findOne({ slug: categorySlug })
+                .select("_id name slug parent")
+                .lean();
+
+            if (baseCategory) {
+                categoriesToCheck = await getCategoryFallbackChain(baseCategory);
+            }
+        }
+
+        // ✅ 3. Main filter
+        const filter = { skinTypes: skinTypeDoc._id };
+        if (categoriesToCheck.length) filter.category = { $in: categoriesToCheck.map(c => c._id) };
+
+        // ✅ Sorting
+        let sortOption = { createdAt: -1 };
         if (sort === "priceLowToHigh") sortOption = { price: 1 };
         else if (sort === "priceHighToLow") sortOption = { price: -1 };
         else if (sort === "rating") sortOption = { avgRating: -1 };
 
-        // ✅ Pagination
+        // ✅ Products
         const total = await Product.countDocuments(filter);
         let products = await Product.find(filter)
             .sort(sortOption)
@@ -1253,28 +1411,9 @@ export const getProductsBySkinType = async (req, res) => {
             .limit(limit)
             .lean();
 
-        // ✅ If no exact matches → fallback (related products by concern or formulation)
-        if (products.length === 0) {
-            products = await Product.find({
-                productTags: { $in: ["all-skin-types", "normal-skin", "hydrating"] }
-            })
-                .sort(sortOption)
-                .limit(limit)
-                .lean();
-        }
-
-        // ✅ Recommendation system (popular products in same skin type)
-        const recommendations = await Product.find({
-            productTags: { $in: [skinTypeSlug] }
-        })
-            .sort({ avgRating: -1, commentsCount: -1 })
-            .limit(6)
-            .lean();
-
-        // ✅ Format into cards
+        // ✅ Format product cards
         const cards = products.map(p => {
             const { shadeOptions, colorOptions } = buildOptions(p);
-
             return {
                 _id: p._id,
                 name: p.name,
@@ -1291,15 +1430,71 @@ export const getProductsBySkinType = async (req, res) => {
             };
         });
 
+        // ✅ Recommendations (ALWAYS generate, not just when products are empty)
+        let recommendations = [];
+        let recommendationMessage = "";
+
+        if (categoriesToCheck.length) {
+            for (const cat of categoriesToCheck) {
+                // Step 1: Same category + same skin type (exclude already shown)
+                recommendations = await Product.find({
+                    category: cat._id,
+                    skinTypes: skinTypeDoc._id,
+                    _id: { $nin: products.map(p => p._id) }
+                })
+                    .sort({ avgRating: -1, commentsCount: -1 })
+                    .limit(6)
+                    .lean();
+
+                if (recommendations.length) {
+                    recommendationMessage = `Recommended top-rated ${cat.name} products for ${skinTypeDoc.name}.`;
+                    break;
+                }
+
+                // Step 2: Same category (ignore skin type)
+                recommendations = await Product.find({
+                    category: cat._id,
+                    _id: { $nin: products.map(p => p._id) }
+                })
+                    .sort({ avgRating: -1, commentsCount: -1 })
+                    .limit(6)
+                    .lean();
+
+                if (recommendations.length) {
+                    recommendationMessage = `Popular ${cat.name} products you may like.`;
+                    break;
+                }
+            }
+        }
+
+        // Step 3: Global fallback
+        if (!recommendations.length) {
+            recommendations = await Product.find({
+                _id: { $nin: products.map(p => p._id) }
+            })
+                .sort({ sales: -1 })
+                .limit(6)
+                .lean();
+
+            recommendationMessage = `Here are some of our best-selling products you may love.`;
+        }
+
+        // ✅ Response
         res.status(200).json({
+            message: products.length
+                ? `Showing ${skinTypeDoc.name} products${categorySlug ? ` in ${categorySlug}` : ""}.`
+                : `No products found for ${skinTypeDoc.name}.`,
             skinType: skinTypeSlug,
             products: cards,
-            recommendations: recommendations.map(r => ({
-                _id: r._id,
-                name: r.name,
-                image: r.images?.length ? normalizeImages([r.images[0]])[0] : null,
-                avgRating: r.avgRating || 0
-            })),
+            recommendations: {
+                message: recommendationMessage,
+                items: recommendations.map(r => ({
+                    _id: r._id,
+                    name: r.name,
+                    image: r.images?.length ? normalizeImages([r.images[0]])[0] : null,
+                    avgRating: r.avgRating || 0
+                }))
+            },
             pagination: {
                 total,
                 page,
@@ -1312,5 +1507,69 @@ export const getProductsBySkinType = async (req, res) => {
     } catch (err) {
         console.error("❌ getProductsBySkinType error:", err);
         res.status(500).json({ message: "Server error", error: err.message });
+    }
+};
+
+
+
+export const getAllSkinTypes = async (req, res) => {
+    try {
+        const { q = "", isActive, page = 1, limit = 20 } = req.query;
+        const filters = { isDeleted: false };
+
+        if (q) filters.name = { $regex: q, $options: "i" };
+        if (typeof isActive !== "undefined") filters.isActive = isActive === "true";
+
+        const pg = Math.max(parseInt(page, 10) || 1, 1);
+        const lim = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
+
+        const pipeline = [
+            { $match: filters },
+            {
+                $lookup: {
+                    from: "products",
+                    let: { sid: "$_id" },
+                    pipeline: [
+                        {
+                            $match: {
+                                $expr: {
+                                    $in: [
+                                        "$$sid",
+                                        { $ifNull: ["$skinTypes", []] } // ✅ ensure always an array
+                                    ]
+                                },
+                                isDeleted: { $ne: true }
+                            }
+                        },
+                        { $count: "count" },
+                    ],
+                    as: "stats",
+                },
+            },
+            {
+                $addFields: {
+                    productCount: {
+                        $ifNull: [{ $arrayElemAt: ["$stats.count", 0] }, 0]
+                    }
+                }
+            },
+            { $project: { stats: 0 } },
+            { $sort: { name: 1 } },
+            { $skip: (pg - 1) * lim },
+            { $limit: lim },
+        ];
+
+        const [rows, total] = await Promise.all([
+            SkinType.aggregate(pipeline),
+            SkinType.countDocuments(filters),
+        ]);
+
+        return res.json({
+            success: true,
+            data: rows,
+            pagination: { page: pg, limit: lim, total }
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
     }
 };

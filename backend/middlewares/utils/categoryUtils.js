@@ -61,3 +61,20 @@ export const getDescendantCategoryIds = async (categoryId) => {
     }
     return Array.from(ids);
 };
+
+
+
+// utils/categoryUtils.js
+export const getCategoryFallbackChain = async (categoryDoc) => {
+    const chain = [];
+    let current = categoryDoc;
+
+    while (current) {
+        chain.push(current);
+        if (!current.parent) break;
+        current = await Category.findById(current.parent)
+            .select("_id name slug thumbnailImage parent")
+            .lean();
+    }
+    return chain; // child → parent → parent …
+};
