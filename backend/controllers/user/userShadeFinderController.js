@@ -3,7 +3,7 @@ import Tone from "../../models/shade/Tone.js";
 import Undertone from "../../models/shade/Undertone.js";
 import Family from "../../models/shade/Family.js";
 import Product from "../../models/Product.js";
-import {buildOptions,normalizeImages} from "../user/userProductController.js";
+import { buildOptions, normalizeImages } from "../user/userProductController.js";
 
 // STEP 1: tones
 export const getTones = async (req, res) => {
@@ -193,7 +193,6 @@ export const getFormulations = async (req, res) => {
 // };
 
 
-// STEP 5: recommendations (products + variants with fallbacks)
 export const getRecommendations = async (req, res) => {
     try {
         const { familyKey, toneKey, undertoneKey, formulation } = req.query;
@@ -205,30 +204,14 @@ export const getRecommendations = async (req, res) => {
             });
         }
 
-        // Base match
-        const baseMatch = {
+        const makeQuery = (extra = {}) => ({
             status: { $ne: "Out of stock" },
-            "foundationVariants.familyKey": familyKey,
-            "foundationVariants.toneKeys": toneKey,
-            "foundationVariants.undertoneKeys": undertoneKey,
-        };
+            "foundationVariants.isActive": true,
+            ...extra,
+        });
 
-        // Main query with formulation
-        let query = { ...baseMatch };
-        if (formulation) query.formulation = formulation;
-
-        let products = await Product.find(query)
-            .populate("category", "name slug")
-            .populate("brand", "name")
-            .select("_id name price images summary status category brand variant foundationVariants");
-
-        let message = "✅ Exact matches found";
-        let suggestions = [];
-
-        // 🔥 Map products to the SAME shape as category products
         const mapProduct = (p) => {
             const { shadeOptions, colorOptions } = buildOptions(p);
-
             return {
                 _id: p._id,
                 name: p.name,
@@ -248,25 +231,129 @@ export const getRecommendations = async (req, res) => {
             };
         };
 
+        let products = [];
+        let suggestions = [];
+        let message = "";
+
+        // ---------------------------
+        // Step 1 → exact match (with formulation if given)
+        // ---------------------------
+        let query = makeQuery({
+            "foundationVariants.familyKey": familyKey,
+            "foundationVariants.toneKeys": toneKey,
+            "foundationVariants.undertoneKeys": undertoneKey,
+            ...(formulation && { formulation }),
+        });
+
+        products = await Product.find(query)
+            .populate("category", "name slug")
+            .populate("brand", "name")
+            .select("_id name price images summary status category brand variant foundationVariants");
+
         products = products.map(mapProduct);
 
-        // FALLBACK if no products with formulation
+        if (products.length > 0) {
+            message = "✅ Exact matches found";
+        }
+
+        // ---------------------------
+        // Step 2 → ignore formulation
+        // ---------------------------
         if (products.length === 0 && formulation) {
-            message = "❌ No exact product matches your selection";
-            const altProducts = await Product.find(baseMatch)
+            const altProducts = await Product.find(
+                makeQuery({
+                    "foundationVariants.familyKey": familyKey,
+                    "foundationVariants.toneKeys": toneKey,
+                    "foundationVariants.undertoneKeys": undertoneKey,
+                })
+            )
                 .populate("category", "name slug")
                 .populate("brand", "name")
                 .select("_id name price images summary status category brand variant foundationVariants");
 
             if (altProducts.length > 0) {
+                message = "❌ No exact match in this formulation";
                 suggestions.push({
                     type: "formulation",
-                    message: `We couldn’t find products in "${formulation}", but found these in other formulations.`,
+                    message: `We couldn’t find products in"${formulation}", but found these in other formulations.`,
                     products: altProducts.map(mapProduct),
                 });
             }
         }
 
+        // ---------------------------
+        // Step 3 → ignore family
+        // ---------------------------
+        if (products.length === 0 && suggestions.length === 0) {
+            const altProducts = await Product.find(
+                makeQuery({
+                    "foundationVariants.toneKeys": toneKey,
+                    "foundationVariants.undertoneKeys": undertoneKey,
+                })
+            )
+                .populate("category", "name slug")
+                .populate("brand", "name")
+                .select("_id name price images summary status category brand variant foundationVariants");
+
+            if (altProducts.length > 0) {
+                message = "❌ No products in this family, showing related alternatives";
+                suggestions.push({
+                    type: "family",
+                    message: `No products in family"${familyKey}", but we found alternatives in other families with same tone + undertone.`,
+                    products: altProducts.map(mapProduct),
+                });
+            }
+        }
+
+        // ---------------------------
+        // Step 4 → ignore undertone, keep tone
+        // ---------------------------
+        if (products.length === 0 && suggestions.length === 0) {
+            const altProducts = await Product.find(
+                makeQuery({
+                    "foundationVariants.toneKeys": toneKey,
+                })
+            )
+                .populate("category", "name slug")
+                .populate("brand", "name")
+                .select("_id name price images summary status category brand variant foundationVariants");
+
+            if (altProducts.length > 0) {
+                message = "❌ No exact undertone match, showing tone-only alternatives";
+                suggestions.push({
+                    type: "tone",
+                    message: `Couldn’t find undertone"${undertoneKey}", but here are products for tone "${toneKey}".`,
+                    products: altProducts.map(mapProduct),
+                });
+            }
+        }
+
+        // ---------------------------
+        // Step 5 → ignore tone, keep undertone
+        // ---------------------------
+        if (products.length === 0 && suggestions.length === 0) {
+            const altProducts = await Product.find(
+                makeQuery({
+                    "foundationVariants.undertoneKeys": undertoneKey,
+                })
+            )
+                .populate("category", "name slug")
+                .populate("brand", "name")
+                .select("_id name price images summary status category brand variant foundationVariants");
+
+            if (altProducts.length > 0) {
+                message = "❌ No exact tone match, showing undertone-only alternatives";
+                suggestions.push({
+                    type: "undertone",
+                    message: `Couldn’t find tone"${toneKey}", but here are products for undertone "${undertoneKey}".`,
+                    products: altProducts.map(mapProduct),
+                });
+            }
+        }
+
+        // ---------------------------
+        // Final fallback
+        // ---------------------------
         if (products.length === 0 && suggestions.length === 0) {
             message = "❌ No exact or related products found, please try adjusting your selection.";
         }

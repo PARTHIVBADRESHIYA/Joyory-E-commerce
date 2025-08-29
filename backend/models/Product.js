@@ -37,6 +37,7 @@ const productSchema = new mongoose.Schema({
     categoryHierarchy: [ // full path
         { type: mongoose.Schema.Types.ObjectId, ref: 'Category' }
     ],
+    skinTypes: [{ type: mongoose.Schema.Types.ObjectId, ref: "SkinType", index: true }],    
     description: String,
     summary: String, // for card preview
     features: String, // optional   

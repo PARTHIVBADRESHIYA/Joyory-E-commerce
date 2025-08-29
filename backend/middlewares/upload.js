@@ -48,3 +48,4 @@ export const uploadTones = makeCloudinaryUploader("tones", 2);
 export const uploadUndertones = makeCloudinaryUploader("undertones", 2);
 export const uploadFamilies = makeCloudinaryUploader("families", 2);
 export const uploadFormulations = makeCloudinaryUploader("formulations", 2);
+export const uploadSkinType = makeCloudinaryUploader("skin-types", 2);

@@ -436,6 +436,7 @@ import brandRoutes from './routes/brandRoutes.js';
 import testPickUpRoutes from './routes/testPickUpRoutes.js';
 import mockShippingRoutes from './routes/mockShippingRoutes.js';
 import shadeFinderRoutes from './routes/shadeFinderRoutes.js';
+import skinTypeAdminRoutes from "./routes/skinTypeRoutes.js";
 
 
 
@@ -557,6 +558,8 @@ app.use('/api/comments', commentRoutes);
 app.use('/api', testRoutes);
 
 app.use('/api/shadefinder', shadeFinderRoutes);
+
+app.use('/api/skintypes', skinTypeAdminRoutes);
 
 // 🔹 Webhooks (Razorpay + Shiprocket)
 app.use("/api/webhooks", webhookRoutes);
