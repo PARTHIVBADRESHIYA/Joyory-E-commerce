@@ -3,210 +3,32 @@ import Product from '../models/Product.js';
 import cloudinary from '../middlewares/utils/cloudinary.js';
 import ProductAttribute from '../models/ProductAttribute.js';
 import Category from '../models/Category.js'; // new import
+import Formulation from '../models/shade/Formulation.js';
 import mongoose from 'mongoose';
 
 
-// const addProductController = async (req, res) => {
-//     try {
-//         const {
-//             name, variant, summary, description, features, howToUse,
-//             price, buyingPrice, brand, category, categories,
-//             quantity, expiryDate
-//         } = req.body;
 
-//         // ✅ Prevent duplicate product names
-//         const existingProduct = await Product.findOne({ name: name.trim() });
+export const resolveFormulationId = async (input) => {
+    if (!input) return null;
 
-//         if (existingProduct) {
-//             return res.status(400).json({
-//                 message: `Product with name "${name}" already exists`
-//             });
-//         }
+    const formulationInput = String(input).trim();
 
-//         // ✅ Ensure at least one category provided
-//         if (!category && (!categories || categories.length === 0)) {
-//             return res.status(400).json({ message: 'Category is required' });
-//         }
+    // Direct ObjectId
+    if (mongoose.Types.ObjectId.isValid(formulationInput)) {
+        return formulationInput;
+    }
 
-//         // ✅ Normalize categories array
-//         let finalCategories = [];
-//         if (categories && categories.length > 0) {
-//             finalCategories = Array.isArray(categories) ? categories : [categories];
-//         } else if (category) {
-//             finalCategories = [category];
-//         }
+    // Try by `key`
+    const formulationDoc = await Formulation.findOne({
+        key: { $regex: `^${formulationInput}$`, $options: "i" }
+    });
 
-//         // ✅ Resolve category names → ObjectIds
-//         const resolvedCategories = [];
-//         for (let cat of finalCategories) {
-//             if (!cat) continue;
+    if (!formulationDoc) {
+        throw new Error(`Formulation "${formulationInput}" not found`);
+    }
 
-//             // Trim spaces & normalize case
-//             const trimmedCat = String(cat).trim();
-
-//             if (mongoose.Types.ObjectId.isValid(trimmedCat)) {
-//                 resolvedCategories.push(trimmedCat);
-//             } else {
-//                 // Case-insensitive category name search
-//                 const foundCat = await Category.findOne({
-//                     name: { $regex: `^${trimmedCat}$`, $options: 'i' }
-//                 });
-
-//                 if (!foundCat) {
-//                     return res.status(400).json({ message: `Category "${trimmedCat}" not found` });
-//                 }
-//                 resolvedCategories.push(foundCat._id);
-//             }
-//         }
-
-//         // ✅ Validate all resolved IDs exist
-//         const foundCategories = await Category.find({ _id: { $in: resolvedCategories } });
-//         if (foundCategories.length !== resolvedCategories.length) {
-//             return res.status(400).json({ message: 'One or more category IDs are invalid' });
-//         }
-
-//         // ✅ Build category hierarchy from leaf to root
-//         const buildCategoryHierarchy = async (leafCategoryId) => {
-//             let hierarchy = [];
-//             let current = await Category.findById(leafCategoryId);
-//             while (current) {
-//                 hierarchy.unshift(current._id);
-//                 if (!current.parent) break;
-//                 current = await Category.findById(current.parent);
-//             }
-//             return hierarchy;
-//         };
-//         const categoryHierarchy = await buildCategoryHierarchy(resolvedCategories[0]);
-
-//         // ✅ Helper to parse arrays
-//         const parseArray = (input) => {
-//             try {
-//                 if (typeof input === 'string') return JSON.parse(input);
-//                 return Array.isArray(input) ? input : [input];
-//             } catch {
-//                 return [input];
-//             }
-//         };
-
-//         // ✅ Helper to get attribute options by category
-//         const getAttributeOptions = async (name, categoryId) => {
-//             const categoryDoc = await Category.findById(categoryId);
-//             const categoryName = categoryDoc?.name;
-//             const attr = await ProductAttribute.findOne({
-//                 name,
-//                 status: 'Active',
-//                 $or: [
-//                     { categories: { $size: 0 } },
-//                     { categories: categoryName }
-//                 ]
-//             });
-//             return attr?.options || [];
-//         };
-
-//         // ✅ Get shade & color options
-//         const mainCategoryId = resolvedCategories[0];
-//         const shadeOptions = await getAttributeOptions('Shade', mainCategoryId);
-//         const colorOptions = await getAttributeOptions('Color', mainCategoryId);
-
-//         const productTags = parseArray(req.body.productTags);
-
-//         // ✅ Numeric checks
-//         const thresholdValue = Number(req.body.thresholdValue);
-//         const parsedPrice = Number(price);
-//         const parsedBuyingPrice = Number(buyingPrice);
-//         const parsedQuantity = Number(quantity);
-
-//         if (isNaN(thresholdValue)) return res.status(400).json({ message: "❌ Invalid thresholdValue" });
-//         if (isNaN(parsedPrice) || isNaN(parsedBuyingPrice) || isNaN(parsedQuantity)) {
-//             return res.status(400).json({ message: "❌ Invalid numeric values" });
-//         }
-
-//         // ✅ Image handling
-//         const uploadImageFromUrl = async (url) => {
-//             const result = await cloudinary.uploader.upload(url, {
-//                 folder: 'products',
-//                 resource_type: 'image',
-//             });
-//             return result.secure_url;
-//         };
-
-//         let images = [];
-//         if (req.files?.length > 0) {
-//             images.push(...req.files.map(file => file.secure_url || file.path || file.url));
-//         }
-//         if (req.body.images || req.body.imageUrls) {
-//             let raw = req.body.images || req.body.imageUrls;
-//             try {
-//                 if (typeof raw === 'string') raw = JSON.parse(raw);
-//                 const urls = Array.isArray(raw) ? raw : [raw];
-//                 for (const url of urls) {
-//                     try {
-//                         const uploaded = await uploadImageFromUrl(url);
-//                         images.push(uploaded);
-//                     } catch (err) {
-//                         console.warn(`❌ Failed to upload image from URL: ${url}`, err.message);
-//                     }
-//                 }
-//             } catch (err) {
-//                 console.warn("⚠️ Could not upload image URLs:", err.message);
-//             }
-//         }
-
-//         // ✅ Stock status
-//         const status =
-//             parsedQuantity === 0 ? 'Out of stock' :
-//                 parsedQuantity < thresholdValue ? 'Low stock' :
-//                     'In-stock';
-
-//         // ✅ Create product
-//         const product = new Product({
-//             name,
-//             variant,
-//             summary,
-//             description,
-//             features,
-//             howToUse,
-//             price: parsedPrice,
-//             buyingPrice: parsedBuyingPrice,
-//             quantity: parsedQuantity,
-//             thresholdValue,
-//             expiryDate,
-//             images,
-//             brand,
-//             category: resolvedCategories[0], // main category
-//             categories: resolvedCategories,
-//             categoryHierarchy,
-//             status,
-//             productTags,
-//             shadeOptions,
-//             colorOptions,
-//             sales: 0,
-//             views: 0,
-//             commentsCount: 0,
-//             affiliateEarnings: 0,
-//             affiliateClicks: 0,
-//         });
-
-//         await product.save();
-//         res.status(201).json({ message: '✅ Product created successfully', product });
-
-//     } catch (error) {
-//         console.error("❌ Product placement error:", util.inspect(error, { showHidden: false, depth: null }));
-//         res.status(500).json({
-//             message: '❌ Product placement failed',
-//             error: error.message || 'Unknown error',
-//             stack: error.stack
-//         });
-//     }
-// };
-
-
-
-
-
-
-
-
+    return formulationDoc._id;
+};
 
 const addProductController = async (req, res) => {
     try {
@@ -329,6 +151,19 @@ const addProductController = async (req, res) => {
             }
         }
 
+
+        // ✅ Resolve formulation
+        let formulationId = null;
+        if (req.body.formulation) {
+            try {
+                formulationId = await resolveFormulationId(req.body.formulation);
+            } catch (err) {
+                return res.status(400).json({ message: err.message });
+            }
+        }
+
+
+
         // ✅ Handle foundationVariants → auto fill shadeOptions & colorOptions
         let foundationVariants = [];
         let shadeOptions = [];
@@ -369,6 +204,7 @@ const addProductController = async (req, res) => {
             description,
             features,
             howToUse,
+            formulation: formulationId,
             price: parsedPrice,
             buyingPrice: parsedBuyingPrice,
             quantity: parsedQuantity,
@@ -403,11 +239,6 @@ const addProductController = async (req, res) => {
         });
     }
 };
-
-
-
-
-
 
 // GET ALL PRODUCTS (supports nested category filtering)
 const getAllProducts = async (req, res) => {
@@ -662,6 +493,40 @@ const updateProductById = async (req, res) => {
                 updateData.colorOptions = variants.map(v => v.hex).filter(Boolean);
             }
         }
+
+        // ✅ Sync skinTypes
+        if (req.body.skinTypes) {
+            let skinTypes = req.body.skinTypes;
+
+            // Handle stringified array
+            if (typeof skinTypes === "string") {
+                try {
+                    skinTypes = JSON.parse(skinTypes);
+                } catch {
+                    skinTypes = [skinTypes];
+                }
+            }
+
+            // Ensure always an array
+            if (!Array.isArray(skinTypes)) {
+                skinTypes = [skinTypes];
+            }
+
+            // Cast only valid ObjectIds
+            updateData.skinTypes = skinTypes
+                .map(id => mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null)
+                .filter(Boolean);
+        }
+
+        // ✅ Handle formulation update
+        if (req.body.formulation) {
+            try {
+                updateData.formulation = await resolveFormulationId(req.body.formulation);
+            } catch (err) {
+                return res.status(400).json({ message: err.message });
+            }
+        }
+
 
         // ✅ Update product
         const updated = await Product.findByIdAndUpdate(id, updateData, { new: true });

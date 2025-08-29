@@ -1212,3 +1212,90 @@ export const getTopCategories = async (req, res) => {
 };
 
 
+// GET /products/skintype/:slug
+export const getProductsBySkinType = async (req, res) => {
+    try {
+        const skinTypeSlug = req.params.slug.toLowerCase(); // e.g. 'sensitive-skin'
+        let { page = 1, limit = 12, sort = "recent" } = req.query;
+
+        page = Number(page) || 1;
+        limit = Number(limit) || 12;
+
+        // ✅ Build filter (products tagged with this skin type)
+        const filter = { productTags: { $in: [skinTypeSlug] } };
+
+        // ✅ Sorting logic
+        let sortOption = { createdAt: -1 }; // default recent
+        if (sort === "priceLowToHigh") sortOption = { price: 1 };
+        else if (sort === "priceHighToLow") sortOption = { price: -1 };
+        else if (sort === "rating") sortOption = { avgRating: -1 };
+
+        // ✅ Pagination
+        const total = await Product.countDocuments(filter);
+        let products = await Product.find(filter)
+            .sort(sortOption)
+            .skip((page - 1) * limit)
+            .limit(limit)
+            .lean();
+
+        // ✅ If no exact matches → fallback (related products by concern or formulation)
+        if (products.length === 0) {
+            products = await Product.find({
+                productTags: { $in: ["all-skin-types", "normal-skin", "hydrating"] }
+            })
+                .sort(sortOption)
+                .limit(limit)
+                .lean();
+        }
+
+        // ✅ Recommendation system (popular products in same skin type)
+        const recommendations = await Product.find({
+            productTags: { $in: [skinTypeSlug] }
+        })
+            .sort({ avgRating: -1, commentsCount: -1 })
+            .limit(6)
+            .lean();
+
+        // ✅ Format into cards
+        const cards = products.map(p => {
+            const { shadeOptions, colorOptions } = buildOptions(p);
+
+            return {
+                _id: p._id,
+                name: p.name,
+                variant: p.variant,
+                price: p.price,
+                brand: p.brand,
+                summary: p.summary || p.description?.slice(0, 100) || "",
+                status: p.status,
+                image: p.images?.length ? normalizeImages([p.images[0]])[0] : null,
+                shadeOptions,
+                colorOptions,
+                commentsCount: p.commentsCount || 0,
+                avgRating: p.avgRating || 0
+            };
+        });
+
+        res.status(200).json({
+            skinType: skinTypeSlug,
+            products: cards,
+            recommendations: recommendations.map(r => ({
+                _id: r._id,
+                name: r.name,
+                image: r.images?.length ? normalizeImages([r.images[0]])[0] : null,
+                avgRating: r.avgRating || 0
+            })),
+            pagination: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit),
+                hasMore: page < Math.ceil(total / limit)
+            }
+        });
+
+    } catch (err) {
+        console.error("❌ getProductsBySkinType error:", err);
+        res.status(500).json({ message: "Server error", error: err.message });
+    }
+};

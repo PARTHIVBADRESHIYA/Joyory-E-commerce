@@ -6,7 +6,7 @@ import {
     getProductsByCategory,
     getTopSellingProducts,
     getProductWithRelated,
-    getTopCategories
+    getTopCategories,getProductsBySkinType
 } from "../../controllers/user/userProductController.js";
 
 import {
@@ -30,6 +30,13 @@ router.get(
     cacheMiddleware,
     validate(productQuerySchema),
     getAllFilteredProducts
+);
+
+router.get(
+    "/:slug",
+    cacheMiddleware,
+    validate(productQuerySchema),
+    getProductsBySkinType
 );
 
 router.get("/category/:slug/products", getProductsByCategory);
