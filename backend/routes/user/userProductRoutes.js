@@ -14,7 +14,7 @@ import {
 
 import {
     productListRateLimiter,
-    productDetailRateLimiter,
+    productDetailRateLimiter, 
 } from "../../middlewares/security/rateLimiter.js";
 
 import { cacheMiddleware } from "../../middlewares/cacheMiddleware.js";
