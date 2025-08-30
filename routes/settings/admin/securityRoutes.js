@@ -1,17 +1,26 @@
+// routes/securityRoutes.js
 import express from 'express';
-import {
-    changePassword,
-    setupMFA,
-    verifyMFA,
-    getLoginHistory
-} from '../../../controllers/settings/admin/securityController.js';
-import { verifyAdminOrTeamMember } from '../../../middlewares/authMiddleware.js';
+import { sendOtpToUser, resetPasswordWithOtp,loginWithOtp ,verifyEmailOtp ,sendOtpToAdmin,adminLoginWithOtp,verifyAdminEmailOtp,resetAdminPasswordWithOtp} from '../../../controllers/otpResetController.js';
+import { otpLimiter } from "../../../middlewares/security/rateLimiter.js";
+
+import { resetPasswordWithOtpSchema } from "../../../middlewares/validations/otpValidation.js";
+import { validate } from "../../../middlewares/validations/validate.js";
+
 
 const router = express.Router();
 
-router.post('/change-password', verifyAdminOrTeamMember, changePassword);
-router.get('/setup-mfa', verifyAdminOrTeamMember, setupMFA);
-router.post('/verify-mfa', verifyAdminOrTeamMember, verifyMFA);
-router.get('/login-history', verifyAdminOrTeamMember, getLoginHistory);
+router.post('/send-otp', otpLimiter,sendOtpToUser)
+router.post('/verify-otp', verifyEmailOtp);
+router.post('/reset-password', resetPasswordWithOtp);
+router.post('/login-otp', loginWithOtp);
+
+
+
+router.post('/admin/send-otp', sendOtpToAdmin);
+router.post('/admin/login-otp', adminLoginWithOtp);
+router.post('/admin/verify-otp', verifyAdminEmailOtp);
+router.post('/admin/reset-password', validate (resetPasswordWithOtpSchema), resetAdminPasswordWithOtp);
+
 
 export default router;
+

@@ -5,7 +5,23 @@ const adminSchema = new mongoose.Schema({
     name: { type: String, required: true },
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
-    role: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminRole' }
+    role: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminRole' },
+
+    loginAttempts: {
+        type: Number,
+        default: 0
+    },
+    lockUntil: {
+        type: Date
+    },
+    otp: {
+    code: { type: String },
+    expiresAt: { type: Date }
+},
+otpRequests: [{ type: Date }]
+
+
+
 }, { timestamps: true });
 
 // Hash password before save

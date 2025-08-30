@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import TeamMember from '../../../models/settings/admin/TeamMember.js';
 import AdminRole from '../../../models/settings/admin/AdminRole.js';
 import mongoose from 'mongoose';
+import { notifyMainAdmins } from '../../../middlewares/utils/notifyMainAdmins.js'; // ✅ Check path
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key';
 if (!JWT_SECRET) throw new Error("JWT_SECRET is not defined in env");
@@ -67,14 +68,46 @@ export const loginTeamMember = async (req, res) => {
         const member = await TeamMember.findOne({ email }).populate('role');
         if (!member) return res.status(404).json({ message: 'Team member not found' });
 
+        // 🔐 Check if account is locked
+        if (member.lockUntil && member.lockUntil > new Date()) {
+            const remaining = member.lockUntil - new Date();
+            const hours = Math.floor(remaining / 3600000);
+            const minutes = Math.floor((remaining % 3600000) / 60000);
+            const seconds = Math.floor((remaining % 60000) / 1000);
+
+            return res.status(403).json({
+                message: `Account locked. Try again in ${hours}h ${minutes}m ${seconds}s.`
+            });
+        }
+
         const isMatch = await bcrypt.compare(password, member.password);
-        if (!isMatch) return res.status(401).json({ message: 'Invalid credentials' });
+        if (!isMatch) {
+            member.loginAttempts = (member.loginAttempts || 0) + 1;
+
+            if (member.loginAttempts >= 3) {
+                member.lockUntil = new Date(Date.now() + 24 * 60 * 60 * 1000); // Lock for 24 hrs
+                member.loginAttempts = 0;
+                await member.save();
+
+                // ✅ Notify main admin only ONCE (when lock happens)
+                await notifyMainAdmins('Team Member Locked', {
+                    message: `Team member ${member.email} has been locked after 3 failed login attempts.`
+                });
+
+                return res.status(401).json({ message: 'Account locked due to multiple failed attempts' });
+            }
+
+            await member.save();
+            return res.status(401).json({ message: 'Invalid credentials' });
+        }
+
+        // ✅ Success - reset attempts
+        member.loginAttempts = 0;
+        member.lockUntil = undefined;
+        await member.save();
 
         const token = jwt.sign(
-            {
-                id: member._id,
-                role: member.role._id
-            },
+            { id: member._id, role: member.role._id },
             JWT_SECRET,
             { expiresIn: '1d' }
         );
@@ -89,6 +122,7 @@ export const loginTeamMember = async (req, res) => {
                 role: member.role
             }
         });
+
     } catch (err) {
         console.error('Team Login Error:', err);
         res.status(500).json({ message: 'Team login failed', error: err.message });

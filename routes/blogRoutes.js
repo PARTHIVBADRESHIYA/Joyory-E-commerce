@@ -1,20 +1,23 @@
 import express from 'express';
-import multer from 'multer';
 import {
     createBlog,
     getBlogById,
     getAllBlogs,
-    getBlogCategories
+    getBlogCategories,
+    getBlogBySlug
 } from '../controllers/blogController.js';
 
+import { uploadBlogImage } from '../middlewares/upload.js';
+
 // Setup multer for image upload
-const upload = multer({ dest: 'uploads/blogs/' }); // You can customize storage later
 
 const router = express.Router();
 
-router.post('/', upload.single('image'), createBlog);        // Create Blog
+router.post('/', uploadBlogImage.single('image'), createBlog);        // Create Blog
 router.get('/:id', getBlogById);                             // Blog Details
 router.get('/', getAllBlogs);                                // Blog List
 router.get('/utils/categories', getBlogCategories);
+// routes/blogRoutes.js
+router.get('/slug/:slug', getBlogBySlug); // 👈 Route using slug
 
 export default router;

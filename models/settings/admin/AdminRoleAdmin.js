@@ -16,7 +16,18 @@ const AdminRoleAdminSchema = new mongoose.Schema({
     profilePic: {
         type: String, // URL or path
         default: ''
-    }
+    },
+    otp: {
+    code: { type: String },
+    expiresAt: { type: Date }
+},
+otpRequests: [{ type: Date }]
+,
+
+      // 🔒 Security fields
+    loginAttempts: { type: Number, default: 0 },
+    lockUntil: { type: Date }
+
 }, { timestamps: true });
 
 export default mongoose.model('AdminRoleAdmin', AdminRoleAdminSchema);

@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 
 const paymentSchema = new mongoose.Schema({
     order: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', required: true },
-    method: { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentMethod', required: true },
+    method: { type: String, required: true },
     status: { type: String, enum: ['Pending', 'Completed', 'Failed'], default: 'Pending' },
     transactionId: { type: String },
     amount: { type: Number, required: true },

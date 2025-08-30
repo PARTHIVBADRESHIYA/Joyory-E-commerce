@@ -1,6 +1,7 @@
 // routes/campaignRoutes.js
 import express from 'express';
-import upload from './../middlewares/upload.js';
+import { uploadCampaign } from '../middlewares/upload.js';
+
 import {
     createCampaign,
     getCampaignDashboard,
@@ -15,7 +16,7 @@ import {
 
 const router = express.Router();
 
-router.post('/', upload.single('image'), createCampaign);
+router.post('/', uploadCampaign.single('image'), createCampaign);
 router.post('/send/:id', sendCampaignNow); // ✅ added dynamic send route
 router.get('/dashboard', getCampaignDashboard);
 router.get('/charts/performance-by-type', getPerformanceByType);

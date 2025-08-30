@@ -146,13 +146,15 @@ export const getPopularProducts = async (req, res) => {
         const earningsMap = {};
 
         affiliates.forEach(affiliate => {
+            const rate = affiliate.commissionRate || 0.15;
+
             affiliate.generatedLinks.forEach(link => {
                 const productId = link.product?._id?.toString();
-                if (!productId) return;
+                if (!productId || affiliate.exclusions.includes(productId)) return;
 
                 const clicks = link.clicks || 0;
                 const price = link.product.price || 0;
-                const earning = price * 0.10 * clicks * 0.10;
+                const earning = rate * price * clicks * 0.10;
 
                 if (!earningsMap[productId]) {
                     earningsMap[productId] = {
@@ -163,6 +165,7 @@ export const getPopularProducts = async (req, res) => {
                 earningsMap[productId].totalEarning += earning;
             });
         });
+
 
         const popularProducts = Object.values(earningsMap).sort((a, b) => b.totalEarning - a.totalEarning);
 

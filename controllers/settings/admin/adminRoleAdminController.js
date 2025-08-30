@@ -3,6 +3,9 @@ import jwt from 'jsonwebtoken';
 import AdminRoleAdmin from '../../../models/settings/admin/AdminRoleAdmin.js';
 import AdminRole from '../../../models/settings/admin/AdminRole.js';
 
+import { notifyMainAdmins } from '../../../middlewares/utils/notifyMainAdmins.js';
+
+
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key';
 if (!JWT_SECRET) throw new Error("JWT_SECRET is not defined in env");
 ;
@@ -58,12 +61,50 @@ export const registerRoleAdmin = async (req, res) => {
 export const loginRoleAdmin = async (req, res) => {
     try {
         const { email, password } = req.body;
-
         const admin = await AdminRoleAdmin.findOne({ email }).populate('role');
+
         if (!admin) return res.status(404).json({ message: 'Role Admin not found' });
 
+        // 🔐 Check if account is locked
+        if (admin.lockUntil && admin.lockUntil > new Date()) {
+            const msLeft = admin.lockUntil - new Date();
+            const seconds = Math.floor((msLeft / 1000) % 60);
+            const minutes = Math.floor((msLeft / (1000 * 60)) % 60);
+            const hours = Math.floor((msLeft / (1000 * 60 * 60)) % 24);
+
+            return res.status(403).json({
+                message: `Account locked. Try again in ${hours}h ${minutes}m ${seconds}s.`
+            });
+        }
+
         const isMatch = await bcrypt.compare(password, admin.password);
-        if (!isMatch) return res.status(401).json({ message: 'Invalid credentials' });
+        if (!isMatch) {
+            admin.loginAttempts = (admin.loginAttempts || 0) + 1;
+
+            // 🔐 Lock only if failed 3 times
+            if (admin.loginAttempts >= 3) {
+                admin.lockUntil = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+                admin.loginAttempts = 0;
+                await admin.save();
+
+                // 🔔 Notify main admin ONLY after lock
+                await notifyMainAdmins('AdminRoleAdmin Locked', {
+                    message: `Admin ${admin.email} was locked due to failed login attempts.`
+                });
+
+                return res.status(403).json({
+                    message: 'Account locked due to multiple failed login attempts. Try again in 24 hours.'
+                });
+            }
+
+            await admin.save();
+            return res.status(401).json({ message: 'Invalid credentials' });
+        }
+
+        // ✅ Reset on success
+        admin.loginAttempts = 0;
+        admin.lockUntil = undefined;
+        await admin.save();
 
         const token = jwt.sign({ id: admin._id, role: admin.role._id }, JWT_SECRET, {
             expiresIn: '1d',
@@ -83,6 +124,8 @@ export const loginRoleAdmin = async (req, res) => {
         res.status(500).json({ message: 'Login failed', error: err.message });
     }
 };
+
+
 
 // Get role admin profile
 export const getRoleAdminProfile = async (req, res) => {
