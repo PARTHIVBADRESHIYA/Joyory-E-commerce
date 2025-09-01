@@ -1,5 +1,3 @@
-<<<<<<< HEAD
-=======
 
 
 // import Promotion from "../models/Promotion.js";
@@ -233,47 +231,13 @@
 
 
 
->>>>>>> 10b747ef4ee47becfe4aafb2ad1b3a4243d453fe
 // controllers/admin/promotionController.js
 import Promotion from "../models/Promotion.js";
 import Category from "../models/Category.js";
 import Product from "../models/Product.js";
 import mongoose from "mongoose";
-<<<<<<< HEAD
-// promotionController.js
-import Brand from "../models/Brand.js";
 
 /* ---------- helpers ---------- */
-const resolveBrands = async (brands) => {
-  if (!brands || brands.length === 0) return [];
-  const resolved = await Promise.all(
-    brands.map(async (b) => {
-      if (typeof b === "object" && b._id)
-        return { brand: b._id, slug: b.slug || "", customId: b._id.toString() };
-
-      if (typeof b === "object" && b.brand)
-        return { brand: b.brand, slug: b.slug || "", customId: b.brand.toString() };
-
-      if (typeof b === "string" && isObjectId(b)) {
-        const br = await Brand.findById(b).select("_id slug");
-        return br ? { brand: br._id, slug: br.slug, customId: br._id.toString() } : null;
-      }
-
-      if (typeof b === "string") {
-        const br = await Brand.findOne({ slug: b }).select("_id slug");
-        return br ? { brand: br._id, slug: br.slug, customId: br._id.toString() } : null;
-      }
-
-      return null;
-    })
-  );
-  return resolved.filter(Boolean);
-};
-
-=======
-
-/* ---------- helpers ---------- */
->>>>>>> 10b747ef4ee47becfe4aafb2ad1b3a4243d453fe
 const isObjectId = (s) => typeof s === "string" && /^[0-9a-fA-F]{24}$/.test(s);
 
 const calculateStatus = (start, end) => {
@@ -409,35 +373,12 @@ const normalizeByType = async (body) => {
 /* ---------- controllers ---------- */
 
 // Create
-<<<<<<< HEAD
-// Create
-const createPromotion = async (req, res) => {
-  try {
-    const status = calculateStatus(req.body.startDate, req.body.endDate);
-
-    const categories = await resolveCategories(req.body.categories);
-    if (req.body.categories?.length && categories.length === 0) {
-      return res.status(400).json({ message: "Invalid categories provided" });
-    }
-
-    const products = await resolveProducts(req.body.products);
-    if (req.body.products?.length && products.length === 0) {
-      return res.status(400).json({ message: "Invalid products provided" });
-    }
-
-    const brands = await resolveBrands(req.body.brands);
-    if (req.body.brands?.length && brands.length === 0) {
-      return res.status(400).json({ message: "Invalid brands provided" });
-    }
-
-=======
 const createPromotion = async (req, res) => {
   try {
     const status = calculateStatus(req.body.startDate, req.body.endDate);
     const categories = await resolveCategories(req.body.categories);
     const products = await resolveProducts(req.body.products);
 
->>>>>>> 10b747ef4ee47becfe4aafb2ad1b3a4243d453fe
     // images from multer + body
     const images = [];
     if (req.files?.length) images.push(...req.files.map((f) => f.path));
@@ -451,10 +392,6 @@ const createPromotion = async (req, res) => {
       ...req.body,
       categories,
       products,
-<<<<<<< HEAD
-      brands,
-=======
->>>>>>> 10b747ef4ee47becfe4aafb2ad1b3a4243d453fe
       status,
       images,
       promotionConfig,
@@ -466,38 +403,14 @@ const createPromotion = async (req, res) => {
   }
 };
 
-<<<<<<< HEAD
-
-// Update
-=======
->>>>>>> 10b747ef4ee47becfe4aafb2ad1b3a4243d453fe
 // Update
 const updatePromotion = async (req, res) => {
   try {
     const { id } = req.params;
     const status = calculateStatus(req.body.startDate, req.body.endDate);
-<<<<<<< HEAD
-
-    const categories = await resolveCategories(req.body.categories);
-    if (req.body.categories?.length && categories.length === 0) {
-      return res.status(400).json({ message: "Invalid categories provided" });
-    }
-
-    const products = await resolveProducts(req.body.products);
-    if (req.body.products?.length && products.length === 0) {
-      return res.status(400).json({ message: "Invalid products provided" });
-    }
-
-    const brands = await resolveBrands(req.body.brands);
-    if (req.body.brands?.length && brands.length === 0) {
-      return res.status(400).json({ message: "Invalid brands provided" });
-    }
-
-=======
     const categories = await resolveCategories(req.body.categories);
     const products = await resolveProducts(req.body.products);
 
->>>>>>> 10b747ef4ee47becfe4aafb2ad1b3a4243d453fe
     const incomingImages = [];
     if (req.files?.length) incomingImages.push(...req.files.map((f) => f.path));
     if (req.body.image) incomingImages.push(req.body.image);
@@ -512,18 +425,9 @@ const updatePromotion = async (req, res) => {
       ...req.body,
       categories,
       products,
-<<<<<<< HEAD
-      brands,
-      status,
-      promotionConfig,
-      images: incomingImages.length
-        ? [...(existing.images || []), ...incomingImages]
-        : existing.images,
-=======
       status,
       promotionConfig,
       images: incomingImages.length ? [...(existing.images || []), ...incomingImages] : existing.images,
->>>>>>> 10b747ef4ee47becfe4aafb2ad1b3a4243d453fe
     };
 
     const promotion = await Promotion.findByIdAndUpdate(id, updateData, { new: true, runValidators: true });
@@ -533,10 +437,6 @@ const updatePromotion = async (req, res) => {
   }
 };
 
-<<<<<<< HEAD
-
-=======
->>>>>>> 10b747ef4ee47becfe4aafb2ad1b3a4243d453fe
 // Delete / Summary / List — keep your existing implementations
 
 // ✅ Delete Promotion
@@ -559,7 +459,7 @@ const getPromotionSummary = async (req, res) => {
 
     const promotions = await Promotion.find(query)
       .select("campaignName targetAudience status promotionType startDate endDate categories images")
-      .populate("categories.category", "brands.brand", "name slug");
+      .populate("categories.category", "name slug");
 
     const summary = promotions.map((p) => ({
       name: p.campaignName,
@@ -570,12 +470,6 @@ const getPromotionSummary = async (req, res) => {
         .toISOString()
         .split("T")[0]}`,
       images: p.images || [],
-      brands: p.brands.map((b) => ({
-        id: b.brand?._id,
-        slug: b.slug || b.brand?.slug,
-        name: b.brand?.name,
-      })),
-
       categories: p.categories.map((c) => ({
         id: c.category?._id,
         slug: c.slug || c.category?.slug,
@@ -595,7 +489,7 @@ const getPromotionList = async (req, res) => {
   try {
     const promotions = await Promotion.find()
       .select("campaignName promotionType startDate endDate status targetAudience categories images")
-      .populate("categories.category", "brands.brand", "name slug");
+      .populate("categories.category", "name slug");
 
     const list = promotions.map((p) => ({
       id: p._id,
@@ -606,12 +500,6 @@ const getPromotionList = async (req, res) => {
       status: p.status,
       targetGroup: p.targetAudience,
       images: p.images || [],
-      brands: p.brands.map((b) => ({
-        id: b.brand?._id,
-        slug: b.slug || b.brand?.slug,
-        name: b.brand?.name,
-      })),
-
       categories: p.categories.map((c) => ({
         id: c.category?._id,
         slug: c.slug || c.category?.slug,

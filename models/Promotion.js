@@ -1,7 +1,6 @@
 
 
 
-
 // import mongoose from "mongoose";
 
 // const promotionSchema = new mongoose.Schema(
@@ -125,8 +124,6 @@ const PromotionSchema = new mongoose.Schema(
         images: [{ type: String }],
 
         // Scope
-        scope: { type: String, enum: ["category", "product", "brand"], default: "product" },
-
         scope: { type: String, enum: ["category", "product"], default: "product" },
         categories: [
             {
@@ -135,15 +132,6 @@ const PromotionSchema = new mongoose.Schema(
                 customId: { type: String },
             },
         ],
-        // models/Promotion.js
-        brands: [
-            {
-                brand: { type: mongoose.Schema.Types.ObjectId, ref: "Brand" },
-                slug: { type: String },
-                customId: { type: String },
-            },
-        ],
-
         products: [{ type: mongoose.Schema.Types.ObjectId, ref: "Product" }],
 
         // Back-compat for "discount" type
