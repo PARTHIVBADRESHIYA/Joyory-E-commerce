@@ -5,9 +5,9 @@ import Review from '../../models/Review.js';
 import Order from '../../models/Order.js';
 import SkinType from '../../models/SkinType.js';
 import Category from '../../models/Category.js';
-import { getDescendantCategoryIds } from '../../middlewares/utils/categoryUtils.js';
+import { getDescendantCategoryIds,getCategoryFallbackChain } from '../../middlewares/utils/categoryUtils.js';
 import { getRecommendations } from '../../middlewares/utils/recommendationService.js';
-import {formatProductCard} from '../../middlewares/utils/recommendationService.js';
+import { formatProductCard } from '../../middlewares/utils/recommendationService.js';
 import mongoose from 'mongoose';
 
 // 🔧 Centralized helper for shades/colors
@@ -31,9 +31,6 @@ export const normalizeImages = (images = []) => {
         img.startsWith('http') ? img : `${process.env.BASE_URL}/${img}`
     );
 };
-
-
-
 
 // ✅ Filtered products with recommendations (trending)
 export const getAllFilteredProducts = async (req, res) => {
@@ -165,19 +162,21 @@ export const getAllFilteredProducts = async (req, res) => {
         res.status(500).json({ message: 'Server error', error: err.message });
     }
 };
-// ✅ Single product with recommendations
+// ✅ Single product with recommendations, messages & parent category fallback
 export const getSingleProduct = async (req, res) => {
     try {
-        // Increment view count
+        const productId = req.params.id;
+
+        // 🔹 Increment view count
         const product = await Product.findByIdAndUpdate(
-            req.params.id,
+            productId,
             { $inc: { views: 1 } },
             { new: true, lean: true }
         );
         if (!product) return res.status(404).json({ message: 'Product not found' });
 
-        // Track recent products & categories for logged-in users
-        if (req.user && req.user.id) {
+        // 🔹 Track recent products & categories for logged-in users
+        if (req.user?.id) {
             const categoryValue = mongoose.Types.ObjectId.isValid(product.category)
                 ? product.category
                 : product.category?.slug || product.category?.toString();
@@ -194,27 +193,27 @@ export const getSingleProduct = async (req, res) => {
             });
         }
 
-        // Fetch category details
+        // 🔹 Fetch category details
         let categoryObj = null;
         if (mongoose.Types.ObjectId.isValid(product.category)) {
-            categoryObj = await Category.findById(product.category).select("name slug").lean();
+            categoryObj = await Category.findById(product.category)
+                .select("name slug parent")
+                .lean();
         }
 
-        // Calculate average rating
+        // 🔹 Calculate average rating
         const allActiveReviews = await Review.find({ productId: product._id, status: "Active" }).select("rating");
         const totalRating = allActiveReviews.reduce((sum, r) => sum + r.rating, 0);
         const avgRating = allActiveReviews.length ? parseFloat((totalRating / allActiveReviews.length).toFixed(1)) : 0;
 
         const { shadeOptions, colorOptions } = buildOptions(product);
 
-        // 🔥 Attach recommendations using updated service
-        const [moreLikeThis, boughtTogether, alsoViewed] = await Promise.all([
-            getRecommendations({ mode: "moreLikeThis", productId: product._id, limit: 6 }),
-            getRecommendations({ mode: "boughtTogether", productId: product._id, limit: 6 }),
-            getRecommendations({ mode: "alsoViewed", productId: product._id, limit: 6 })
-        ]);
+        // 🔹 Get recommendations from centralized service
+        const moreLikeThis = await getRecommendations({ mode: "moreLikeThis", productId: product._id, limit: 6 });
+        const boughtTogether = await getRecommendations({ mode: "boughtTogether", productId: product._id, limit: 6 });
+        const alsoViewed = await getRecommendations({ mode: "alsoViewed", productId: product._id, userId: req.user?.id, limit: 6 });
 
-        // Return product with full details + recommendations
+        // 🔹 Return product + recommendations
         res.status(200).json({
             _id: product._id,
             name: product.name,
@@ -222,9 +221,9 @@ export const getSingleProduct = async (req, res) => {
             variant: product.variant,
             description: product.description || "",
             summary: product.summary || "",
-            features: product.features || "",
+            features: product.features || [],
             howToUse: product.howToUse || "",
-            ingredients: product.ingredients || "",
+            ingredients: product.ingredients || [],
             price: product.price,
             mrp: product.mrp,
             discountPercent: product.mrp ? Math.round(((product.mrp - product.price) / product.mrp) * 100) : 0,
@@ -237,9 +236,9 @@ export const getSingleProduct = async (req, res) => {
             totalRatings: allActiveReviews.length,
             inStock: product.inStock ?? true,
             recommendations: {
-                moreLikeThis: moreLikeThis.products || [],
-                boughtTogether: boughtTogether.products || [],
-                alsoViewed: alsoViewed.products || []
+                moreLikeThis: { products: moreLikeThis.products, message: moreLikeThis.message },
+                boughtTogether: { products: boughtTogether.products, message: boughtTogether.message },
+                alsoViewed: { products: alsoViewed.products, message: alsoViewed.message }
             }
         });
 
@@ -250,7 +249,8 @@ export const getSingleProduct = async (req, res) => {
 };
 
 
-// ✅ Products by category with recommendations
+
+// ✅ Products by category with full recommendations
 export const getProductsByCategory = async (req, res) => {
     try {
         const slug = req.params.slug.toLowerCase();
@@ -261,9 +261,13 @@ export const getProductsByCategory = async (req, res) => {
         // 🔹 Fetch category by slug or ObjectId
         let category = null;
         if (mongoose.Types.ObjectId.isValid(slug)) {
-            category = await Category.findById(slug).select("name slug bannerImage thumbnailImage ancestors").lean();
+            category = await Category.findById(slug)
+                .select("name slug bannerImage thumbnailImage ancestors")
+                .lean();
         } else {
-            category = await Category.findOne({ slug }).select("name slug bannerImage thumbnailImage ancestors").lean();
+            category = await Category.findOne({ slug })
+                .select("name slug bannerImage thumbnailImage ancestors")
+                .lean();
         }
         if (!category) return res.status(404).json({ message: "Category not found" });
 
@@ -297,7 +301,6 @@ export const getProductsByCategory = async (req, res) => {
             .limit(limit)
             .lean();
 
-        // 🔹 Format products using formatProductCard
         const cards = await Promise.all(products.map(p => formatProductCard(p)));
 
         // 🔹 Breadcrumb from ancestors
@@ -308,10 +311,28 @@ export const getProductsByCategory = async (req, res) => {
             ancestors = category.ancestors.map(id => ancestorDocs.find(a => String(a._id) === String(id))).filter(Boolean);
         }
 
-        // 🔹 Top-selling recommendations for category
-        const topSelling = await getRecommendations({ mode: "topSelling", categorySlug: category.slug, limit: 6 });
+        // 🔹 Fetch recommendations in parallel
+        const firstProduct = products[0] || await Product.findOne({ category: category._id }).lean();
 
-        res.status(200).json({
+        let [topSelling, moreLikeThis, trending] = await Promise.all([
+            getRecommendations({ mode: "topSelling", categorySlug: category.slug, limit: 6 }),
+            firstProduct ? getRecommendations({ mode: "moreLikeThis", productId: firstProduct._id, limit: 6 }) : Promise.resolve({ products: [] }),
+            getRecommendations({ mode: "trending", limit: 6 })
+        ]);
+
+        // 🔹 Filter out duplicates
+        const usedIds = new Set();
+        const filterUnique = (rec) => {
+            if (!rec?.products?.length) return [];
+            return rec.products.filter(p => {
+                const id = p._id.toString();
+                if (usedIds.has(id)) return false;
+                usedIds.add(id);
+                return true;
+            });
+        };
+
+        return res.status(200).json({
             category,
             breadcrumb: ancestors,
             products: cards,
@@ -321,17 +342,14 @@ export const getProductsByCategory = async (req, res) => {
                 limit,
                 totalPages: Math.ceil(total / limit),
                 hasMore: page < Math.ceil(total / limit)
-            },
-            recommendations: topSelling.products || []
+            }
         });
 
     } catch (err) {
         console.error("❌ getProductsByCategory error:", err);
-        res.status(500).json({ message: "Server error", error: err.message });
+        return res.status(500).json({ message: "Server error", error: err.message });
     }
 };
-
-// (Other controllers remain unchanged unless you want extra recs)
 
 
 // 🔥 Top Selling Products

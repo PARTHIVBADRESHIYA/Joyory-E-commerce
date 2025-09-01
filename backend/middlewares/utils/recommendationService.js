@@ -5,6 +5,7 @@ import Category from "../../models/Category.js";
 import Order from "../../models/Order.js";
 import ProductViewLog from "../../models/ProductViewLog.js";
 import { buildOptions, normalizeImages } from "../../controllers/user/userProductController.js";
+import { getCategoryFallbackChain } from "../../middlewares/utils/categoryUtils.js";
 
 /**
  * Format a single product into a full card
@@ -27,12 +28,9 @@ export const formatProductCard = async (product) => {
         price: product.price,
         mrp: product.mrp,
         discountPercent: product.mrp ? Math.round(((product.mrp - product.price) / product.mrp) * 100) : 0,
-        summary: product.summary || product.description?.slice(0, 100) || "",
         images: normalizeImages(product.images || []),
-        category: categoryObj,
         shadeOptions,
         colorOptions,
-        foundationVariants: product.foundationVariants || [],
         avgRating: product.avgRating || 0,
         totalRatings: product.commentsCount || 0,
         inStock: product.inStock ?? true
@@ -40,14 +38,13 @@ export const formatProductCard = async (product) => {
 };
 
 /**
- * Universal Recommendation Service
+ * Universal Recommendation Service with parent-category fallback
  */
 export const getRecommendations = async ({ mode, productId, categorySlug, userId, limit = 6 }) => {
     try {
         let products = [];
         let message = "";
 
-        // Helper: trending products
         const getTrending = async () => {
             return await Product.find({ sales: { $gt: 0 } })
                 .sort({ sales: -1 })
@@ -55,121 +52,130 @@ export const getRecommendations = async ({ mode, productId, categorySlug, userId
                 .lean();
         };
 
+        const fallbackCategoryChain = async (categoryId) => {
+            const chain = await getCategoryFallbackChain(await Category.findById(categoryId).lean());
+            for (const cat of chain) {
+                const prods = await Product.find({ category: cat._id })
+                    .sort({ sales: -1 })
+                    .limit(Number(limit))
+                    .lean();
+                if (prods.length) return { products: prods, fallbackFrom: cat.name };
+            }
+            return { products: [], fallbackFrom: null };
+        };
+
         switch (mode) {
             case "moreLikeThis": {
                 const product = await Product.findById(productId).lean();
                 if (!product) return { success: false, products: [], message: "Product not found" };
 
+                // Same brand + category
                 products = await Product.find({
                     _id: { $ne: product._id },
                     category: product.category,
                     brand: product.brand
                 }).sort({ sales: -1 }).limit(Number(limit)).lean();
 
-                // Fallbacks
+                let fallbackFrom = null;
+
                 if (!products.length) {
+                    // Same category only
                     products = await Product.find({
                         _id: { $ne: product._id },
                         category: product.category
                     }).sort({ sales: -1 }).limit(Number(limit)).lean();
+                    fallbackFrom = "same category";
                 }
-                if (!products.length) products = await getTrending();
-                message = "More like this";
-                break;
-            }
 
-            case "alsoViewed": {
-                const logs = await ProductViewLog.aggregate([
-                    { $match: { productId: new mongoose.Types.ObjectId(productId) } },
-                    { $group: { _id: "$userId" } },
-                    {
-                        $lookup: {
-                            from: "productviewlogs",
-                            localField: "_id",
-                            foreignField: "userId",
-                            as: "otherViews"
-                        }
-                    },
-                    { $unwind: "$otherViews" },
-                    { $match: { "otherViews.productId": { $ne: new mongoose.Types.ObjectId(productId) } } },
-                    { $group: { _id: "$otherViews.productId", count: { $sum: 1 } } },
-                    { $sort: { count: -1 } },
-                    { $limit: Number(limit) }
-                ]);
+                if (!products.length && product.category) {
+                    // Parent/grandparent chain fallback
+                    const fallback = await fallbackCategoryChain(product.category);
+                    products = fallback.products;
+                    fallbackFrom = fallback.fallbackFrom ? `parent category: ${fallback.fallbackFrom}` : null;
+                }
 
-                const productIds = logs.map(l => l._id);
-                products = await Product.find({ _id: { $in: productIds } }).lean();
+                if (!products.length) {
+                    products = await getTrending();
+                    fallbackFrom = "trending products";
+                }
 
-                if (!products.length) products = (await getRecommendations({ mode: "moreLikeThis", productId, limit })).products;
-                if (!products.length) products = await getTrending();
-                message = "Customers also viewed";
+                message = fallbackFrom ? `More like this (showing from ${fallbackFrom})` : "More like this";
                 break;
             }
 
             case "boughtTogether": {
                 const orders = await Order.aggregate([
                     { $unwind: "$products" },
-                    { $match: { "products.productId": { $ne: new mongoose.Types.ObjectId(productId) }, "products.productId": { $exists: true } } },
+                    { $match: { "products.productId": { $ne: new mongoose.Types.ObjectId(productId) } } },
                     { $group: { _id: "$products.productId", count: { $sum: 1 } } },
                     { $sort: { count: -1 } },
                     { $limit: Number(limit) }
                 ]);
-
                 const productIds = orders.map(o => o._id);
                 products = await Product.find({ _id: { $in: productIds } }).lean();
+
+                let fallbackFrom = null;
 
                 if (!products.length) {
                     const prod = await Product.findById(productId).lean();
                     if (prod?.category) {
-                        products = await Product.find({
-                            _id: { $ne: prod._id },
-                            category: prod.category
-                        }).sort({ sales: -1 }).limit(Number(limit)).lean();
+                        const fallback = await fallbackCategoryChain(prod.category);
+                        products = fallback.products;
+                        fallbackFrom = fallback.fallbackFrom ? `parent category: ${fallback.fallbackFrom}` : null;
                     }
                 }
 
-                if (!products.length) products = await getTrending();
-                message = "Frequently bought together";
+                if (!products.length) {
+                    products = await getTrending();
+                    fallbackFrom = "trending products";
+                }
+
+                message = fallbackFrom ? `Frequently bought together (showing from ${fallbackFrom})` : "Frequently bought together";
                 break;
             }
 
-            case "topSelling": {
-                const category = await Category.findOne({ slug: categorySlug }).lean();
-                if (!category) return { success: false, products: [], message: "Category not found" };
-
-                products = await Product.find({ category: category._id }).sort({ sales: -1 }).limit(Number(limit)).lean();
-                if (!products.length) products = await getTrending();
-                message = `Top selling in ${category.name}`;
-                break;
-            }
-
-            case "trending": {
-                products = await getTrending();
-                message = "Trending now";
-                break;
-            }
-
-            case "recentlyViewed": {
+            case "alsoViewed": {
                 const viewed = await ProductViewLog.find({ userId })
                     .sort({ createdAt: -1 })
                     .limit(Number(limit))
                     .populate("productId")
                     .lean();
-
                 products = viewed.map(v => v.productId);
-                if (!products.length) products = await getTrending();
-                message = "Recently viewed by you";
+
+                let fallbackFrom = null;
+
+                if (!products.length) {
+                    // Optional: fallback to top-selling in the same category if productId given
+                    if (productId) {
+                        const prod = await Product.findById(productId).lean();
+                        if (prod?.category) {
+                            const fallback = await fallbackCategoryChain(prod.category);
+                            products = fallback.products;
+                            fallbackFrom = fallback.fallbackFrom ? `parent category: ${fallback.fallbackFrom}` : null;
+                        }
+                    }
+                }
+
+                if (!products.length) {
+                    products = await getTrending();
+                    fallbackFrom = "trending products";
+                }
+
+                message = fallbackFrom ? `Also viewed (showing from ${fallbackFrom})` : "Also viewed by others";
                 break;
             }
 
-            default:
-                return { success: false, products: [], message: "Invalid mode" };
+            default: {
+                products = await getTrending();
+                message = "Trending products";
+            }
         }
 
-        // Format all products fully
+        // Format
         products = await Promise.all(products.map(p => formatProductCard(p)));
 
         return { success: true, products, message };
+
     } catch (err) {
         console.error("❌ Recommendation service error:", err);
         return { success: false, products: [], message: "Server error" };
