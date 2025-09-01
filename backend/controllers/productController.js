@@ -1,24 +1,263 @@
+// import util from 'util';
+// import Product from '../models/Product.js';
+// import cloudinary from '../middlewares/utils/cloudinary.js';
+// import Category from '../models/Category.js'; // new import
+// import Formulation from '../models/shade/Formulation.js';
+// import mongoose from 'mongoose';
+
+
+
+// export const resolveFormulationId = async (input) => {
+//     if (!input) return null;
+
+//     const formulationInput = String(input).trim();
+
+//     // Direct ObjectId
+//     if (mongoose.Types.ObjectId.isValid(formulationInput)) {
+//         return formulationInput;
+//     }
+
+//     // Try by `key`
+//     const formulationDoc = await Formulation.findOne({
+//         key: { $regex: `^${formulationInput}$`, $options: "i" }
+//     });
+
+//     if (!formulationDoc) {
+//         throw new Error(`Formulation "${formulationInput}" not found`);
+//     }
+
+//     return formulationDoc._id;
+// };
+
+// const addProductController = async (req, res) => {
+//     try {
+//         const {
+//             name, variant, summary, description, features, howToUse,
+//             price, buyingPrice, brand, category, categories,
+//             quantity, expiryDate
+//         } = req.body;
+
+//         // ✅ Prevent duplicate product names
+//         const existingProduct = await Product.findOne({ name: name.trim() });
+//         if (existingProduct) {
+//             return res.status(400).json({
+//                 message: `Product with name "${name}" already exists`
+//             });
+//         }
+
+//         // ✅ Ensure at least one category provided
+//         if (!category && (!categories || categories.length === 0)) {
+//             return res.status(400).json({ message: 'Category is required' });
+//         }
+
+//         // ✅ Normalize categories array
+//         let finalCategories = [];
+//         if (categories && categories.length > 0) {
+//             finalCategories = Array.isArray(categories) ? categories : [categories];
+//         } else if (category) {
+//             finalCategories = [category];
+//         }
+
+//         // ✅ Resolve category names → ObjectIds
+//         const resolvedCategories = [];
+//         for (let cat of finalCategories) {
+//             if (!cat) continue;
+//             const trimmedCat = String(cat).trim();
+
+//             if (mongoose.Types.ObjectId.isValid(trimmedCat)) {
+//                 resolvedCategories.push(trimmedCat);
+//             } else {
+//                 const foundCat = await Category.findOne({
+//                     name: { $regex: `^${trimmedCat}$`, $options: 'i' }
+//                 });
+//                 if (!foundCat) {
+//                     return res.status(400).json({ message: `Category "${trimmedCat}" not found` });
+//                 }
+//                 resolvedCategories.push(foundCat._id);
+//             }
+//         }
+
+//         // ✅ Validate all resolved IDs exist
+//         const foundCategories = await Category.find({ _id: { $in: resolvedCategories } });
+//         if (foundCategories.length !== resolvedCategories.length) {
+//             return res.status(400).json({ message: 'One or more category IDs are invalid' });
+//         }
+
+//         // ✅ Build category hierarchy from leaf to root
+//         const buildCategoryHierarchy = async (leafCategoryId) => {
+//             let hierarchy = [];
+//             let current = await Category.findById(leafCategoryId);
+//             while (current) {
+//                 hierarchy.unshift(current._id);
+//                 if (!current.parent) break;
+//                 current = await Category.findById(current.parent);
+//             }
+//             return hierarchy;
+//         };
+//         const categoryHierarchy = await buildCategoryHierarchy(resolvedCategories[0]);
+
+//         // ✅ Helper to parse arrays
+//         const parseArray = (input) => {
+//             try {
+//                 if (typeof input === 'string') return JSON.parse(input);
+//                 return Array.isArray(input) ? input : [input];
+//             } catch {
+//                 return [input];
+//             }
+//         };
+
+//         const productTags = parseArray(req.body.productTags);
+
+//         // ✅ Numeric checks
+//         const thresholdValue = Number(req.body.thresholdValue);
+//         const parsedPrice = Number(price);
+//         const parsedBuyingPrice = Number(buyingPrice);
+//         const parsedQuantity = Number(quantity);
+
+//         if (isNaN(thresholdValue)) return res.status(400).json({ message: "❌ Invalid thresholdValue" });
+//         if (isNaN(parsedPrice) || isNaN(parsedBuyingPrice) || isNaN(parsedQuantity)) {
+//             return res.status(400).json({ message: "❌ Invalid numeric values" });
+//         }
+
+//         // ✅ Image handling
+//         const uploadImageFromUrl = async (url) => {
+//             const result = await cloudinary.uploader.upload(url, {
+//                 folder: 'products',
+//                 resource_type: 'image',
+//             });
+//             return result.secure_url;
+//         };
+
+//         let images = [];
+//         if (req.files?.length > 0) {
+//             images.push(...req.files.map(file => file.secure_url || file.path || file.url));
+//         }
+//         if (req.body.images || req.body.imageUrls) {
+//             let raw = req.body.images || req.body.imageUrls;
+//             try {
+//                 if (typeof raw === 'string') raw = JSON.parse(raw);
+//                 const urls = Array.isArray(raw) ? raw : [raw];
+//                 for (const url of urls) {
+//                     try {
+//                         const uploaded = await uploadImageFromUrl(url);
+//                         images.push(uploaded);
+//                     } catch (err) {
+//                         console.warn(`❌ Failed to upload image from URL: ${url}`, err.message);
+//                     }
+//                 }
+//             } catch (err) {
+//                 console.warn("⚠️ Could not upload image URLs:", err.message);
+//             }
+//         }
+
+
+//         // ✅ Resolve formulation
+//         let formulationId = null;
+//         if (req.body.formulation) {
+//             try {
+//                 formulationId = await resolveFormulationId(req.body.formulation);
+//             } catch (err) {
+//                 return res.status(400).json({ message: err.message });
+//             }
+//         }
+
+
+
+//         // ✅ Handle foundationVariants → auto fill shadeOptions & colorOptions
+//         let foundationVariants = [];
+//         let shadeOptions = [];
+//         let colorOptions = [];
+
+//         if (req.body.foundationVariants) {
+//             let variants = req.body.foundationVariants;
+//             if (typeof variants === "string") {
+//                 try {
+//                     variants = JSON.parse(variants);
+//                 } catch (err) {
+//                     console.warn("⚠️ Could not parse foundationVariants JSON:", err.message);
+//                     variants = [];
+//                 }
+//             }
+//             if (Array.isArray(variants)) {
+//                 foundationVariants = variants.map(v => ({
+//                     ...v,
+//                     isActive: v.isActive !== false, // default true
+//                     createdAt: new Date()
+//                 }));
+//                 shadeOptions = foundationVariants.map(v => v.shadeName).filter(Boolean);
+//                 colorOptions = foundationVariants.map(v => v.hex).filter(Boolean);
+//             }
+//         }
+
+//         // ✅ Stock status
+//         const status =
+//             parsedQuantity === 0 ? 'Out of stock' :
+//                 parsedQuantity < thresholdValue ? 'Low stock' :
+//                     'In-stock';
+
+//         // ✅ Create product
+//         const product = new Product({
+//             name,
+//             variant,
+//             summary,
+//             description,
+//             features,
+//             howToUse,
+//             formulation: formulationId,
+//             price: parsedPrice,
+//             buyingPrice: parsedBuyingPrice,
+//             quantity: parsedQuantity,
+//             thresholdValue,
+//             expiryDate,
+//             images,
+//             brand,
+//             category: resolvedCategories[0], // main category
+//             categories: resolvedCategories,
+//             categoryHierarchy,
+//             status,
+//             productTags,
+//             shadeOptions,
+//             colorOptions,
+//             foundationVariants,
+//             sales: 0,
+//             views: 0,
+//             commentsCount: 0,
+//             affiliateEarnings: 0,
+//             affiliateClicks: 0,
+//         });
+
+//         await product.save();
+//         res.status(201).json({ message: '✅ Product created successfully', product });
+
+//     } catch (error) {
+//         console.error("❌ Product placement error:", util.inspect(error, { showHidden: false, depth: null }));
+//         res.status(500).json({
+//             message: '❌ Product placement failed',
+//             error: error.message || 'Unknown error',
+//             stack: error.stack
+//         });
+//     }
+// };
+
+
+
+
+
 import util from 'util';
 import Product from '../models/Product.js';
 import cloudinary from '../middlewares/utils/cloudinary.js';
-import ProductAttribute from '../models/ProductAttribute.js';
-import Category from '../models/Category.js'; // new import
+import Category from '../models/Category.js';
 import Formulation from '../models/shade/Formulation.js';
 import mongoose from 'mongoose';
 
-
-
 export const resolveFormulationId = async (input) => {
     if (!input) return null;
-
     const formulationInput = String(input).trim();
 
-    // Direct ObjectId
     if (mongoose.Types.ObjectId.isValid(formulationInput)) {
         return formulationInput;
     }
 
-    // Try by `key`
     const formulationDoc = await Formulation.findOne({
         key: { $regex: `^${formulationInput}$`, $options: "i" }
     });
@@ -51,7 +290,7 @@ const addProductController = async (req, res) => {
             return res.status(400).json({ message: 'Category is required' });
         }
 
-        // ✅ Normalize categories array
+        // ✅ Normalize categories
         let finalCategories = [];
         if (categories && categories.length > 0) {
             finalCategories = Array.isArray(categories) ? categories : [categories];
@@ -59,12 +298,11 @@ const addProductController = async (req, res) => {
             finalCategories = [category];
         }
 
-        // ✅ Resolve category names → ObjectIds
+        // ✅ Resolve categories to ObjectIds
         const resolvedCategories = [];
         for (let cat of finalCategories) {
             if (!cat) continue;
             const trimmedCat = String(cat).trim();
-
             if (mongoose.Types.ObjectId.isValid(trimmedCat)) {
                 resolvedCategories.push(trimmedCat);
             } else {
@@ -78,13 +316,12 @@ const addProductController = async (req, res) => {
             }
         }
 
-        // ✅ Validate all resolved IDs exist
         const foundCategories = await Category.find({ _id: { $in: resolvedCategories } });
         if (foundCategories.length !== resolvedCategories.length) {
             return res.status(400).json({ message: 'One or more category IDs are invalid' });
         }
 
-        // ✅ Build category hierarchy from leaf to root
+        // ✅ Build hierarchy
         const buildCategoryHierarchy = async (leafCategoryId) => {
             let hierarchy = [];
             let current = await Category.findById(leafCategoryId);
@@ -97,7 +334,7 @@ const addProductController = async (req, res) => {
         };
         const categoryHierarchy = await buildCategoryHierarchy(resolvedCategories[0]);
 
-        // ✅ Helper to parse arrays
+        // ✅ Helper parseArray
         const parseArray = (input) => {
             try {
                 if (typeof input === 'string') return JSON.parse(input);
@@ -151,7 +388,6 @@ const addProductController = async (req, res) => {
             }
         }
 
-
         // ✅ Resolve formulation
         let formulationId = null;
         if (req.body.formulation) {
@@ -162,13 +398,10 @@ const addProductController = async (req, res) => {
             }
         }
 
-
-
-        // ✅ Handle foundationVariants → auto fill shadeOptions & colorOptions
+        // ✅ FoundationVariants logic (unchanged)
         let foundationVariants = [];
         let shadeOptions = [];
         let colorOptions = [];
-
         if (req.body.foundationVariants) {
             let variants = req.body.foundationVariants;
             if (typeof variants === "string") {
@@ -182,7 +415,7 @@ const addProductController = async (req, res) => {
             if (Array.isArray(variants)) {
                 foundationVariants = variants.map(v => ({
                     ...v,
-                    isActive: v.isActive !== false, // default true
+                    isActive: v.isActive !== false,
                     createdAt: new Date()
                 }));
                 shadeOptions = foundationVariants.map(v => v.shadeName).filter(Boolean);
@@ -195,6 +428,17 @@ const addProductController = async (req, res) => {
             parsedQuantity === 0 ? 'Out of stock' :
                 parsedQuantity < thresholdValue ? 'Low stock' :
                     'In-stock';
+
+        // ✅ Extract dynamic category attributes
+        let attributes = {};
+        const mainCategory = foundCategories[0];
+        if (mainCategory?.attributes?.length > 0) {
+            for (const attr of mainCategory.attributes) {
+                if (req.body[attr.key] !== undefined) {
+                    attributes[attr.key] = req.body[attr.key];
+                }
+            }
+        }
 
         // ✅ Create product
         const product = new Product({
@@ -212,7 +456,7 @@ const addProductController = async (req, res) => {
             expiryDate,
             images,
             brand,
-            category: resolvedCategories[0], // main category
+            category: resolvedCategories[0],
             categories: resolvedCategories,
             categoryHierarchy,
             status,
@@ -225,6 +469,7 @@ const addProductController = async (req, res) => {
             commentsCount: 0,
             affiliateEarnings: 0,
             affiliateClicks: 0,
+            attributes // 👈 dynamic attributes
         });
 
         await product.save();
@@ -239,6 +484,7 @@ const addProductController = async (req, res) => {
         });
     }
 };
+
 
 // GET ALL PRODUCTS (supports nested category filtering)
 const getAllProducts = async (req, res) => {
@@ -409,6 +655,142 @@ const updateProductStock = async (req, res) => {
 //         res.status(500).json({ message: 'Failed to update product', error: error.message });
 //     }
 // };
+// const updateProductById = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+
+//         const parseArray = (input) => {
+//             try {
+//                 if (typeof input === 'string') return JSON.parse(input);
+//                 return Array.isArray(input) ? input : [input];
+//             } catch {
+//                 return [input];
+//             }
+//         };
+
+//         const updateData = { ...req.body };
+
+//         if (req.body.price) updateData.price = Number(req.body.price);
+//         if (req.body.buyingPrice) updateData.buyingPrice = Number(req.body.buyingPrice);
+//         if (req.body.quantity) updateData.quantity = Number(req.body.quantity);
+//         if (req.body.thresholdValue) updateData.thresholdValue = Number(req.body.thresholdValue);
+
+//         if (req.body.shadeOptions) updateData.shadeOptions = parseArray(req.body.shadeOptions);
+//         if (req.body.colorOptions) updateData.colorOptions = parseArray(req.body.colorOptions);
+//         if (req.body.productTags) updateData.productTags = parseArray(req.body.productTags);
+
+//         // ✅ Handle images
+//         if (req.files?.length > 0) {
+//             updateData.images = req.files.map(file => file.path);
+//         } else if (req.body.images || req.body.imageUrls) {
+//             let raw = req.body.images || req.body.imageUrls;
+//             try {
+//                 if (typeof raw === 'string') raw = JSON.parse(raw);
+//             } catch (err) {
+//                 console.warn("⚠️ Could not parse imageUrls:", raw);
+//             }
+//             updateData.images = Array.isArray(raw) ? raw : [raw];
+//         }
+
+//         // ✅ Auto status based on stock
+//         if (updateData.quantity !== undefined && updateData.thresholdValue !== undefined) {
+//             if (updateData.quantity === 0) {
+//                 updateData.status = 'Out of stock';
+//             } else if (updateData.quantity < updateData.thresholdValue) {
+//                 updateData.status = 'Low stock';
+//             } else {
+//                 updateData.status = 'In-stock';
+//             }
+//         }
+
+//         // ✅ Validate category if updated
+//         if (updateData.category) {
+//             let categoryDoc;
+//             if (mongoose.Types.ObjectId.isValid(updateData.category)) {
+//                 categoryDoc = await Category.findById(updateData.category);
+//             } else {
+//                 categoryDoc = await Category.findOne({ name: updateData.category });
+//             }
+
+//             if (!categoryDoc) {
+//                 return res.status(400).json({ message: 'Invalid category (ID or name not found)' });
+//             }
+
+//             updateData.category = categoryDoc._id;
+//         }
+
+//         // ✅ Sync shadeOptions & colorOptions from foundationVariants
+//         if (req.body.foundationVariants) {
+//             let variants = req.body.foundationVariants;
+//             if (typeof variants === "string") {
+//                 try {
+//                     variants = JSON.parse(variants);
+//                 } catch (err) {
+//                     console.warn("⚠️ Could not parse foundationVariants JSON:", err.message);
+//                     variants = [];
+//                 }
+//             }
+
+//             if (Array.isArray(variants)) {
+//                 updateData.foundationVariants = variants;
+
+//                 // Auto-fill shadeOptions & colorOptions
+//                 updateData.shadeOptions = variants.map(v => v.shadeName).filter(Boolean);
+//                 updateData.colorOptions = variants.map(v => v.hex).filter(Boolean);
+//             }
+//         }
+
+//         // ✅ Sync skinTypes
+//         if (req.body.skinTypes) {
+//             let skinTypes = req.body.skinTypes;
+
+//             // Handle stringified array
+//             if (typeof skinTypes === "string") {
+//                 try {
+//                     skinTypes = JSON.parse(skinTypes);
+//                 } catch {
+//                     skinTypes = [skinTypes];
+//                 }
+//             }
+
+//             // Ensure always an array
+//             if (!Array.isArray(skinTypes)) {
+//                 skinTypes = [skinTypes];
+//             }
+
+//             // Cast only valid ObjectIds
+//             updateData.skinTypes = skinTypes
+//                 .map(id => mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null)
+//                 .filter(Boolean);
+//         }
+
+//         // ✅ Handle formulation update
+//         if (req.body.formulation) {
+//             try {
+//                 updateData.formulation = await resolveFormulationId(req.body.formulation);
+//             } catch (err) {
+//                 return res.status(400).json({ message: err.message });
+//             }
+//         }
+
+
+//         // ✅ Update product
+//         const updated = await Product.findByIdAndUpdate(id, updateData, { new: true });
+
+//         if (!updated) {
+//             return res.status(404).json({ message: '❌ Product not found' });
+//         }
+
+//         res.status(200).json({ message: '✅ Product updated successfully', product: updated });
+
+//     } catch (error) {
+//         console.error("❌ Product update error:", error);
+//         res.status(500).json({ message: 'Failed to update product', error: error.message });
+//     }
+// };
+
+
+
 const updateProductById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -465,15 +847,25 @@ const updateProductById = async (req, res) => {
             } else {
                 categoryDoc = await Category.findOne({ name: updateData.category });
             }
-
             if (!categoryDoc) {
                 return res.status(400).json({ message: 'Invalid category (ID or name not found)' });
             }
-
             updateData.category = categoryDoc._id;
+
+            // 🔹 Attach dynamic attributes based on category
+            if (categoryDoc?.attributes?.length > 0) {
+                let attributes = {};
+                for (const attr of categoryDoc.attributes) {
+                    // take value if provided in request
+                    if (req.body[attr.key] !== undefined) {
+                        attributes[attr.key] = req.body[attr.key];
+                    }
+                }
+                updateData.attributes = attributes;
+            }
         }
 
-        // ✅ Sync shadeOptions & colorOptions from foundationVariants
+        // ✅ FoundationVariants logic (unchanged)
         if (req.body.foundationVariants) {
             let variants = req.body.foundationVariants;
             if (typeof variants === "string") {
@@ -484,21 +876,16 @@ const updateProductById = async (req, res) => {
                     variants = [];
                 }
             }
-
             if (Array.isArray(variants)) {
                 updateData.foundationVariants = variants;
-
-                // Auto-fill shadeOptions & colorOptions
                 updateData.shadeOptions = variants.map(v => v.shadeName).filter(Boolean);
                 updateData.colorOptions = variants.map(v => v.hex).filter(Boolean);
             }
         }
 
-        // ✅ Sync skinTypes
+        // ✅ Sync skinTypes (unchanged)
         if (req.body.skinTypes) {
             let skinTypes = req.body.skinTypes;
-
-            // Handle stringified array
             if (typeof skinTypes === "string") {
                 try {
                     skinTypes = JSON.parse(skinTypes);
@@ -506,13 +893,9 @@ const updateProductById = async (req, res) => {
                     skinTypes = [skinTypes];
                 }
             }
-
-            // Ensure always an array
             if (!Array.isArray(skinTypes)) {
                 skinTypes = [skinTypes];
             }
-
-            // Cast only valid ObjectIds
             updateData.skinTypes = skinTypes
                 .map(id => mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null)
                 .filter(Boolean);
@@ -527,10 +910,8 @@ const updateProductById = async (req, res) => {
             }
         }
 
-
         // ✅ Update product
         const updated = await Product.findByIdAndUpdate(id, updateData, { new: true });
-
         if (!updated) {
             return res.status(404).json({ message: '❌ Product not found' });
         }

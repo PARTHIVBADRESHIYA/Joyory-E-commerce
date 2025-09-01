@@ -26,6 +26,16 @@ const categorySchema = new mongoose.Schema({
             ref: "Brand"
         }
     ],
+
+
+    // 👇 New: define attributes this category supports
+    attributes: [
+        {
+            key: { type: String, required: true }, // e.g. "shadeOptions"
+            label: String,                          // e.g. "Available Shades"
+            type: { type: String, enum: ["string", "number", "color", "array"], default: "string" }
+        }
+    ],
     bannerImage: { type: String, default: null },
     thumbnailImage: { type: String, default: null }
     ,// URL for top banner
