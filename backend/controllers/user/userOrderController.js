@@ -461,6 +461,12 @@ export const initiateOrderFromCart = async (req, res) => {
 export const getOrderTracking = async (req, res) => {
     try {
         const { id } = req.params;
+
+        // Validate ObjectId upfront
+        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: "Invalid order ID" });
+        }
+
         const order = await Order.findById(id).populate("products.productId");
         if (!order) {
             return res.status(404).json({ message: "Order not found" });
@@ -468,29 +474,33 @@ export const getOrderTracking = async (req, res) => {
 
         let liveTracking = null;
 
-        // ✅ If order has AWB code, fetch live tracking from Shiprocket
+        // ✅ Fetch Shiprocket tracking only if AWB exists
         if (order.shipment?.awb_code) {
-            const token = await getShiprocketToken();
             try {
+                const token = await getShiprocketToken();
                 const trackRes = await axios.get(
                     `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${order.shipment.awb_code}`,
-                    { headers: { Authorization: `Bearer ${token}` } }
+                    { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 } // ⏱ 10s safety timeout
                 );
                 liveTracking = trackRes.data;
             } catch (err) {
                 console.error("❌ Shiprocket tracking fetch failed:", err.response?.data || err.message);
+                // Still send response gracefully
+                liveTracking = { tracking_data: { shipment_status: "Tracking Unavailable" } };
             }
         }
 
-        res.json({
+        // ✅ Always return something
+        return res.json({
             orderId: order._id,
-            status: order.orderStatus, // Pending, Processing, Shipped, etc.
+            status: order.orderStatus,
             shipment: {
                 shipment_id: order.shipment?.shipment_id || null,
                 awb_code: order.shipment?.awb_code || null,
                 tracking_url: order.shipment?.tracking_url || null,
                 courier_id: order.shipment?.courier_id || null,
-                courier_name: liveTracking?.tracking_data?.courier_name || order.shipment?.courier_name || null,
+                courier_name:
+                    liveTracking?.tracking_data?.courier_name || order.shipment?.courier_name || null,
                 current_status:
                     liveTracking?.tracking_data?.shipment_status ||
                     order.shipment?.status ||
@@ -515,12 +525,14 @@ export const getOrderTracking = async (req, res) => {
             createdAt: order.createdAt,
         });
     } catch (err) {
-        res.status(500).json({
+        console.error("🔥 getOrderTracking failed:", err.message);
+        return res.status(500).json({
             message: "Failed to fetch order tracking",
             error: err.message,
         });
     }
 };
+
 
 
 

@@ -36,7 +36,7 @@ const PromotionSchema = new mongoose.Schema(
         images: [{ type: String }],
 
         // Scope
-        scope: { type: String, enum: ["category", "product", "brand"], default: "product" },
+        scope: { type: String, enum: ["category", "product", "brand","global"], default: "global" },
 
         categories: [
             {
