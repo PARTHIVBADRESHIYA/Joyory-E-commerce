@@ -7,6 +7,7 @@ import SkinType from '../../models/SkinType.js';
 import Category from '../../models/Category.js';
 import { getDescendantCategoryIds } from '../../middlewares/utils/categoryUtils.js';
 import { getRecommendations } from '../../middlewares/utils/recommendationService.js';
+import {formatProductCard} from '../../middlewares/utils/recommendationService.js';
 import mongoose from 'mongoose';
 
 // 🔧 Centralized helper for shades/colors

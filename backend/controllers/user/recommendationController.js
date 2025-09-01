@@ -193,11 +193,11 @@ export const getHomepageSections = async (req, res) => {
         const isGuest = !req.user;
         const sections = [];
 
-        // 1️⃣ Trending
+        // 🔹 1️⃣ Trending
         const trending = await getRecommendations({ mode: "trending", limit: 10 });
         sections.push({ title: "Trending Now", products: trending.success ? trending.products : [] });
 
-        // 2️⃣ New Arrivals
+        // 🔹 2️⃣ New Arrivals
         const newArrivals = await Product.find({ inStock: true })
             .sort({ createdAt: -1 })
             .limit(10)
@@ -205,7 +205,11 @@ export const getHomepageSections = async (req, res) => {
         const formattedNew = await Promise.all(newArrivals.map(formatProductCard));
         sections.push({ title: "New Arrivals", products: formattedNew });
 
-        // 3️⃣ Personalized Recommendations
+        // 🔹 3️⃣ Top Selling (guest + user)
+        const topSelling = await getRecommendations({ mode: "topSelling", categorySlug: "", limit: 10 });
+        sections.push({ title: "Top Selling", products: topSelling.success ? topSelling.products : [] });
+
+        // 🔹 4️⃣ Personalized & Recently Viewed for logged-in users
         if (!isGuest) {
             const user = await User.findById(req.user._id).lean();
             let purchasedIds = [];
@@ -242,6 +246,7 @@ export const getHomepageSections = async (req, res) => {
             const topCategories = Object.keys(categoryScore).sort((a, b) => categoryScore[b] - categoryScore[a]);
             const topBrands = Object.keys(brandScore).sort((a, b) => brandScore[b] - brandScore[a]);
 
+            // Personalized
             let personalized = await Product.find({
                 $or: [
                     topCategories.length ? { category: { $in: topCategories } } : null,
@@ -253,23 +258,22 @@ export const getHomepageSections = async (req, res) => {
             const formattedPersonalized = await Promise.all(personalized.map(formatProductCard));
             if (formattedPersonalized.length) sections.push({ title: "Recommended For You", products: formattedPersonalized });
 
-            // 4️⃣ Recently Viewed
+            // Recently Viewed
             const recentViewed = await getRecommendations({ mode: "recentlyViewed", userId: req.user._id, limit: 10 });
             if (recentViewed.success && recentViewed.products.length) {
                 sections.push({ title: "Recently Viewed", products: recentViewed.products });
             }
 
-            // 5️⃣ Frequently Bought Together / Also Viewed (optional, can rotate)
+            // Also Viewed (optional)
             if (personalized.length) {
-                const sampleProductId = personalized[0]._id;
-                const alsoViewed = await getRecommendations({ mode: "alsoViewed", productId: sampleProductId, limit: 8 });
+                const alsoViewed = await getRecommendations({ mode: "alsoViewed", productId: personalized[0]._id, limit: 8 });
                 if (alsoViewed.success && alsoViewed.products.length) {
                     sections.push({ title: "Customers Also Viewed", products: alsoViewed.products });
                 }
             }
         }
 
-        // 6️⃣ Fallback for guests or empty sections
+        // 🔹 5️⃣ Fallback for guests or empty sections
         if (!sections.length || sections.every(s => !s.products.length)) {
             const defaultRec = await getDefaultRecommendations();
             sections.push({ title: "Recommended for You", products: defaultRec });
@@ -281,6 +285,7 @@ export const getHomepageSections = async (req, res) => {
         return res.status(500).json({ success: false, message: "Failed to fetch homepage sections" });
     }
 };
+
 
 
 
