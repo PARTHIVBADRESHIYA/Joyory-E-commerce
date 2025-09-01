@@ -172,26 +172,119 @@
 //     }
 // };
 
-// controllers/recommendationController.js
 import Product from "../../models/Product.js";
 import User from "../../models/User.js";
 import Order from "../../models/Order.js";
 import Category from "../../models/Category.js";
 import mongoose from "mongoose";
+import { formatProductCard, getRecommendations } from "../../middlewares/utils/recommendationService.js";
 
-// 🔹 Default fallback recommendations (for guests or no data)
-const getDefaultRecommendations = async (req, res) => {
+// 🔹 Default fallback
+export const getDefaultRecommendations = async () => {
+    const bestSellers = await Product.find().sort({ totalSales: -1 }).limit(10).lean();
+    if (bestSellers.length) return Promise.all(bestSellers.map(formatProductCard));
+
+    const random = await Product.aggregate([{ $sample: { size: 10 } }]);
+    return Promise.all(random.map(formatProductCard));
+};
+
+export const getHomepageSections = async (req, res) => {
     try {
-        const bestSellers = await Product.find().sort({ totalSales: -1 }).limit(10);
-        if (bestSellers.length) return res.json(bestSellers);
+        const isGuest = !req.user;
+        const sections = [];
 
-        const random = await Product.aggregate([{ $sample: { size: 10 } }]);
-        return res.json(random);
+        // 1️⃣ Trending
+        const trending = await getRecommendations({ mode: "trending", limit: 10 });
+        sections.push({ title: "Trending Now", products: trending.success ? trending.products : [] });
+
+        // 2️⃣ New Arrivals
+        const newArrivals = await Product.find({ inStock: true })
+            .sort({ createdAt: -1 })
+            .limit(10)
+            .lean();
+        const formattedNew = await Promise.all(newArrivals.map(formatProductCard));
+        sections.push({ title: "New Arrivals", products: formattedNew });
+
+        // 3️⃣ Personalized Recommendations
+        if (!isGuest) {
+            const user = await User.findById(req.user._id).lean();
+            let purchasedIds = [];
+            let userCategories = [];
+            let userBrands = [];
+
+            // Recent orders
+            const orders = await Order.find({ userId: req.user._id })
+                .sort({ createdAt: -1 })
+                .limit(20)
+                .populate("products.productId")
+                .lean();
+
+            orders.forEach(order => {
+                order.products.forEach(item => {
+                    if (item.productId) {
+                        purchasedIds.push(item.productId._id.toString());
+                        if (item.productId.category) userCategories.push(item.productId.category.toString());
+                        if (item.productId.brand) userBrands.push(item.productId.brand);
+                    }
+                });
+            });
+
+            // Browsing history
+            user.recentProducts?.forEach(pid => purchasedIds.push(pid.toString()));
+            user.recentCategories?.forEach(cid => userCategories.push(cid.toString()));
+
+            // Weighted scoring
+            const categoryScore = {};
+            userCategories.forEach(cid => categoryScore[cid] = (categoryScore[cid] || 0) + 3);
+            const brandScore = {};
+            userBrands.forEach(b => brandScore[b] = (brandScore[b] || 0) + 2);
+
+            const topCategories = Object.keys(categoryScore).sort((a, b) => categoryScore[b] - categoryScore[a]);
+            const topBrands = Object.keys(brandScore).sort((a, b) => brandScore[b] - brandScore[a]);
+
+            let personalized = await Product.find({
+                $or: [
+                    topCategories.length ? { category: { $in: topCategories } } : null,
+                    topBrands.length ? { brand: { $in: topBrands } } : null
+                ].filter(Boolean),
+                _id: { $nin: purchasedIds }
+            }).sort({ createdAt: -1 }).limit(10).lean();
+
+            const formattedPersonalized = await Promise.all(personalized.map(formatProductCard));
+            if (formattedPersonalized.length) sections.push({ title: "Recommended For You", products: formattedPersonalized });
+
+            // 4️⃣ Recently Viewed
+            const recentViewed = await getRecommendations({ mode: "recentlyViewed", userId: req.user._id, limit: 10 });
+            if (recentViewed.success && recentViewed.products.length) {
+                sections.push({ title: "Recently Viewed", products: recentViewed.products });
+            }
+
+            // 5️⃣ Frequently Bought Together / Also Viewed (optional, can rotate)
+            if (personalized.length) {
+                const sampleProductId = personalized[0]._id;
+                const alsoViewed = await getRecommendations({ mode: "alsoViewed", productId: sampleProductId, limit: 8 });
+                if (alsoViewed.success && alsoViewed.products.length) {
+                    sections.push({ title: "Customers Also Viewed", products: alsoViewed.products });
+                }
+            }
+        }
+
+        // 6️⃣ Fallback for guests or empty sections
+        if (!sections.length || sections.every(s => !s.products.length)) {
+            const defaultRec = await getDefaultRecommendations();
+            sections.push({ title: "Recommended for You", products: defaultRec });
+        }
+
+        return res.json({ success: true, sections });
     } catch (err) {
-        console.error("❌ Default Recommendations Error:", err);
-        return res.status(500).json({ error: "Failed to fetch default recommendations" });
+        console.error("🔥 Homepage Sections Error:", err);
+        return res.status(500).json({ success: false, message: "Failed to fetch homepage sections" });
     }
 };
+
+
+
+
 
 // export const getPersonalizedRecommendations = async (req, res) => {
 //     try {
@@ -360,176 +453,187 @@ const getDefaultRecommendations = async (req, res) => {
 //         return res.status(500).json({ error: "Failed to fetch personalized recommendations" });
 //     }
 // };
-export const getPersonalizedRecommendations = async (req, res) => {
-    try {
-        // ✅ Guest users → fallback
-        if (!req.user) return getDefaultRecommendations(req, res);
 
-        const userId = req.user.id;
-        const user = await User.findById(userId).populate("savedRecommendations");
-        if (!user) return getDefaultRecommendations(req, res);
 
-        // ✅ Best sellers as fallback pool
-        const bestSellers = await Product.find().sort({ totalSales: -1 }).limit(10);
 
-        // ✅ STEP 1: Fetch recent orders
-        const orders = await Order.find({ user: userId })
-            .sort({ createdAt: -1 })
-            .limit(10)
-            .populate("products.productId");
 
-        let purchasedProductIds = [];
-        let purchasedCategories = [];
-        let purchasedBrands = [];
 
-        orders.forEach(order => {
-            order.products.forEach(item => {
-                if (item.productId) {
-                    purchasedProductIds.push(item.productId._id);
-                    if (item.productId.category) purchasedCategories.push(item.productId.category);
-                    if (item.productId.brand) purchasedBrands.push(item.productId.brand);
-                }
-            });
-        });
 
-        // ✅ STEP 2: Browsing history
-        const recentCategories = user.recentCategories || [];
-        const recentProducts = user.recentProducts || [];
 
-        let recentCategoryIds = [];
-        let recentBrands = [];
 
-        if (recentCategories.length) {
-            // split into ObjectIds vs Strings
-            const objectIdCategories = recentCategories.filter(c => mongoose.Types.ObjectId.isValid(c));
-            const slugCategories = recentCategories
-                .filter(c => typeof c === "string" && !mongoose.Types.ObjectId.isValid(c))
-                .map(c => c.toLowerCase());
 
-            const categoryDocs = await Category.find({
-                $or: [
-                    objectIdCategories.length ? { _id: { $in: objectIdCategories } } : null,
-                    slugCategories.length ? { slug: { $in: slugCategories } } : null,
-                    slugCategories.length ? { name: { $in: slugCategories } } : null
-                ].filter(Boolean)
-            }).select("_id");
 
-            recentCategoryIds = categoryDocs.map(c => c._id);
-        }
 
-        if (recentProducts.length) {
-            const viewedProducts = await Product.find({ _id: { $in: recentProducts } })
-                .select("category brand")
-                .lean();
+// export const getPersonalizedRecommendations = async (req, res) => {
+//     try {
+//         // ✅ Guest users → fallback
+//         if (!req.user) return getDefaultRecommendations(req, res);
 
-            viewedProducts.forEach(p => {
-                if (p.category) recentCategoryIds.push(p.category);
-                if (p.brand) recentBrands.push(p.brand);
-            });
-        }
+//         const userId = req.user.id;
+//         const user = await User.findById(userId).populate("savedRecommendations");
+//         if (!user) return getDefaultRecommendations(req, res);
 
-        // ✅ STEP 3: Weighted scoring
-        const weightedCategories = [
-            ...recentCategoryIds.map(id => ({ id: String(id), weight: 3 })), // browsing > orders
-            ...purchasedCategories.map(id => ({ id: String(id), weight: 1 }))
-        ];
+//         // ✅ Best sellers as fallback pool
+//         const bestSellers = await Product.find().sort({ totalSales: -1 }).limit(10);
 
-        const weightedBrands = [
-            ...recentBrands.map(b => ({ id: b, weight: 2 })),
-            ...purchasedBrands.map(b => ({ id: b, weight: 1 }))
-        ];
+//         // ✅ STEP 1: Fetch recent orders
+//         const orders = await Order.find({ user: userId })
+//             .sort({ createdAt: -1 })
+//             .limit(10)
+//             .populate("products.productId");
 
-        // Aggregate weights
-        const categoryScore = {};
-        weightedCategories.forEach(({ id, weight }) => {
-            categoryScore[id] = (categoryScore[id] || 0) + weight;
-        });
+//         let purchasedProductIds = [];
+//         let purchasedCategories = [];
+//         let purchasedBrands = [];
 
-        const brandScore = {};
-        weightedBrands.forEach(({ id, weight }) => {
-            brandScore[id] = (brandScore[id] || 0) + weight;
-        });
+//         orders.forEach(order => {
+//             order.products.forEach(item => {
+//                 if (item.productId) {
+//                     purchasedProductIds.push(item.productId._id);
+//                     if (item.productId.category) purchasedCategories.push(item.productId.category);
+//                     if (item.productId.brand) purchasedBrands.push(item.productId.brand);
+//                 }
+//             });
+//         });
 
-        // Sort by highest score
-        const combinedCategories = Object.keys(categoryScore).sort((a, b) => categoryScore[b] - categoryScore[a]);
-        const combinedBrands = Object.keys(brandScore).sort((a, b) => brandScore[b] - brandScore[a]);
+//         // ✅ STEP 2: Browsing history
+//         const recentCategories = user.recentCategories || [];
+//         const recentProducts = user.recentProducts || [];
 
-        let recommendations = [];
+//         let recentCategoryIds = [];
+//         let recentBrands = [];
 
-        // ✅ STEP 4: Core recommendations (categories + brands)
-        if (combinedCategories.length > 0 || combinedBrands.length > 0) {
-            recommendations = await Product.find({
-                $or: [
-                    combinedCategories.length ? { category: { $in: combinedCategories } } : null,
-                    combinedBrands.length ? { brand: { $in: combinedBrands } } : null
-                ].filter(Boolean),
-                _id: { $nin: purchasedProductIds }
-            })
-                .sort({ createdAt: -1 })
-                .limit(20);
-        }
+//         if (recentCategories.length) {
+//             // split into ObjectIds vs Strings
+//             const objectIdCategories = recentCategories.filter(c => mongoose.Types.ObjectId.isValid(c));
+//             const slugCategories = recentCategories
+//                 .filter(c => typeof c === "string" && !mongoose.Types.ObjectId.isValid(c))
+//                 .map(c => c.toLowerCase());
 
-        // ✅ STEP 5: Parent categories (if less recs)
-        if (recommendations.length < 10 && combinedCategories.length > 0) {
-            const parentCats = await Category.find({ _id: { $in: combinedCategories } })
-                .select("ancestors")
-                .lean();
+//             const categoryDocs = await Category.find({
+//                 $or: [
+//                     objectIdCategories.length ? { _id: { $in: objectIdCategories } } : null,
+//                     slugCategories.length ? { slug: { $in: slugCategories } } : null,
+//                     slugCategories.length ? { name: { $in: slugCategories } } : null
+//                 ].filter(Boolean)
+//             }).select("_id");
 
-            const ancestorIds = parentCats.flatMap(c => c.ancestors || []);
-            if (ancestorIds.length) {
-                const parentRecs = await Product.find({
-                    category: { $in: ancestorIds },
-                    _id: { $nin: purchasedProductIds }
-                }).limit(10);
+//             recentCategoryIds = categoryDocs.map(c => c._id);
+//         }
 
-                recommendations = [...recommendations, ...parentRecs];
-            }
-        }
+//         if (recentProducts.length) {
+//             const viewedProducts = await Product.find({ _id: { $in: recentProducts } })
+//                 .select("category brand")
+//                 .lean();
 
-        // ✅ STEP 6: Sibling categories
-        if (recommendations.length < 10 && combinedCategories.length > 0) {
-            const parentCats = await Category.find({ _id: { $in: combinedCategories } })
-                .select("ancestors")
-                .lean();
+//             viewedProducts.forEach(p => {
+//                 if (p.category) recentCategoryIds.push(p.category);
+//                 if (p.brand) recentBrands.push(p.brand);
+//             });
+//         }
 
-            const parentIds = parentCats.flatMap(c => c.ancestors || []);
-            if (parentIds.length) {
-                const siblingCats = await Category.find({ ancestors: { $in: parentIds } })
-                    .select("_id")
-                    .lean();
+//         // ✅ STEP 3: Weighted scoring
+//         const weightedCategories = [
+//             ...recentCategoryIds.map(id => ({ id: String(id), weight: 3 })), // browsing > orders
+//             ...purchasedCategories.map(id => ({ id: String(id), weight: 1 }))
+//         ];
 
-                const siblingIds = siblingCats.map(c => c._id);
-                if (siblingIds.length) {
-                    const siblingRecs = await Product.find({
-                        category: { $in: siblingIds },
-                        _id: { $nin: purchasedProductIds }
-                    }).limit(10);
+//         const weightedBrands = [
+//             ...recentBrands.map(b => ({ id: b, weight: 2 })),
+//             ...purchasedBrands.map(b => ({ id: b, weight: 1 }))
+//         ];
 
-                    recommendations = [...recommendations, ...siblingRecs];
-                }
-            }
-        }
+//         // Aggregate weights
+//         const categoryScore = {};
+//         weightedCategories.forEach(({ id, weight }) => {
+//             categoryScore[id] = (categoryScore[id] || 0) + weight;
+//         });
 
-        // ✅ STEP 7: Absolute fallback
-        if (!recommendations.length) {
-            recommendations = bestSellers.length
-                ? bestSellers
-                : await Product.aggregate([{ $sample: { size: 10 } }]);
-        }
+//         const brandScore = {};
+//         weightedBrands.forEach(({ id, weight }) => {
+//             brandScore[id] = (brandScore[id] || 0) + weight;
+//         });
 
-        // ✅ Deduplicate + limit final
-        const uniqueRecs = recommendations.filter(
-            (v, i, arr) => arr.findIndex(t => t._id.toString() === v._id.toString()) === i
-        ).slice(0, 15);
+//         // Sort by highest score
+//         const combinedCategories = Object.keys(categoryScore).sort((a, b) => categoryScore[b] - categoryScore[a]);
+//         const combinedBrands = Object.keys(brandScore).sort((a, b) => brandScore[b] - brandScore[a]);
 
-        // ✅ Cache for faster response next time
-        user.savedRecommendations = uniqueRecs.map(p => p._id);
-        user.lastRecommendationUpdate = new Date();
-        await user.save();
+//         let recommendations = [];
 
-        return res.json(uniqueRecs);
-    } catch (err) {
-        console.error("❌ Personalized Recommendations Error:", err);
-        return res.status(500).json({ error: "Failed to fetch personalized recommendations" });
-    }
-};
+//         // ✅ STEP 4: Core recommendations (categories + brands)
+//         if (combinedCategories.length > 0 || combinedBrands.length > 0) {
+//             recommendations = await Product.find({
+//                 $or: [
+//                     combinedCategories.length ? { category: { $in: combinedCategories } } : null,
+//                     combinedBrands.length ? { brand: { $in: combinedBrands } } : null
+//                 ].filter(Boolean),
+//                 _id: { $nin: purchasedProductIds }
+//             })
+//                 .sort({ createdAt: -1 })
+//                 .limit(20);
+//         }
+
+//         // ✅ STEP 5: Parent categories (if less recs)
+//         if (recommendations.length < 10 && combinedCategories.length > 0) {
+//             const parentCats = await Category.find({ _id: { $in: combinedCategories } })
+//                 .select("ancestors")
+//                 .lean();
+
+//             const ancestorIds = parentCats.flatMap(c => c.ancestors || []);
+//             if (ancestorIds.length) {
+//                 const parentRecs = await Product.find({
+//                     category: { $in: ancestorIds },
+//                     _id: { $nin: purchasedProductIds }
+//                 }).limit(10);
+
+//                 recommendations = [...recommendations, ...parentRecs];
+//             }
+//         }
+
+//         // ✅ STEP 6: Sibling categories
+//         if (recommendations.length < 10 && combinedCategories.length > 0) {
+//             const parentCats = await Category.find({ _id: { $in: combinedCategories } })
+//                 .select("ancestors")
+//                 .lean();
+
+//             const parentIds = parentCats.flatMap(c => c.ancestors || []);
+//             if (parentIds.length) {
+//                 const siblingCats = await Category.find({ ancestors: { $in: parentIds } })
+//                     .select("_id")
+//                     .lean();
+
+//                 const siblingIds = siblingCats.map(c => c._id);
+//                 if (siblingIds.length) {
+//                     const siblingRecs = await Product.find({
+//                         category: { $in: siblingIds },
+//                         _id: { $nin: purchasedProductIds }
+//                     }).limit(10);
+
+//                     recommendations = [...recommendations, ...siblingRecs];
+//                 }
+//             }
+//         }
+
+//         // ✅ STEP 7: Absolute fallback
+//         if (!recommendations.length) {
+//             recommendations = bestSellers.length
+//                 ? bestSellers
+//                 : await Product.aggregate([{ $sample: { size: 10 } }]);
+//         }
+
+//         // ✅ Deduplicate + limit final
+//         const uniqueRecs = recommendations.filter(
+//             (v, i, arr) => arr.findIndex(t => t._id.toString() === v._id.toString()) === i
+//         ).slice(0, 15);
+
+//         // ✅ Cache for faster response next time
+//         user.savedRecommendations = uniqueRecs.map(p => p._id);
+//         user.lastRecommendationUpdate = new Date();
+//         await user.save();
+
+//         return res.json(uniqueRecs);
+//     } catch (err) {
+//         console.error("❌ Personalized Recommendations Error:", err);
+//         return res.status(500).json({ error: "Failed to fetch personalized recommendations" });
+//     }
+// };

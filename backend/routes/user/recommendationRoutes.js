@@ -1,14 +1,17 @@
-// routes/recommendationRoutes.js
 import express from "express";
-import { getPersonalizedRecommendations } from "../../controllers/user/recommendationController.js";
-import {trackProductView} from "../../controllers/user/userController.js";
-import {authenticateUser,optionalAuth} from "../../middlewares/authMiddleware.js";
+import { getHomepageSections, getDefaultRecommendations } from "../../controllers/user/recommendationController.js";
+import { trackProductView } from "../../controllers/user/userController.js";
+import { authenticateUser, optionalAuth } from "../../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
-router.get("/personalized",optionalAuth, getPersonalizedRecommendations);
+// Full homepage with multiple sections
+router.get("/personalized", optionalAuth, getHomepageSections);
 
-router.post("/track-view",authenticateUser, trackProductView);
+// Default / fallback recommendations
+router.get("/default", optionalAuth, getDefaultRecommendations);
+
+// Track product views for personalization
+router.post("/track-view", authenticateUser, trackProductView);
 
 export default router;
-

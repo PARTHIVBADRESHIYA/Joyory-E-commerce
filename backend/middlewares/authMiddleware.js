@@ -55,24 +55,24 @@ export const authenticateUser = async (req, res, next) => {
 };
 
 
-export const optionalAuth = async (req, res, next) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        return next(); // no token → guest
-    }
-
-    const token = authHeader.split(" ")[1];
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        const user = await User.findById(decoded.id);
-        if (user) {
-            req.user = user; // only attach if valid
+    export const optionalAuth = async (req, res, next) => {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith("Bearer ")) {
+            return next(); // no token → guest
         }
-    } catch (err) {
-        console.warn("⚠️ Invalid token, continuing as guest");
-    }
-    next();
-};
+
+        const token = authHeader.split(" ")[1];
+        try {
+            const decoded = jwt.verify(token, JWT_SECRET);
+            const user = await User.findById(decoded.id);
+            if (user) {
+                req.user = user; // only attach if valid
+            }
+        } catch (err) {
+            console.warn("⚠️ Invalid token, continuing as guest");
+        }
+        next();
+    };
 
 
 // const verifyAdminOrTeamMember = async (req, res, next) => {

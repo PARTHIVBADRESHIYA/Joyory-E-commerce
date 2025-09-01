@@ -191,33 +191,30 @@ const userLogin = async (req, res) => {
 const trackProductView = async (req, res) => {
     try {
         const { productId, category } = req.body;
-        const userId = req.user._id; // ✅ Automatically take from authenticated user
+        const userId = req.user._id;
 
         if (!productId || !category) {
             return res.status(400).json({ message: "Product ID and category are required" });
         }
 
-        // Update user's recent products & categories
-        await User.findByIdAndUpdate(userId, {
-            $push: {
-                recentProducts: {
-                    $each: [productId],
-                    $position: 0 // add at beginning
-                },
-                recentCategories: {
-                    $each: [category],
-                    $position: 0
-                }
+        // Push to beginning, remove duplicates, trim to last 20 items
+        await User.findByIdAndUpdate(
+            userId,
+            {
+                $pull: { recentProducts: productId, recentCategories: category }
             }
-        });
+        );
 
-        // Trim both arrays to last 20 items
-        await User.findByIdAndUpdate(userId, {
-            $push: {
-                recentProducts: { $each: [], $slice: 20 },
-                recentCategories: { $each: [], $slice: 20 }
-            }
-        });
+        await User.findByIdAndUpdate(
+            userId,
+            {
+                $push: {
+                    recentProducts: { $each: [productId], $position: 0, $slice: 20 },
+                    recentCategories: { $each: [category], $position: 0, $slice: 20 }
+                }
+            },
+            { new: true }
+        );
 
         res.json({ message: "User activity updated successfully" });
     } catch (error) {
@@ -225,6 +222,7 @@ const trackProductView = async (req, res) => {
         res.status(500).json({ message: "Error updating user activity" });
     }
 };
+    
 
 
 export {
