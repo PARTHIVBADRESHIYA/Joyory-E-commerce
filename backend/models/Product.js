@@ -42,8 +42,9 @@ const productSchema = new mongoose.Schema({
     attributes: mongoose.Schema.Types.Mixed,
     skinTypes: [{ type: mongoose.Schema.Types.ObjectId, ref: "SkinType", index: true }],
     description: String,
+    ingredients: [String],
     summary: String, // for card preview
-    features: String, // optional   
+    features: [String],       // now supports multiple features
     howToUse: String, // optional
     image: String, // keep for primary
     images: [{ type: String }],// 🔁 Add this for multi-images

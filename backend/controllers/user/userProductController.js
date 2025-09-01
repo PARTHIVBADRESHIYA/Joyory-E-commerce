@@ -633,8 +633,8 @@ import Review from '../../models/Review.js';
 import Order from '../../models/Order.js';
 import SkinType from '../../models/SkinType.js';
 import Category from '../../models/Category.js';
-import { getDescendantCategoryIds ,getCategoryFallbackChain} from '../../middlewares/utils/categoryUtils.js';
-import {getRecommendedProducts } from '../../middlewares/utils/recommendationService.js';
+import { getDescendantCategoryIds, getCategoryFallbackChain } from '../../middlewares/utils/categoryUtils.js';
+import { getRecommendedProducts } from '../../middlewares/utils/recommendationService.js';
 import mongoose from 'mongoose';
 
 // 🔧 Centralized helper for shades/colors
@@ -901,7 +901,13 @@ export const getSingleProduct = async (req, res) => {
             name: product.name,
             brand: product.brand,
             variant: product.variant,
+
+            // ✅ Basic details
             description: product.description || "",
+            summary: product.summary || "",
+            features: product.features || "",
+            howToUse: product.howToUse || "",
+            ingredients: product.ingredients || "",   // if you’ve added ingredients field in schema    
             price: product.price,
             mrp: product.mrp,
             discountPercent: product.mrp
@@ -1366,7 +1372,7 @@ export const getTopCategories = async (req, res) => {
 };
 
 
- // GET /products/skintype/:slug
+// GET /products/skintype/:slug
 // export const getProductsBySkinType = async (req, res) => {
 //     try {
 //         const skinTypeSlug = req.params.slug.toLowerCase();

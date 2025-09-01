@@ -272,7 +272,7 @@ export const resolveFormulationId = async (input) => {
 const addProductController = async (req, res) => {
     try {
         const {
-            name, variant, summary, description, features, howToUse,
+            name, variant, summary, description, ingredients, features, howToUse,
             price, buyingPrice, brand, category, categories,
             quantity, expiryDate
         } = req.body;
@@ -446,6 +446,7 @@ const addProductController = async (req, res) => {
             variant,
             summary,
             description,
+            ingredients,
             features,
             howToUse,
             formulation: formulationId,
@@ -543,6 +544,7 @@ const getAllProducts = async (req, res) => {
             image: Array.isArray(p.images) ? p.images[0] : p.image,
             price: p.price,
             summary: p.summary || p.description?.slice(0, 100),
+            ingredients: p.ingredients?.slice(0, 100)   ,
             sales: p.sales,
             remaining: p.quantity,
             status: p.status,
