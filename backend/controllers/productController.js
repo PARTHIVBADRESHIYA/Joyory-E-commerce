@@ -972,18 +972,56 @@ const getSingleProductById = async (req, res) => {
 
 
 
+// const updateVariantImages = async (req, res) => {
+//     try {
+//         const { id, sku } = req.params;
+
+//         // If multer-cloudinary is used, uploaded file URLs are available in req.files
+//         const uploadedImages = req.files.map(file => file.path);
+
+//         // Update only that foundationVariant's images
+//         const product = await Product.findOneAndUpdate(
+//             { _id: id, "foundationVariants.sku": sku },
+//             {
+//                 $set: { "foundationVariants.$.images": uploadedImages } // replace existing images
+//             },
+//             { new: true }
+//         );
+
+//         if (!product) {
+//             return res.status(404).json({ message: "❌ Product or variant not found" });
+//         }
+
+//         res.status(200).json({
+//             message: "✅ Variant images updated successfully",
+//             product
+//         });
+//     } catch (err) {
+//         console.error("updateVariantImages error:", err);
+//         res.status(500).json({ message: "Failed to update variant images", error: err.message });
+//     }
+// };
+
+
+
+// controllers/productController.js
+// controllers/productController.js
 const updateVariantImages = async (req, res) => {
     try {
         const { id, sku } = req.params;
 
-        // If multer-cloudinary is used, uploaded file URLs are available in req.files
-        const uploadedImages = req.files.map(file => file.path);
+        // Multer-Cloudinary gives file URLs in req.files
+        const uploadedImages = req.files?.map(file => file.path) || [];
 
-        // Update only that foundationVariant's images
+        if (!uploadedImages.length) {
+            return res.status(400).json({ message: "❌ No images uploaded" });
+        }
+
+        // Always replace whatever is there (if nothing, it just sets new)
         const product = await Product.findOneAndUpdate(
             { _id: id, "foundationVariants.sku": sku },
             {
-                $set: { "foundationVariants.$.images": uploadedImages } // replace existing images
+                $set: { "foundationVariants.$.images": uploadedImages }
             },
             { new: true }
         );
@@ -1001,4 +1039,6 @@ const updateVariantImages = async (req, res) => {
         res.status(500).json({ message: "Failed to update variant images", error: err.message });
     }
 };
+
+
 export { addProductController, getSingleProductById, getAllProducts, updateProductStock, updateProductById, deleteProduct, updateVariantImages };

@@ -796,6 +796,8 @@ const createPromotion = async (req, res) => {
 };
 
 // ✅ Simplified Update Promotion
+// controllers/admin/promotionController.js
+
 const updatePromotion = async (req, res) => {
   try {
     const { id } = req.params;
@@ -819,9 +821,21 @@ const updatePromotion = async (req, res) => {
       ...(req.body.image ? [req.body.image] : []),
     ];
 
-    const existing = await Promotion.findById(id).select("images");
+    const existing = await Promotion.findById(id);
     if (!existing) {
       return res.status(404).json({ message: "Promotion not found" });
+    }
+
+    // ✅ Normalize promotionConfig if passed
+    let normalizedConfig = existing.promotionConfig;
+    if (req.body.promotionConfig || req.body.promotionType) {
+      const { promotionConfig } = await normalizeByType({
+        promotionType: req.body.promotionType || existing.promotionType,
+        promotionConfig: req.body.promotionConfig || existing.promotionConfig,
+        discountUnit: req.body.discountUnit || existing.discountUnit,
+        discountValue: req.body.discountValue || existing.discountValue,
+      });
+      normalizedConfig = promotionConfig;
     }
 
     // prepare update data
@@ -833,13 +847,14 @@ const updatePromotion = async (req, res) => {
       images: incomingImages.length
         ? [...(existing.images || []), ...incomingImages]
         : existing.images,
+      promotionConfig: normalizedConfig, // ✅ allow update
     };
 
-    // remove promotionType & other fields you don’t want to overwrite accidentally
-    delete updateData.promotionType;
-    delete updateData.promotionConfig;
+    // prevent overwriting promotionType accidentally (unless explicitly provided)
+    if (!req.body.promotionType) {
+      updateData.promotionType = existing.promotionType;
+    }
 
-    // now update
     const promotion = await Promotion.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
@@ -852,6 +867,7 @@ const updatePromotion = async (req, res) => {
       .json({ message: "Failed to update promotion", error: err.message });
   }
 };
+
 
 
 

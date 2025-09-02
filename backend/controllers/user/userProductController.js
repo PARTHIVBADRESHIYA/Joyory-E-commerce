@@ -6,7 +6,7 @@ import Review from '../../models/Review.js';
 import Order from '../../models/Order.js';
 import SkinType from '../../models/SkinType.js';
 import Category from '../../models/Category.js';
-import { getDescendantCategoryIds,getCategoryFallbackChain } from '../../middlewares/utils/categoryUtils.js';
+import { getDescendantCategoryIds, getCategoryFallbackChain } from '../../middlewares/utils/categoryUtils.js';
 import { getRecommendations } from '../../middlewares/utils/recommendationService.js';
 import { formatProductCard } from '../../middlewares/utils/recommendationService.js';
 import { applyFlatDiscount, asMoney, productMatchesPromo } from '../../controllers/user/userPromotionController.js'; // reuse helpers
@@ -167,37 +167,175 @@ export const getAllFilteredProducts = async (req, res) => {
 };
 // ✅ Single product with recommendations, messages & parent category fallback
 
+// export const getSingleProduct = async (req, res) => {
+//     try {
+//         const productId = req.params.id;
+
+//         // 🔹 Fetch product and increment views
+//         const product = await Product.findByIdAndUpdate(
+//             productId,
+//             { $inc: { views: 1 } },
+//             { new: true, lean: true }
+//         );
+//         if (!product) return res.status(404).json({ message: 'Product not found' });
+
+//         // 🔹 Track recent products & categories
+//         if (req.user?.id) {
+//             const categoryValue = mongoose.Types.ObjectId.isValid(product.category)
+//                 ? product.category
+//                 : product.category?.slug || product.category?.toString();
+
+//             await User.findByIdAndUpdate(req.user.id, {
+//                 $pull: { recentProducts: product._id, recentCategories: categoryValue }
+//             });
+
+//             await User.findByIdAndUpdate(req.user.id, {
+//                 $push: {
+//                     recentProducts: { $each: [product._id], $position: 0, $slice: 20 },
+//                     recentCategories: { $each: [categoryValue], $position: 0, $slice: 20 }
+//                 }
+//             });
+//         }
+
+//         // 🔹 Fetch category details
+//         let categoryObj = null;
+//         if (mongoose.Types.ObjectId.isValid(product.category)) {
+//             categoryObj = await Category.findById(product.category)
+//                 .select("name slug parent")
+//                 .lean();
+//         }
+
+//         // 🔹 Calculate average rating
+//         const reviews = await Review.find({ productId: product._id, status: "Active" }).select("rating");
+//         const totalRating = reviews.reduce((sum, r) => sum + r.rating, 0);
+//         const avgRating = reviews.length ? parseFloat((totalRating / reviews.length).toFixed(1)) : 0;
+
+//         // 🔹 Fetch all promotions
+//         const promotions = await Promotion.find({}).lean();
+
+//         // 🔹 Find best applicable promotion for this product
+//         let bestPromo = null;
+//         let discountedPrice = product.price ?? product.mrp ?? 0;
+//         let discountPercent = 0;
+//         let discountAmount = 0;
+//         let badge = null;
+//         let promoMessage = null;
+
+//         promotions.forEach((promo) => {
+//             if (productMatchesPromo(product, promo)) {
+//                 const { price, discountAmount: da, discountPercent: dp } = applyFlatDiscount(product.mrp ?? product.price, promo);
+//                 if (!bestPromo || dp > discountPercent) {
+//                     bestPromo = promo;
+//                     discountedPrice = price;
+//                     discountPercent = dp;
+//                     discountAmount = da;
+//                 }
+//             }
+//         });
+
+//         // 🔹 Set badge & promoMessage
+//         if (bestPromo) {
+//             const promoType = bestPromo.promotionType;
+//             if (promoType === "discount") {
+//                 badge = bestPromo.discountUnit === "percent"
+//                     ? `${bestPromo.discountValue}% Off`
+//                     : `₹${asMoney(bestPromo.discountValue)} Off`;
+//                 promoMessage = `Save ${badge} on this product`;
+//             } else if (promoType === "tieredDiscount") {
+//                 const tiers = Array.isArray(bestPromo.promotionConfig?.tiers) ? bestPromo.promotionConfig.tiers : [];
+//                 const bestTierPercent = tiers.length ? Math.max(...tiers.map(t => t.discountPercent || 0)) : 0;
+//                 badge = `Buy More Save More (Up to ${bestTierPercent}%)`;
+//                 promoMessage = `Add more to save up to ${bestTierPercent}%`;
+//             } else if (promoType === "bogo" || promoType === "buy1get1") {
+//                 const bq = bestPromo.promotionConfig?.buyQty ?? 1;
+//                 const gq = bestPromo.promotionConfig?.getQty ?? 1;
+//                 badge = `BOGO ${bq}+${gq}`;
+//                 promoMessage = `Buy ${bq}, Get ${gq} Free`;
+//             } else if (promoType === "bundle") {
+//                 badge = "Bundle Deal";
+//                 promoMessage = "Special price when bought together";
+//             } else if (promoType === "gift") {
+//                 badge = "Free Gift";
+//                 promoMessage = "Get a free gift on qualifying order";
+//             }
+//         }
+
+//         // 🔹 Return product
+//         res.status(200).json({
+//             _id: product._id,
+//             name: product.name,
+//             brand: product.brand,
+//             variant: product.variant,
+//             description: product.description || "",
+//             summary: product.summary || "",
+//             features: product.features || [],
+//             howToUse: product.howToUse || "",
+//             ingredients: product.ingredients || [],
+//             price: Math.round(discountedPrice),
+//             mrp: Math.round(product.mrp ?? product.price),
+//             discountPercent: Math.max(0, Math.round(discountPercent)),
+//             discountAmount: Math.max(0, Math.round(discountAmount)),
+//             badge,
+//             promoMessage,
+//             images: normalizeImages(product.images || []),
+//             category: categoryObj,
+//             shadeOptions: buildOptions(product).shadeOptions,
+//             colorOptions: buildOptions(product).colorOptions,
+//             foundationVariants: product.foundationVariants || [],
+//             avgRating,
+//             totalRatings: reviews.length,
+//         });
+
+//     } catch (err) {
+//         console.error("❌ getSingleProduct error:", err);
+//         res.status(500).json({ message: "Server error", error: err.message });
+//     }
+// };
+
+
 export const getSingleProduct = async (req, res) => {
     try {
         const productId = req.params.id;
+        if (!mongoose.Types.ObjectId.isValid(productId)) {
+            return res.status(400).json({ message: "Invalid product id" });
+        }
 
-        // 🔹 Fetch product and increment views
+        // 1) Load product + increment views
         const product = await Product.findByIdAndUpdate(
             productId,
             { $inc: { views: 1 } },
             { new: true, lean: true }
         );
-        if (!product) return res.status(404).json({ message: 'Product not found' });
+        if (!product) return res.status(404).json({ message: "Product not found" });
 
-        // 🔹 Track recent products & categories
+        // 2) Keep user's recent history (compact: pull then push in bulk)
         if (req.user?.id) {
             const categoryValue = mongoose.Types.ObjectId.isValid(product.category)
                 ? product.category
-                : product.category?.slug || product.category?.toString();
+                : product.category?.slug || String(product.category || "");
 
-            await User.findByIdAndUpdate(req.user.id, {
-                $pull: { recentProducts: product._id, recentCategories: categoryValue }
-            });
-
-            await User.findByIdAndUpdate(req.user.id, {
-                $push: {
-                    recentProducts: { $each: [product._id], $position: 0, $slice: 20 },
-                    recentCategories: { $each: [categoryValue], $position: 0, $slice: 20 }
+            await User.bulkWrite([
+                {
+                    updateOne: {
+                        filter: { _id: req.user.id },
+                        update: { $pull: { recentProducts: product._id, recentCategories: categoryValue } }
+                    }
+                },
+                {
+                    updateOne: {
+                        filter: { _id: req.user.id },
+                        update: {
+                            $push: {
+                                recentProducts: { $each: [product._id], $position: 0, $slice: 20 },
+                                recentCategories: { $each: [categoryValue], $position: 0, $slice: 20 }
+                            }
+                        }
+                    }
                 }
-            });
+            ]);
         }
 
-        // 🔹 Fetch category details
+        // 3) Category details
         let categoryObj = null;
         if (mongoose.Types.ObjectId.isValid(product.category)) {
             categoryObj = await Category.findById(product.category)
@@ -205,62 +343,124 @@ export const getSingleProduct = async (req, res) => {
                 .lean();
         }
 
-        // 🔹 Calculate average rating
-        const reviews = await Review.find({ productId: product._id, status: "Active" }).select("rating");
-        const totalRating = reviews.reduce((sum, r) => sum + r.rating, 0);
-        const avgRating = reviews.length ? parseFloat((totalRating / reviews.length).toFixed(1)) : 0;
+        // 4) Ratings (efficient aggregation)
+        const [{ avg = 0, count = 0 } = {}] = await Review.aggregate([
+            { $match: { productId: product._id, status: "Active" } },
+            { $group: { _id: "$productId", avg: { $avg: "$rating" }, count: { $sum: 1 } } }
+        ]);
+        const avgRating = Math.round((avg || 0) * 10) / 10;
 
-        // 🔹 Fetch all promotions
-        const promotions = await Promotion.find({}).lean();
+        // 5) Pull only active/in-window promotions
+        const now = new Date();
+        const promotions = await Promotion.find({
+            status: "active",
+            startDate: { $lte: now },
+            endDate: { $gte: now }
+        }).lean();
 
-        // 🔹 Find best applicable promotion for this product
+        // Helpers
+        const originalPrice = Number(product.price ?? product.mrp ?? 0) || 0;
+        const mrp = Number(product.mrp ?? product.price ?? 0) || 0;
+
+        // 6) Decide best promo
         let bestPromo = null;
-        let discountedPrice = product.price ?? product.mrp ?? 0;
-        let discountPercent = 0;
-        let discountAmount = 0;
+        let bestPrice = originalPrice;
+        let bestDiscountAmount = 0;
+        let bestDiscountPercent = 0;
+
+        for (const promo of promotions) {
+            if (!productMatchesPromo(product, promo)) continue;
+
+            const type = promo.promotionType;
+
+            // Only *flat* discounts change PDP price
+            if (type === "discount") {
+                const unit = promo.discountUnit;
+                const val = Number(promo.discountValue || 0);
+
+                if (unit === "percent" && val > 0) {
+                    const price = Math.max(0, mrp - (mrp * val) / 100);
+                    const da = Math.max(0, mrp - price);
+                    const dp = mrp > 0 ? Math.floor((da / mrp) * 100) : 0;
+
+                    // pick by absolute savings, tie-break by higher %
+                    const isBetter =
+                        da > bestDiscountAmount || (da === bestDiscountAmount && dp > bestDiscountPercent);
+                    if (isBetter) {
+                        bestPromo = promo;
+                        bestPrice = price;
+                        bestDiscountAmount = da;
+                        bestDiscountPercent = dp;
+                    }
+                } else if (unit === "amount" && val > 0) {
+                    const price = Math.max(0, mrp - val);
+                    const da = Math.max(0, mrp - price);
+                    const dp = mrp > 0 ? Math.floor((da / mrp) * 100) : 0;
+
+                    const isBetter =
+                        da > bestDiscountAmount || (da === bestDiscountAmount && dp > bestDiscountPercent);
+                    if (isBetter) {
+                        bestPromo = promo;
+                        bestPrice = price;
+                        bestDiscountAmount = da;
+                        bestDiscountPercent = dp;
+                    }
+                }
+            }
+
+            // Tiered / BOGO / Bundle / Gift do NOT alter PDP price
+            // (we still might want to show a badge/message for awareness — handled below)
+        }
+
+        // 7) Build badge/message from best applicable promo (or awareness-only promos)
         let badge = null;
         let promoMessage = null;
 
-        promotions.forEach((promo) => {
-            if (productMatchesPromo(product, promo)) {
-                const { price, discountAmount: da, discountPercent: dp } = applyFlatDiscount(product.mrp ?? product.price, promo);
-                if (!bestPromo || dp > discountPercent) {
-                    bestPromo = promo;
-                    discountedPrice = price;
-                    discountPercent = dp;
-                    discountAmount = da;
-                }
-            }
-        });
-
-        // 🔹 Set badge & promoMessage
         if (bestPromo) {
-            const promoType = bestPromo.promotionType;
-            if (promoType === "discount") {
-                badge = bestPromo.discountUnit === "percent"
+            // bestPromo is always a 'discount'
+            badge =
+                bestPromo.discountUnit === "percent"
                     ? `${bestPromo.discountValue}% Off`
                     : `₹${asMoney(bestPromo.discountValue)} Off`;
-                promoMessage = `Save ${badge} on this product`;
-            } else if (promoType === "tieredDiscount") {
-                const tiers = Array.isArray(bestPromo.promotionConfig?.tiers) ? bestPromo.promotionConfig.tiers : [];
-                const bestTierPercent = tiers.length ? Math.max(...tiers.map(t => t.discountPercent || 0)) : 0;
-                badge = `Buy More Save More (Up to ${bestTierPercent}%)`;
-                promoMessage = `Add more to save up to ${bestTierPercent}%`;
-            } else if (promoType === "bogo" || promoType === "buy1get1") {
-                const bq = bestPromo.promotionConfig?.buyQty ?? 1;
-                const gq = bestPromo.promotionConfig?.getQty ?? 1;
-                badge = `BOGO ${bq}+${gq}`;
-                promoMessage = `Buy ${bq}, Get ${gq} Free`;
-            } else if (promoType === "bundle") {
-                badge = "Bundle Deal";
-                promoMessage = "Special price when bought together";
-            } else if (promoType === "gift") {
-                badge = "Free Gift";
-                promoMessage = "Get a free gift on qualifying order";
+            promoMessage = `Save ${badge} on this product`;
+        } else {
+            // No flat discount selected. Pick ONE awareness promo to show (highest priority order).
+            // Priority: tieredDiscount > bogo > bundle > gift
+            const awareness =
+                promotions
+                    .filter(p => productMatchesPromo(product, p))
+                    .sort((a, b) => {
+                        const order = { tieredDiscount: 1, bogo: 2, buy1get1: 2, bundle: 3, gift: 4, discount: 5 };
+                        return (order[a.promotionType] || 99) - (order[b.promotionType] || 99);
+                    })[0] || null;
+
+            if (awareness) {
+                const t = awareness.promotionType;
+                if (t === "tieredDiscount") {
+                    const tiers = Array.isArray(awareness.promotionConfig?.tiers)
+                        ? awareness.promotionConfig.tiers
+                        : [];
+                    const top = tiers.length
+                        ? Math.max(...tiers.map(ti => Number(ti.discountPercent || 0)))
+                        : 0;
+                    badge = `Buy More Save More${top ? ` (Up to ${top}%)` : ""}`;
+                    promoMessage = `Add more to save up to ${top}%`;
+                } else if (t === "bogo" || t === "buy1get1") {
+                    const bq = awareness.promotionConfig?.buyQty ?? 1;
+                    const gq = awareness.promotionConfig?.getQty ?? 1;
+                    badge = `BOGO ${bq}+${gq}`;
+                    promoMessage = `Buy ${bq}, Get ${gq} Free`;
+                } else if (t === "bundle") {
+                    badge = "Bundle Deal";
+                    promoMessage = "Special price when bought together";
+                } else if (t === "gift") {
+                    badge = "Free Gift";
+                    promoMessage = "Get a free gift on qualifying order";
+                }
             }
         }
 
-        // 🔹 Return product
+        // 8) Response (numbers rounded for UI labels)
         res.status(200).json({
             _id: product._id,
             name: product.name,
@@ -271,10 +471,10 @@ export const getSingleProduct = async (req, res) => {
             features: product.features || [],
             howToUse: product.howToUse || "",
             ingredients: product.ingredients || [],
-            price: Math.round(discountedPrice),
-            mrp: Math.round(product.mrp ?? product.price),
-            discountPercent: Math.max(0, Math.round(discountPercent)),
-            discountAmount: Math.max(0, Math.round(discountAmount)),
+            mrp: Math.round(mrp),
+            price: Math.round(bestPrice), // may equal mrp if no flat promo
+            discountPercent: Math.max(0, Math.round(bestDiscountPercent)),
+            discountAmount: Math.max(0, Math.round(bestDiscountAmount)),
             badge,
             promoMessage,
             images: normalizeImages(product.images || []),
@@ -283,16 +483,13 @@ export const getSingleProduct = async (req, res) => {
             colorOptions: buildOptions(product).colorOptions,
             foundationVariants: product.foundationVariants || [],
             avgRating,
-            totalRatings: reviews.length,
+            totalRatings: count || 0
         });
-
     } catch (err) {
         console.error("❌ getSingleProduct error:", err);
         res.status(500).json({ message: "Server error", error: err.message });
     }
 };
-
-
 
 // ✅ Products by category with full recommendations
 export const getProductsByCategory = async (req, res) => {
