@@ -497,118 +497,14 @@ export const getSingleProduct = async (req, res) => {
 
 
 // ✅ Products by category with full recommendations
-// export const getProductsByCategory = async (req, res) => {
-//     try {
-//         const slug = req.params.slug.toLowerCase();
-//         let { page = 1, limit = 12, sort = "recent" } = req.query;
-//         page = Number(page) || 1;
-//         limit = Number(limit) || 12;
-
-//         // 🔹 Fetch category by slug or ObjectId
-//         let category = null;
-//         if (mongoose.Types.ObjectId.isValid(slug)) {
-//             category = await Category.findById(slug)
-//                 .select("name slug bannerImage thumbnailImage ancestors")
-//                 .lean();
-//         } else {
-//             category = await Category.findOne({ slug })
-//                 .select("name slug bannerImage thumbnailImage ancestors")
-//                 .lean();
-//         }
-//         if (!category) return res.status(404).json({ message: "Category not found" });
-
-//         // 🔹 Track user's recent categories
-//         if (req.user && req.user.id) {
-//             await User.findByIdAndUpdate(req.user.id, { $pull: { recentCategories: category._id } });
-//             await User.findByIdAndUpdate(req.user.id, {
-//                 $push: { recentCategories: { $each: [category._id], $position: 0, $slice: 20 } }
-//             });
-//         }
-
-//         // 🔹 Fetch descendant categories
-//         const ids = (await getDescendantCategoryIds(category._id))
-//             .filter(id => mongoose.Types.ObjectId.isValid(id))
-//             .map(id => new mongoose.Types.ObjectId(id));
-//         ids.push(category._id);
-
-//         const filter = { $or: [{ categories: { $in: ids } }, { category: { $in: ids } }] };
-
-//         const sortOptions = {
-//             recent: { createdAt: -1 },
-//             priceLowToHigh: { price: 1 },
-//             priceHighToLow: { price: -1 },
-//             rating: { avgRating: -1 }
-//         };
-
-//         const total = await Product.countDocuments(filter);
-//         const products = await Product.find(filter)
-//             .sort(sortOptions[sort] || { createdAt: -1 })
-//             .skip((page - 1) * limit)
-//             .limit(limit)
-//             .lean();
-
-//         const cards = await Promise.all(products.map(p => formatProductCard(p)));
-
-//         // 🔹 Breadcrumb from ancestors
-//         let ancestors = [];
-//         if (Array.isArray(category.ancestors) && category.ancestors.length) {
-//             const ancestorDocs = await Category.find({ _id: { $in: category.ancestors } })
-//                 .select("name slug").lean();
-//             ancestors = category.ancestors.map(id => ancestorDocs.find(a => String(a._id) === String(id))).filter(Boolean);
-//         }
-
-//         // 🔹 Fetch recommendations in parallel
-//         const firstProduct = products[0] || await Product.findOne({ category: category._id }).lean();
-
-//         let [topSelling, moreLikeThis, trending] = await Promise.all([
-//             getRecommendations({ mode: "topSelling", categorySlug: category.slug, limit: 6 }),
-//             firstProduct ? getRecommendations({ mode: "moreLikeThis", productId: firstProduct._id, limit: 6 }) : Promise.resolve({ products: [] }),
-//             getRecommendations({ mode: "trending", limit: 6 })
-//         ]);
-
-//         // 🔹 Filter out duplicates
-//         const usedIds = new Set();
-//         const filterUnique = (rec) => {
-//             if (!rec?.products?.length) return [];
-//             return rec.products.filter(p => {
-//                 const id = p._id.toString();
-//                 if (usedIds.has(id)) return false;
-//                 usedIds.add(id);
-//                 return true;
-//             });
-//         };
-
-//         return res.status(200).json({
-//             category,
-//             breadcrumb: ancestors,
-//             products: cards,
-//             pagination: {
-//                 total,
-//                 page,
-//                 limit,
-//                 totalPages: Math.ceil(total / limit),
-//                 hasMore: page < Math.ceil(total / limit)
-//             }
-//         });
-
-//     } catch (err) {
-//         console.error("❌ getProductsByCategory error:", err);
-//         return res.status(500).json({ message: "Server error", error: err.message });
-//     }
-// };
-
-
-// ✅ Products by category with full filters + recommendations
 export const getProductsByCategory = async (req, res) => {
     try {
         const slug = req.params.slug.toLowerCase();
-        let { page = 1, limit = 12, sort = "newest", search, brand, priceMin, priceMax, maxPrice } =
-            req.query;
-
+        let { page = 1, limit = 12, sort = "recent" } = req.query;
         page = Number(page) || 1;
         limit = Number(limit) || 12;
 
-        // 🔹 Find category by slug or ObjectId
+        // 🔹 Fetch category by slug or ObjectId
         let category = null;
         if (mongoose.Types.ObjectId.isValid(slug)) {
             category = await Category.findById(slug)
@@ -621,72 +517,60 @@ export const getProductsByCategory = async (req, res) => {
         }
         if (!category) return res.status(404).json({ message: "Category not found" });
 
-        // 🔹 Track recent categories for logged-in user
+        // 🔹 Track user's recent categories
         if (req.user && req.user.id) {
             await User.findByIdAndUpdate(req.user.id, { $pull: { recentCategories: category._id } });
             await User.findByIdAndUpdate(req.user.id, {
-                $push: { recentCategories: { $each: [category._id], $position: 0, $slice: 20 } },
+                $push: { recentCategories: { $each: [category._id], $position: 0, $slice: 20 } }
             });
         }
 
-        // 🔹 Collect category + descendants
+        // 🔹 Fetch descendant categories
         const ids = (await getDescendantCategoryIds(category._id))
-            .filter((id) => mongoose.Types.ObjectId.isValid(id))
-            .map((id) => new mongoose.Types.ObjectId(id));
+            .filter(id => mongoose.Types.ObjectId.isValid(id))
+            .map(id => new mongoose.Types.ObjectId(id));
         ids.push(category._id);
 
-        // ✅ Build options for fetchProducts
-        const options = {
-            search,
-            brandIds: brand ? [brand] : [],
-            categoryIds: ids,
-            priceRange:
-                priceMin || priceMax
-                    ? {
-                        min: priceMin ? Number(priceMin) : 0,
-                        max: priceMax ? Number(priceMax) : Infinity,
-                    }
-                    : null,
-            maxPrice: maxPrice ? Number(maxPrice) : null,
-            sort,
-            page,
-            limit,
+        const filter = { $or: [{ categories: { $in: ids } }, { category: { $in: ids } }] };
+
+        const sortOptions = {
+            recent: { createdAt: -1 },
+            priceLowToHigh: { price: 1 },
+            priceHighToLow: { price: -1 },
+            rating: { avgRating: -1 }
         };
 
-        // 🔹 Centralized product fetching
-        const { products, pagination } = await fetchProducts(options);
+        const total = await Product.countDocuments(filter);
+        const products = await Product.find(filter)
+            .sort(sortOptions[sort] || { createdAt: -1 })
+            .skip((page - 1) * limit)
+            .limit(limit)
+            .lean();
 
-        // 🔹 Convert to product cards
-        const cards = await Promise.all(products.map((p) => formatProductCard(p)));
+        const cards = await Promise.all(products.map(p => formatProductCard(p)));
 
-        // 🔹 Breadcrumb (ancestors)
+        // 🔹 Breadcrumb from ancestors
         let ancestors = [];
         if (Array.isArray(category.ancestors) && category.ancestors.length) {
             const ancestorDocs = await Category.find({ _id: { $in: category.ancestors } })
-                .select("name slug")
-                .lean();
-            ancestors = category.ancestors
-                .map((id) => ancestorDocs.find((a) => String(a._id) === String(id)))
-                .filter(Boolean);
+                .select("name slug").lean();
+            ancestors = category.ancestors.map(id => ancestorDocs.find(a => String(a._id) === String(id))).filter(Boolean);
         }
 
-        // 🔹 Recommendations (topSelling, moreLikeThis, trending)
-        const firstProduct =
-            products[0] || (await Product.findOne({ category: category._id }).lean());
+        // 🔹 Fetch recommendations in parallel
+        const firstProduct = products[0] || await Product.findOne({ category: category._id }).lean();
 
         let [topSelling, moreLikeThis, trending] = await Promise.all([
             getRecommendations({ mode: "topSelling", categorySlug: category.slug, limit: 6 }),
-            firstProduct
-                ? getRecommendations({ mode: "moreLikeThis", productId: firstProduct._id, limit: 6 })
-                : Promise.resolve({ products: [] }),
-            getRecommendations({ mode: "trending", limit: 6 }),
+            firstProduct ? getRecommendations({ mode: "moreLikeThis", productId: firstProduct._id, limit: 6 }) : Promise.resolve({ products: [] }),
+            getRecommendations({ mode: "trending", limit: 6 })
         ]);
 
-        // 🔹 Remove duplicate recs
+        // 🔹 Filter out duplicates
         const usedIds = new Set();
         const filterUnique = (rec) => {
             if (!rec?.products?.length) return [];
-            return rec.products.filter((p) => {
+            return rec.products.filter(p => {
                 const id = p._id.toString();
                 if (usedIds.has(id)) return false;
                 usedIds.add(id);
@@ -698,188 +582,89 @@ export const getProductsByCategory = async (req, res) => {
             category,
             breadcrumb: ancestors,
             products: cards,
-            pagination,
-            recommendations: {
-                topSelling: filterUnique(topSelling),
-                moreLikeThis: filterUnique(moreLikeThis),
-                trending: filterUnique(trending),
-            },
+            pagination: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit),
+                hasMore: page < Math.ceil(total / limit)
+            }
         });
+
     } catch (err) {
         console.error("❌ getProductsByCategory error:", err);
         return res.status(500).json({ message: "Server error", error: err.message });
     }
 };
 
+
+
+
 // 🔥 Top Selling Products
-// export const getTopSellingProducts = async (req, res) => {
-//     try {
-//         const topProducts = await Product.find()
-//             .sort({ sales: -1 })
-//             .limit(10)
-//             .select("name images foundationVariants shadeOptions colorOptions")
-//             .lean();
-
-//         res.status(200).json({
-//             success: true,
-//             products: topProducts.map(p => {
-//                 const shadeOptions = (p.foundationVariants?.length > 0)
-//                     ? p.foundationVariants.map(v => v.shadeName).filter(Boolean)
-//                     : (p.shadeOptions || []);
-//                 const colorOptions = (p.foundationVariants?.length > 0)
-//                     ? p.foundationVariants.map(v => v.hex).filter(Boolean)
-//                     : (p.colorOptions || []);
-
-//                 return {
-//                     _id: p._id,
-//                     name: p.name,
-//                     image: p.image || (p.images?.[0] || null),
-//                     shadeOptions,
-//                     colorOptions
-//                 };
-//             })
-//         });
-//     } catch (error) {
-//         console.error("🔥 Failed to fetch top sellers:", error);
-//         res.status(500).json({
-//             success: false,
-//             message: "Failed to fetch top selling products",
-//             error: error.message
-//         });
-//     }
-// };
-
-
-
 export const getTopSellingProducts = async (req, res) => {
     try {
-        let { page = 1, limit = 10, search, brand, category, priceMin, priceMax, maxPrice } = req.query;
-        page = Number(page) || 1;
-        limit = Number(limit) || 10;
-
-        // ✅ Build options for fetchProducts
-        const options = {
-            search,
-            brandIds: brand ? [brand] : [],
-            categoryIds: category ? [category] : [],
-            priceRange:
-                priceMin || priceMax
-                    ? {
-                        min: priceMin ? Number(priceMin) : 0,
-                        max: priceMax ? Number(priceMax) : Infinity,
-                    }
-                    : null,
-            maxPrice: maxPrice ? Number(maxPrice) : null,
-            sort: "popular", // 👉 use popularityScore / sales field for top sellers
-            page,
-            limit,
-        };
-
-        // ✅ Centralized product fetching
-        const { products, pagination } = await fetchProducts(options);
-
-        // ✅ Format product cards
-        const cards = await Promise.all(products.map((p) => formatProductCard(p)));
+        const topProducts = await Product.find()
+            .sort({ sales: -1 })
+            .limit(10)
+            .select("name images foundationVariants shadeOptions colorOptions")
+            .lean();
 
         res.status(200).json({
             success: true,
-            products: cards,
-            pagination,
+            products: topProducts.map(p => {
+                const shadeOptions = (p.foundationVariants?.length > 0)
+                    ? p.foundationVariants.map(v => v.shadeName).filter(Boolean)
+                    : (p.shadeOptions || []);
+                const colorOptions = (p.foundationVariants?.length > 0)
+                    ? p.foundationVariants.map(v => v.hex).filter(Boolean)
+                    : (p.colorOptions || []);
+
+                return {
+                    _id: p._id,
+                    name: p.name,
+                    image: p.image || (p.images?.[0] || null),
+                    shadeOptions,
+                    colorOptions
+                };
+            })
         });
     } catch (error) {
         console.error("🔥 Failed to fetch top sellers:", error);
         res.status(500).json({
             success: false,
             message: "Failed to fetch top selling products",
-            error: error.message,
+            error: error.message
         });
     }
 };
 
-// export const getTopSellingProductsByCategory = async (req, res) => {
-//     try {
-//         const { categorySlug } = req.query;
 
-//         // ✅ Use global recommendation system
-//         const { products, category, message } = await getRecommendations({
-//             categorySlug,
-//         });
-
-//         return res.status(200).json({
-//             success: true,
-//             category,
-//             message,
-//             products
-//         });
-//     } catch (error) {
-//         console.error("🔥 Failed to fetch top selling products:", error);
-//         return res.status(500).json({
-//             success: false,
-//             message: "Failed to fetch top selling products",
-//             error: error.message
-//         });
-//     }
-// };
-
-// 🔥 Product Details + Related
 
 
 export const getTopSellingProductsByCategory = async (req, res) => {
     try {
-        const { categorySlug, page = 1, limit = 10, search, brand, priceMin, priceMax, maxPrice } = req.query;
+        const { categorySlug } = req.query;
 
-        // 🔹 Find category by slug
-        const category = await Category.findOne({ slug: categorySlug })
-            .select("_id name slug")
-            .lean();
-
-        if (!category) {
-            return res.status(404).json({
-                success: false,
-                message: "Category not found",
-            });
-        }
-
-        // ✅ Build options for fetchProducts
-        const options = {
-            search,
-            brandIds: brand ? [brand] : [],
-            categoryIds: [category._id],
-            priceRange:
-                priceMin || priceMax
-                    ? {
-                        min: priceMin ? Number(priceMin) : 0,
-                        max: priceMax ? Number(priceMax) : Infinity,
-                    }
-                    : null,
-            maxPrice: maxPrice ? Number(maxPrice) : null,
-            sort: "popular", // 👉 Top selling = sorted by sales/popularity
-            page: Number(page),
-            limit: Number(limit),
-        };
-
-        // ✅ Centralized product fetching
-        const { products, pagination } = await fetchProducts(options);
-
-        // ✅ Format product cards for UI
-        const cards = await Promise.all(products.map((p) => formatProductCard(p)));
+        // ✅ Use global recommendation system
+        const { products, category, message } = await getRecommendations({
+            categorySlug,
+        });
 
         return res.status(200).json({
             success: true,
             category,
-            products: cards,
-            pagination,
+            message,
+            products
         });
     } catch (error) {
-        console.error("🔥 Failed to fetch top selling products by category:", error);
+        console.error("🔥 Failed to fetch top selling products:", error);
         return res.status(500).json({
             success: false,
-            message: "Failed to fetch top selling products by category",
-            error: error.message,
+            message: "Failed to fetch top selling products",
+            error: error.message
         });
     }
 };
-
 
 export const getProductWithRelated = async (req, res) => {
     try {
@@ -1067,163 +852,81 @@ export const getAllSkinTypes = async (req, res) => {
 
 
 // // ✅ Products by Skin Type with Recommendations
-// export const getProductsBySkinType = async (req, res) => {
-//     try {
-//         const slug = req.params.slug.toLowerCase();
-//         let { page = 1, limit = 12, sort = "recent" } = req.query;
-//         page = Number(page) || 1;
-//         limit = Number(limit) || 12;
-
-//         // 🔹 Fetch skin type
-//         const skinType = await SkinType.findOne({ slug, isDeleted: false }).lean();
-//         if (!skinType) return res.status(404).json({ message: "Skin type not found" });
-
-//         // 🔹 Find related categories (Makeup + Skincare)
-//         const categories = await Category.find({ slug: { $in: ["makeup", "skincare"] } }).select("_id slug").lean();
-//         const categoryIds = categories.map(c => c._id);
-
-//         const sortOptions = {
-//             recent: { createdAt: -1 },
-//             priceLow: { price: 1 },
-//             priceHigh: { price: -1 },
-//             popular: { totalSales: -1 },
-//         };
-
-//         // 🔹 Fetch main products for this skin type
-//         const products = await Product.find({
-//             skinTypes: skinType._id,
-//             isDeleted: { $ne: true }
-//         })
-//             .sort(sortOptions[sort] || { createdAt: -1 })
-//             .skip((page - 1) * limit)
-//             .limit(limit)
-//             .lean();
-
-//         const total = await Product.countDocuments({
-//             skinTypes: skinType._id,
-//             isDeleted: { $ne: true }
-//         });
-
-//         const mainProductIds = products.map(p => p._id);
-
-//         // 🔹 Fetch top-selling recommendations (Makeup + Skincare, excluding main products)
-//         const topSelling = await Product.find({
-//             category: { $in: categoryIds },
-//             isDeleted: { $ne: true },
-//             _id: { $nin: mainProductIds }
-//         }).sort({ totalSales: -1 }).limit(5).lean();
-
-//         const excludeIds = [...mainProductIds, ...topSelling.map(p => p._id)];
-
-//         // 🔹 Random recommendations
-//         const randomProducts = await Product.aggregate([
-//             { $match: { category: { $in: categoryIds }, isDeleted: { $ne: true }, _id: { $nin: excludeIds } } },
-//             { $sample: { size: 5 } }
-//         ]);
-
-//         // 🔹 Format all products consistently
-//         const formattedProducts = await Promise.all(products.map(p => formatProductCard(p)));
-//         const formattedTopSelling = await Promise.all(topSelling.map(p => formatProductCard(p)));
-//         const formattedRandom = await Promise.all(randomProducts.map(p => formatProductCard(p)));
-
-//         res.json({
-//             success: true,
-//             skinType: skinType.name,
-//             products: formattedProducts,
-//             pagination: { page, limit, total, totalPages: Math.ceil(total / limit), hasMore: page < Math.ceil(total / limit) },
-//             recommendations: {
-//                 topSelling: formattedTopSelling,
-//                 random: formattedRandom
-//             }
-//         });
-
-//     } catch (err) {
-//         console.error("❌ getProductsBySkinType error:", err);
-//         res.status(500).json({ success: false, message: err.message });
-//     }
-// };
-
-
-
 export const getProductsBySkinType = async (req, res) => {
     try {
         const slug = req.params.slug.toLowerCase();
-        let { page = 1, limit = 12, sort = "recent", search, brand, priceMin, priceMax, maxPrice } = req.query;
+        let { page = 1, limit = 12, sort = "recent" } = req.query;
         page = Number(page) || 1;
         limit = Number(limit) || 12;
 
         // 🔹 Fetch skin type
         const skinType = await SkinType.findOne({ slug, isDeleted: false }).lean();
-        if (!skinType) {
-            return res.status(404).json({ success: false, message: "Skin type not found" });
-        }
+        if (!skinType) return res.status(404).json({ message: "Skin type not found" });
 
-        // 🔹 Fetch related categories (Makeup + Skincare)
-        const categories = await Category.find({
-            slug: { $in: ["makeup", "skincare"] },
+        // 🔹 Find related categories (Makeup + Skincare)
+        const categories = await Category.find({ slug: { $in: ["makeup", "skincare"] } }).select("_id slug").lean();
+        const categoryIds = categories.map(c => c._id);
+
+        const sortOptions = {
+            recent: { createdAt: -1 },
+            priceLow: { price: 1 },
+            priceHigh: { price: -1 },
+            popular: { totalSales: -1 },
+        };
+
+        // 🔹 Fetch main products for this skin type
+        const products = await Product.find({
+            skinTypes: skinType._id,
+            isDeleted: { $ne: true }
         })
-            .select("_id slug")
+            .sort(sortOptions[sort] || { createdAt: -1 })
+            .skip((page - 1) * limit)
+            .limit(limit)
             .lean();
-        const categoryIds = categories.map((c) => c._id);
 
-        // ✅ Main products for this skin type
-        const { products, pagination } = await fetchProducts({
-            search,
-            brandIds: brand ? [brand] : [],
-            categoryIds,
-            priceRange:
-                priceMin || priceMax
-                    ? {
-                        min: priceMin ? Number(priceMin) : 0,
-                        max: priceMax ? Number(priceMax) : Infinity,
-                    }
-                    : null,
-            maxPrice: maxPrice ? Number(maxPrice) : null,
-            sort: sort === "recent" ? "newest" : sort === "priceLow" ? "price_asc" : sort === "priceHigh" ? "price_desc" : "popular",
-            page,
-            limit,
+        const total = await Product.countDocuments({
+            skinTypes: skinType._id,
+            isDeleted: { $ne: true }
         });
 
-        const formattedProducts = await Promise.all(products.map((p) => formatProductCard(p)));
-        const mainProductIds = products.map((p) => p._id);
+        const mainProductIds = products.map(p => p._id);
 
-        // ✅ Top-selling recommendations
-        const { products: topSellingRaw } = await fetchProducts({
-            categoryIds,
-            sort: "popular",
-            limit: 5,
-            page: 1,
-        });
-        const topSelling = await Promise.all(topSellingRaw.filter((p) => !mainProductIds.includes(p._id)).map((p) => formatProductCard(p)));
+        // 🔹 Fetch top-selling recommendations (Makeup + Skincare, excluding main products)
+        const topSelling = await Product.find({
+            category: { $in: categoryIds },
+            isDeleted: { $ne: true },
+            _id: { $nin: mainProductIds }
+        }).sort({ totalSales: -1 }).limit(5).lean();
 
-        // ✅ Random recommendations (from Makeup + Skincare but excluding main + top selling)
-        const excludeIds = [...mainProductIds, ...topSellingRaw.map((p) => p._id)];
-        const { products: randomRaw } = await fetchProducts({
-            categoryIds,
-            sort: "newest", // random fallback, could add $sample in fetchProducts if needed
-            limit: 5,
-            page: 1,
-        });
-        const random = await Promise.all(
-            randomRaw.filter((p) => !excludeIds.includes(p._id)).map((p) => formatProductCard(p))
-        );
+        const excludeIds = [...mainProductIds, ...topSelling.map(p => p._id)];
 
-        return res.json({
+        // 🔹 Random recommendations
+        const randomProducts = await Product.aggregate([
+            { $match: { category: { $in: categoryIds }, isDeleted: { $ne: true }, _id: { $nin: excludeIds } } },
+            { $sample: { size: 5 } }
+        ]);
+
+        // 🔹 Format all products consistently
+        const formattedProducts = await Promise.all(products.map(p => formatProductCard(p)));
+        const formattedTopSelling = await Promise.all(topSelling.map(p => formatProductCard(p)));
+        const formattedRandom = await Promise.all(randomProducts.map(p => formatProductCard(p)));
+
+        res.json({
             success: true,
             skinType: skinType.name,
             products: formattedProducts,
-            pagination,
+            pagination: { page, limit, total, totalPages: Math.ceil(total / limit), hasMore: page < Math.ceil(total / limit) },
             recommendations: {
-                topSelling,
-                random,
-            },
+                topSelling: formattedTopSelling,
+                random: formattedRandom
+            }
         });
+
     } catch (err) {
         console.error("❌ getProductsBySkinType error:", err);
         res.status(500).json({ success: false, message: err.message });
     }
 };
-
 
 export const getProductDetail = async (req, res) => {
     try {
