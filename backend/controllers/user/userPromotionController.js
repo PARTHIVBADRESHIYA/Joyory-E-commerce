@@ -9,18 +9,16 @@ const ObjectId = mongoose.Types.ObjectId; // ✅ Fix for ReferenceError
 /* ----------------------------- HELPERS ----------------------------- */
 export const escapeRegex = (str = "") => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 export const isObjectId = (s) => typeof s === "string" && /^[0-9a-fA-F]{24}$/.test(s);
-
 export const getCountdown = (endDate) => {
     const now = new Date();
     const end = new Date(endDate);
     const diff = end - now;
     if (diff <= 0) return { days: 0, hours: 0, minutes: 0, seconds: 0 };
-    return {
-        days: Math.floor(diff / 86400000),
-        hours: Math.floor((diff % 86400000) / 3600000),
-        minutes: Math.floor((diff % 3600000) / 60000),
-        seconds: Math.floor((diff % 60000) / 1000),
-    };
+    const days = Math.floor(diff / 86400000);
+    const hours = Math.floor((diff % 86400000) / 3600000);
+    const minutes = Math.floor((diff % 3600000) / 60000);
+    const seconds = Math.floor((diff % 60000) / 1000);
+    return { days, hours, minutes, seconds };
 };
 
 export const productMatchesPromo = (product, promo) => {
@@ -54,8 +52,13 @@ export const productMatchesPromo = (product, promo) => {
     return false;
 };
 
-export const asMoney = (n) => Math.max(0, Math.round(Number(n || 0)));
-
+export const asMoney = (num) => {
+    if (!num || isNaN(num)) return "0";
+    return Number(num).toLocaleString("en-IN", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+    });
+};
 /* --------------------------- PRICE HELPERS --------------------------- */
 export const applyFlatDiscount = (mrp, promotion) => {
     if (promotion.promotionType !== "discount" || !promotion.discountValue) {
@@ -84,10 +87,103 @@ export const bestTierForQty = (tiers, qty) =>
  *  - ?section=banner   (sitewide/banner promos: newUser, paymentOffer, freeShipping, global discount banners)
  *  - default: all active promos
  */
+// export const getActivePromotionsForUsers = async (req, res) => {
+//     try {
+//         const now = new Date();
+//         const section = (req.query.section || "").toString().toLowerCase(); // 'product'|'banner'|'all'
+//         const baseFilter = {
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now },
+//         };
+
+//         const promos = await Promotion.find(baseFilter)
+//             .select(
+//                 "campaignName description images promotionType promotionConfig discountUnit discountValue scope startDate endDate targetAudience categories products"
+//             )
+//             .populate("categories.category", "name slug")
+//             .lean();
+
+//         // split by purpose
+//         const productTypes = new Set(["discount", "tieredDiscount", "bogo", "bundle", "gift"]);
+//         const bannerTypes = new Set(["newUser", "paymentOffer", "freeShipping", "discount"]);
+
+//         let filtered = promos;
+//         if (section === "product") {
+//             filtered = promos.filter((p) => productTypes.has(p.promotionType));
+//         } else if (section === "banner") {
+//             filtered = promos.filter((p) => bannerTypes.has(p.promotionType));
+//         }
+
+//         // Map to lightweight payload for front-end cards
+//         const payload = filtered.map((p) => {
+//             // compute simple label / badge
+//             let discountPercent = null;
+//             let discountAmount = null;
+//             let discountLabel = "";
+//             if (p.promotionType === "discount" && p.discountValue) {
+//                 if (p.discountUnit === "percent") {
+//                     discountPercent = Number(p.discountValue) || 0;
+//                     discountLabel = `${discountPercent}% OFF`;
+//                 } else {
+//                     discountAmount = Number(p.discountValue) || 0;
+//                     discountLabel = `₹${asMoney(discountAmount)} OFF`;
+//                 }
+//             } else if (p.promotionType === "tieredDiscount") {
+//                 const tiers = Array.isArray(p.promotionConfig?.tiers) ? p.promotionConfig.tiers : [];
+//                 const top = tiers.length ? tiers.reduce((s, t) => Math.max(s, Number(t.discountPercent || 0)), 0) : 0;
+//                 discountLabel = top ? `Buy More, Save up to ${top}%` : "Buy More, Save More";
+//             } else if (p.promotionType === "bogo") {
+//                 const bq = p.promotionConfig?.buyQty ?? 1;
+//                 const gq = p.promotionConfig?.getQty ?? 1;
+//                 discountLabel = `BOGO ${bq}+${gq}`;
+//             } else if (p.promotionType === "paymentOffer") {
+//                 const provider = p.promotionConfig?.provider || "";
+//                 const pct = Number(p.promotionConfig?.discountPercent || 0);
+//                 discountLabel = provider ? `${provider} ${pct}% off` : `Payment Offer ${pct}%`;
+//             } else if (p.promotionType === "newUser") {
+//                 discountLabel = `New User ${p.promotionConfig?.discountPercent || ""}%`;
+//             } else if (p.promotionType === "freeShipping") {
+//                 discountLabel = `Free Shipping over ₹${p.promotionConfig?.minOrderValue || 0}`;
+//             }
+
+//             return {
+//                 _id: p._id,
+//                 title: p.campaignName,
+//                 description: p.description || "",
+//                 images: p.images || [],
+//                 type: p.promotionType,
+//                 scope: p.scope,
+//                 discountPercent,
+//                 discountAmount,
+//                 discountLabel,
+//                 countdown: getCountdown(p.endDate),
+//                 // pass small metadata so frontend can choose CTA behavior
+//                 promoMeta: {
+//                     categories: (p.categories || []).map((c) => ({ id: c.category?._id, slug: c.slug || c.category?.slug, name: c.category?.name })),
+//                     products: (p.products || []).map((x) => (typeof x === "object" ? String(x._id ?? x) : String(x))),
+//                     promotionConfig: p.promotionConfig || {},
+//                     startDate: p.startDate,
+//                     endDate: p.endDate,
+//                 },
+//             };
+//         });
+
+//         return res.json(payload);
+//     } catch (err) {
+//         console.error("getActivePromotionsForUsers error:", err);
+//         return res.status(500).json({ message: "Failed to load promotions", error: err.message });
+//     }
+// };
+
+
+
 export const getActivePromotionsForUsers = async (req, res) => {
     try {
         const now = new Date();
-        const section = (req.query.section || "").toString().toLowerCase(); // 'product'|'banner'|'all'
+        const section = (req.query.section || "").toString().toLowerCase(); // 'product'|'banner'|'offers'|'all'
+
+        // ✅ Only running, active promotions
         const baseFilter = {
             status: "active",
             startDate: { $lte: now },
@@ -96,28 +192,40 @@ export const getActivePromotionsForUsers = async (req, res) => {
 
         const promos = await Promotion.find(baseFilter)
             .select(
-                "campaignName description images promotionType promotionConfig discountUnit discountValue scope startDate endDate targetAudience categories products"
+                "campaignName description images promotionType promotionConfig discountUnit discountValue scope startDate endDate targetAudience categories brands products tags"
             )
             .populate("categories.category", "name slug")
+            .populate("brands.brand", "name slug")
             .lean();
 
-        // split by purpose
+        // ✅ Separate by purpose
         const productTypes = new Set(["discount", "tieredDiscount", "bogo", "bundle", "gift"]);
         const bannerTypes = new Set(["newUser", "paymentOffer", "freeShipping", "discount"]);
 
         let filtered = promos;
+
         if (section === "product") {
             filtered = promos.filter((p) => productTypes.has(p.promotionType));
         } else if (section === "banner") {
             filtered = promos.filter((p) => bannerTypes.has(p.promotionType));
+        } else if (section === "offers") {
+            // 👉 Offers section = GenZ / Combo / Trending etc. based on tags
+            filtered = promos.filter(
+                (p) =>
+                    Array.isArray(p.tags) &&
+                    (p.tags.includes("special") ||
+                        p.tags.includes("combo") ||
+                        p.tags.includes("trending"))
+            );
         }
+        // else = "all" → no filter
 
-        // Map to lightweight payload for front-end cards
+        // ✅ Normalize for frontend
         const payload = filtered.map((p) => {
-            // compute simple label / badge
             let discountPercent = null;
             let discountAmount = null;
             let discountLabel = "";
+
             if (p.promotionType === "discount" && p.discountValue) {
                 if (p.discountUnit === "percent") {
                     discountPercent = Number(p.discountValue) || 0;
@@ -128,7 +236,9 @@ export const getActivePromotionsForUsers = async (req, res) => {
                 }
             } else if (p.promotionType === "tieredDiscount") {
                 const tiers = Array.isArray(p.promotionConfig?.tiers) ? p.promotionConfig.tiers : [];
-                const top = tiers.length ? tiers.reduce((s, t) => Math.max(s, Number(t.discountPercent || 0)), 0) : 0;
+                const top = tiers.length
+                    ? tiers.reduce((s, t) => Math.max(s, Number(t.discountPercent || 0)), 0)
+                    : 0;
                 discountLabel = top ? `Buy More, Save up to ${top}%` : "Buy More, Save More";
             } else if (p.promotionType === "bogo") {
                 const bq = p.promotionConfig?.buyQty ?? 1;
@@ -150,15 +260,26 @@ export const getActivePromotionsForUsers = async (req, res) => {
                 description: p.description || "",
                 images: p.images || [],
                 type: p.promotionType,
+                tags: p.tags || [],
                 scope: p.scope,
                 discountPercent,
                 discountAmount,
                 discountLabel,
                 countdown: getCountdown(p.endDate),
-                // pass small metadata so frontend can choose CTA behavior
                 promoMeta: {
-                    categories: (p.categories || []).map((c) => ({ id: c.category?._id, slug: c.slug || c.category?.slug, name: c.category?.name })),
-                    products: (p.products || []).map((x) => (typeof x === "object" ? String(x._id ?? x) : String(x))),
+                    categories: (p.categories || []).map((c) => ({
+                        id: c.category?._id,
+                        slug: c.slug || c.category?.slug,
+                        name: c.category?.name,
+                    })),
+                    brands: (p.brands || []).map((b) => ({
+                        id: b.brand?._id,
+                        slug: b.slug || b.brand?.slug,
+                        name: b.brand?.name,
+                    })),
+                    products: (p.products || []).map((x) =>
+                        typeof x === "object" ? String(x._id ?? x) : String(x)
+                    ),
                     promotionConfig: p.promotionConfig || {},
                     startDate: p.startDate,
                     endDate: p.endDate,
@@ -172,6 +293,7 @@ export const getActivePromotionsForUsers = async (req, res) => {
         return res.status(500).json({ message: "Failed to load promotions", error: err.message });
     }
 };
+
 
 /* --------- GET Promotion Products (user clicks a promo card) --------- */
 /**

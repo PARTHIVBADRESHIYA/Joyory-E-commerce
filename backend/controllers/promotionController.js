@@ -701,13 +701,23 @@ const normalizeByType = async (body) => {
           tierScope: promotionConfig.tierScope === "perOrder" ? "perOrder" : "perProduct",
         },
       };
+    case "bundle": {
+      // fallback safe parsing
+      const bundleProducts = Array.isArray(promotionConfig.bundleProducts)
+        ? promotionConfig.bundleProducts.filter(isObjectId)
+        : [];
 
-    case "bundle":
-      const bundleProducts = (promotionConfig.bundleProducts || []).filter(isObjectId);
       const bundlePrice = Number(promotionConfig.bundlePrice || 0);
-      if (bundleProducts.length < 2) throw new Error("bundle requires at least 2 products");
-      if (!(bundlePrice > 0)) throw new Error("bundlePrice must be > 0");
-      return { promotionConfig: { bundleProducts, bundlePrice } };
+
+      // ✅ Instead of throwing hard errors, just fallback gracefully
+      return {
+        promotionConfig: {
+          bundleProducts,
+          bundlePrice: bundlePrice > 0 ? bundlePrice : null, // allow null if not set
+        },
+      };
+    }
+
 
     case "gift":
       const minOrderValue = Number(promotionConfig.minOrderValue || 0);
@@ -785,15 +795,24 @@ const createPromotion = async (req, res) => {
   }
 };
 
-// ✅ Update
+// ✅ Simplified Update Promotion
 const updatePromotion = async (req, res) => {
   try {
     const { id } = req.params;
+
+    // compute status fresh
     const status = calculateStatus(req.body.startDate, req.body.endDate);
 
-    const categories = await resolveCategories(req.body.categories);
-    const brands = await resolveBrands(req.body.brands);
+    // resolve categories & brands (only if provided)
+    const categories = req.body.categories
+      ? await resolveCategories(req.body.categories)
+      : undefined;
 
+    const brands = req.body.brands
+      ? await resolveBrands(req.body.brands)
+      : undefined;
+
+    // handle images
     const incomingImages = [
       ...(req.files?.map((f) => f.path) || []),
       ...(Array.isArray(req.body.images) ? req.body.images.filter(Boolean) : []),
@@ -801,21 +820,26 @@ const updatePromotion = async (req, res) => {
     ];
 
     const existing = await Promotion.findById(id).select("images");
-    if (!existing) return res.status(404).json({ message: "Promotion not found" });
+    if (!existing) {
+      return res.status(404).json({ message: "Promotion not found" });
+    }
 
-    const { promotionConfig } = await normalizeByType(req.body);
-
+    // prepare update data
     const updateData = {
-      ...req.body,
-      categories,
-      brands,
+      ...req.body, // take all body fields directly
       status,
-      promotionConfig,
+      ...(categories !== undefined && { categories }),
+      ...(brands !== undefined && { brands }),
       images: incomingImages.length
         ? [...(existing.images || []), ...incomingImages]
         : existing.images,
     };
 
+    // remove promotionType & other fields you don’t want to overwrite accidentally
+    delete updateData.promotionType;
+    delete updateData.promotionConfig;
+
+    // now update
     const promotion = await Promotion.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
@@ -823,9 +847,12 @@ const updatePromotion = async (req, res) => {
 
     res.status(200).json({ message: "Promotion updated", promotion });
   } catch (err) {
-    res.status(400).json({ message: "Failed to update promotion", error: err.message });
+    res
+      .status(400)
+      .json({ message: "Failed to update promotion", error: err.message });
   }
 };
+
 
 
 // ✅ Delete Promotion

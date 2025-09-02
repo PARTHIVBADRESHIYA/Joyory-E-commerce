@@ -20,12 +20,16 @@ const PromotionSchema = new mongoose.Schema(
                 "bogo",           // Buy X Get Y
                 "bundle",         // predefined bundles (Phase 2)
                 "gift",           // gift on min order (Phase 2)
-                "freeShipping",   // free shipping over threshold (Phase 2)
+                "freeShipping",   // free shipping over threshold (Phase 2) 
                 "newUser",        // first order offer (Phase 3)
                 "paymentOffer",   // bank/wallet/upi offers (Phase 3)
             ],
             required: true,
         },
+        tags: [{
+            type: String,
+            enum: ["festival", "seasonal", "collection", "trending", "combo", "special"],
+        }],
 
         targetAudience: {
             type: String,
@@ -36,7 +40,7 @@ const PromotionSchema = new mongoose.Schema(
         images: [{ type: String }],
 
         // Scope
-        scope: { type: String, enum: ["category", "product", "brand","global"], default: "global" },
+        scope: { type: String, enum: ["category", "product", "brand", "global"], default: "global" },
 
         categories: [
             {
