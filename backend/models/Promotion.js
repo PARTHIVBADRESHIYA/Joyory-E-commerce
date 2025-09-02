@@ -22,7 +22,8 @@ const PromotionSchema = new mongoose.Schema(
                 "gift",           // gift on min order (Phase 2)
                 "freeShipping",   // free shipping over threshold (Phase 2) 
                 "newUser",        // first order offer (Phase 3)
-                "paymentOffer",   // bank/wallet/upi offers (Phase 3)
+                "paymentOffer",
+                "collection"   // bank/wallet/upi offers (Phase 3)
             ],
             required: true,
         },

@@ -738,6 +738,14 @@ const normalizeByType = async (body) => {
         throw new Error("newUser maxDiscount must be >= 0");
       return { promotionConfig };
 
+    case "collection":
+      if (!(promotionConfig.maxProductPrice > 0)) {
+        throw new Error("collection requires maxProductPrice > 0");
+      }
+      return {
+        promotionConfig: { maxProductPrice: promotionConfig.maxProductPrice }
+      };
+
     case "paymentOffer":
       if (!promotionConfig.provider) throw new Error("paymentOffer requires provider");
       if (!Array.isArray(promotionConfig.methods) || !promotionConfig.methods.length)
