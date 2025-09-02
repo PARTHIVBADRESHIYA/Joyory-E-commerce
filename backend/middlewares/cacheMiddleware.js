@@ -2,7 +2,7 @@
 import { cache } from "./cache.js";
 
 export const cacheMiddleware = (req, res, next) => {
-    const key = `${req.originalUrl}`; // 🔑 Safer than JSON.stringify(req.query)
+    const key = `${req.originalUrl}`;
 
     const cachedData = cache.get(key);
     if (cachedData) {
@@ -10,12 +10,27 @@ export const cacheMiddleware = (req, res, next) => {
         return res.json(cachedData);
     }
 
-    // Override res.json to store response in cache
-    res.sendResponse = res.json;
+    // Wrap res.json
+    const originalJson = res.json.bind(res);
     res.json = (body) => {
-        cache.set(key, body, 300); // ⏳ Cache for 5 min
-        res.sendResponse(body);
+        cache.set(key, body, 300);
+        return originalJson(body);
     };
+
+    // Wrap res.send (for routes that use send instead of json)
+    const originalSend = res.send.bind(res);
+    res.send = (body) => {
+        try {
+            const parsed = JSON.parse(body);
+            cache.set(key, parsed, 300);
+        } catch {
+            // body not JSON → skip caching
+        }
+        return originalSend(body);
+    };
+    
+    console.log("❌ Cache miss, waiting for controller:", key);
 
     next();
 };
+

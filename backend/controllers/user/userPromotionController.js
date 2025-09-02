@@ -325,7 +325,56 @@ export const getPromotionProducts = async (req, res) => {
 
         if (!promo) return res.status(404).json({ message: "Promotion not found" });
 
-        // 🔹 Base match
+        const promoType = promo.promotionType;
+
+       /* ---------- ✅ Special Case: Bundle Promotions ---------- */
+if (promoType === "bundle") {
+    const bundleProductIds = promo.promotionConfig?.bundleProducts?.length
+        ? promo.promotionConfig.bundleProducts
+        : promo.products?.map(p => p._id ?? p) || [];
+
+    const bundleProducts = await Product.find({ _id: { $in: bundleProductIds } })
+        .select("_id name images brand mrp price")
+        .lean();
+
+    const totalMrp = bundleProducts.reduce((sum, p) => sum + (p.mrp || p.price || 0), 0);
+    const bundlePrice = Number(promo.promotionConfig?.bundlePrice || 0);
+
+    const product = {
+        _id: promo._id, // bundle id = promo id
+        name: promo.campaignName,
+        description: promo.description,
+        image: promo.images?.[0] || (bundleProducts[0]?.images?.[0] ?? ""),
+        brand: "Combo Offer",
+        mrp: Math.round(totalMrp),
+        price: Math.round(bundlePrice),
+        discountPercent: bundlePrice > 0 ? Math.round(100 - ((bundlePrice / totalMrp) * 100)) : 0,
+        discountAmount: bundlePrice > 0 ? totalMrp - bundlePrice : 0,
+        badge: "Bundle Deal",
+        promoMessage: "Special price when bought together",
+        display: {
+            mrpLabel: `₹${totalMrp}`,
+            priceLabel: `₹${bundlePrice}`,
+            discountLabel: "Bundle Deal",
+        },
+        bundleItems: bundleProducts.map(p => ({
+            _id: p._id,
+            name: p.name,
+            image: Array.isArray(p.images) && p.images.length ? p.images[0] : "",
+            brand: p.brand,
+            mrp: p.mrp,
+            price: p.price,
+        })),
+    };
+
+    return res.json({
+        products: [product],
+        pagination: { page: 1, limit: 1, total: 1, pages: 1 },
+    });
+}
+
+
+        /* ---------- 🔹 Regular Promo Flow (discount, tiered, bogo, etc.) ---------- */
         const baseOr = [];
         if (promo.scope === "category" && promo.categories?.length) {
             const catIds = promo.categories.map((c) => c?.category?._id).filter(Boolean).map(id => new ObjectId(id));
@@ -343,13 +392,11 @@ export const getPromotionProducts = async (req, res) => {
             }
         }
 
-
         const match = {};
         if (baseOr.length) match.$or = baseOr;
         if (search) match.name = { $regex: escapeRegex(search), $options: "i" };
 
-        // 🔹 Promo setup
-        const promoType = promo.promotionType;
+        // Promo setup
         const promoValue = Number(promo.discountValue || 0);
         const promoIsPercent = promoType === "discount" && promo.discountUnit === "percent" && promoValue > 0;
         const promoIsAmount = promoType === "discount" && promo.discountUnit === "amount" && promoValue > 0;
@@ -357,7 +404,6 @@ export const getPromotionProducts = async (req, res) => {
         const tiers = Array.isArray(promo.promotionConfig?.tiers) ? promo.promotionConfig.tiers : [];
         const bestTierPercent = tiers.length ? Math.max(...tiers.map((t) => Number(t.discountPercent || 0))) : 0;
 
-        // 🔹 Pipeline
         const addFieldsStage = {
             $addFields: {
                 mrpEff: { $ifNull: ["$mrp", "$price"] },
@@ -417,7 +463,6 @@ export const getPromotionProducts = async (req, res) => {
 
         const [aggResult] = await Product.aggregate(pipeline).collation({ locale: "en", strength: 2 });
 
-        // 🔹 Format products like Nykaa
         const products = (aggResult?.data ?? []).map((p) => {
             let badge = null;
             let promoMessage = null;
@@ -433,9 +478,6 @@ export const getPromotionProducts = async (req, res) => {
                 const gq = promo.promotionConfig?.getQty ?? 1;
                 badge = `BOGO ${bq}+${gq}`;
                 promoMessage = `Buy ${bq}, Get ${gq} Free`;
-            } else if (promoType === "bundle") {
-                badge = "Bundle Deal";
-                promoMessage = "Special price when bought together";
             } else if (promoType === "gift") {
                 badge = "Free Gift";
                 promoMessage = "Get a free gift on qualifying order";
@@ -451,7 +493,7 @@ export const getPromotionProducts = async (req, res) => {
                 discountPercent: Math.max(0, Math.round(p.discountPercent ?? 0)),
                 discountAmount: Math.max(0, Math.round(p.discount ?? 0)),
                 badge,
-                promoMessage, // 👈 NEW
+                promoMessage,
                 display: {
                     mrpLabel: `₹${Math.round(p.mrp ?? 0)}`,
                     priceLabel: `₹${Math.round(p.price ?? 0)}`,
@@ -459,7 +501,6 @@ export const getPromotionProducts = async (req, res) => {
                 },
             };
         });
-
 
         const total = aggResult?.totalArr?.[0]?.count ?? 0;
 
@@ -473,6 +514,7 @@ export const getPromotionProducts = async (req, res) => {
         res.status(500).json({ message: "Failed to fetch promotion products", error: err.message });
     }
 };
+
 
 
 /**
