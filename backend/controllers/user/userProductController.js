@@ -308,7 +308,7 @@ export const getSingleProduct = async (req, res) => {
         );
         if (!product) return res.status(404).json({ message: "Product not found" });
 
-        // 2) Keep user's recent history (compact: pull then push in bulk)
+        // 2) Save to user's recent history
         if (req.user?.id) {
             const categoryValue = mongoose.Types.ObjectId.isValid(product.category)
                 ? product.category
@@ -335,7 +335,7 @@ export const getSingleProduct = async (req, res) => {
             ]);
         }
 
-        // 3) Category details
+        // 3) Category info
         let categoryObj = null;
         if (mongoose.Types.ObjectId.isValid(product.category)) {
             categoryObj = await Category.findById(product.category)
@@ -343,14 +343,14 @@ export const getSingleProduct = async (req, res) => {
                 .lean();
         }
 
-        // 4) Ratings (efficient aggregation)
+        // 4) Ratings
         const [{ avg = 0, count = 0 } = {}] = await Review.aggregate([
             { $match: { productId: product._id, status: "Active" } },
             { $group: { _id: "$productId", avg: { $avg: "$rating" }, count: { $sum: 1 } } }
         ]);
         const avgRating = Math.round((avg || 0) * 10) / 10;
 
-        // 5) Pull only active/in-window promotions
+        // 5) Promotions
         const now = new Date();
         const promotions = await Promotion.find({
             status: "active",
@@ -358,11 +358,10 @@ export const getSingleProduct = async (req, res) => {
             endDate: { $gte: now }
         }).lean();
 
-        // Helpers
         const originalPrice = Number(product.price ?? product.mrp ?? 0) || 0;
         const mrp = Number(product.mrp ?? product.price ?? 0) || 0;
 
-        // 6) Decide best promo
+        // 6) Best promo logic
         let bestPromo = null;
         let bestPrice = originalPrice;
         let bestDiscountAmount = 0;
@@ -370,20 +369,17 @@ export const getSingleProduct = async (req, res) => {
 
         for (const promo of promotions) {
             if (!productMatchesPromo(product, promo)) continue;
-
             const type = promo.promotionType;
 
-            // Only *flat* discounts change PDP price
             if (type === "discount") {
                 const unit = promo.discountUnit;
                 const val = Number(promo.discountValue || 0);
 
                 if (unit === "percent" && val > 0) {
                     const price = Math.max(0, mrp - (mrp * val) / 100);
-                    const da = Math.max(0, mrp - price);
+                    const da = mrp - price;
                     const dp = mrp > 0 ? Math.floor((da / mrp) * 100) : 0;
 
-                    // pick by absolute savings, tie-break by higher %
                     const isBetter =
                         da > bestDiscountAmount || (da === bestDiscountAmount && dp > bestDiscountPercent);
                     if (isBetter) {
@@ -394,7 +390,7 @@ export const getSingleProduct = async (req, res) => {
                     }
                 } else if (unit === "amount" && val > 0) {
                     const price = Math.max(0, mrp - val);
-                    const da = Math.max(0, mrp - price);
+                    const da = mrp - price;
                     const dp = mrp > 0 ? Math.floor((da / mrp) * 100) : 0;
 
                     const isBetter =
@@ -407,25 +403,19 @@ export const getSingleProduct = async (req, res) => {
                     }
                 }
             }
-
-            // Tiered / BOGO / Bundle / Gift do NOT alter PDP price
-            // (we still might want to show a badge/message for awareness — handled below)
         }
 
-        // 7) Build badge/message from best applicable promo (or awareness-only promos)
+        // 7) Badge/message
         let badge = null;
         let promoMessage = null;
 
         if (bestPromo) {
-            // bestPromo is always a 'discount'
             badge =
                 bestPromo.discountUnit === "percent"
                     ? `${bestPromo.discountValue}% Off`
                     : `₹${asMoney(bestPromo.discountValue)} Off`;
             promoMessage = `Save ${badge} on this product`;
         } else {
-            // No flat discount selected. Pick ONE awareness promo to show (highest priority order).
-            // Priority: tieredDiscount > bogo > bundle > gift
             const awareness =
                 promotions
                     .filter(p => productMatchesPromo(product, p))
@@ -437,9 +427,7 @@ export const getSingleProduct = async (req, res) => {
             if (awareness) {
                 const t = awareness.promotionType;
                 if (t === "tieredDiscount") {
-                    const tiers = Array.isArray(awareness.promotionConfig?.tiers)
-                        ? awareness.promotionConfig.tiers
-                        : [];
+                    const tiers = awareness.promotionConfig?.tiers || [];
                     const top = tiers.length
                         ? Math.max(...tiers.map(ti => Number(ti.discountPercent || 0)))
                         : 0;
@@ -460,7 +448,14 @@ export const getSingleProduct = async (req, res) => {
             }
         }
 
-        // 8) Response (numbers rounded for UI labels)
+        // 8) Recommendations
+        const [moreLikeThis, boughtTogether, alsoViewed] = await Promise.all([
+            getRecommendations({ mode: "moreLikeThis", productId, userId: req.user?.id }),
+            getRecommendations({ mode: "boughtTogether", productId, userId: req.user?.id }),
+            getRecommendations({ mode: "alsoViewed", productId, userId: req.user?.id })
+        ]);
+
+        // 9) Response
         res.status(200).json({
             _id: product._id,
             name: product.name,
@@ -472,7 +467,7 @@ export const getSingleProduct = async (req, res) => {
             howToUse: product.howToUse || "",
             ingredients: product.ingredients || [],
             mrp: Math.round(mrp),
-            price: Math.round(bestPrice), // may equal mrp if no flat promo
+            price: Math.round(bestPrice),
             discountPercent: Math.max(0, Math.round(bestDiscountPercent)),
             discountAmount: Math.max(0, Math.round(bestDiscountAmount)),
             badge,
@@ -483,13 +478,21 @@ export const getSingleProduct = async (req, res) => {
             colorOptions: buildOptions(product).colorOptions,
             foundationVariants: product.foundationVariants || [],
             avgRating,
-            totalRatings: count || 0
+            totalRatings: count || 0,
+
+            // ✅ Added recommendation sections
+            recommendations: {
+                moreLikeThis,
+                boughtTogether,
+                alsoViewed
+            }
         });
     } catch (err) {
         console.error("❌ getSingleProduct error:", err);
         res.status(500).json({ message: "Server error", error: err.message });
     }
 };
+
 
 // ✅ Products by category with full recommendations
 export const getProductsByCategory = async (req, res) => {

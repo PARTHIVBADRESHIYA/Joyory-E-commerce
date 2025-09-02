@@ -745,10 +745,12 @@ export const getPromotionProducts = async (req, res) => {
                     commentsCount: 1,
                 },
             },
-            { $sort: sort === "price_asc" ? { price: 1 } :
-                     sort === "price_desc" ? { price: -1 } :
-                     sort === "discount" ? { discountPercent: -1, discount: -1 } :
-                     { createdAt: -1 } },
+            {
+                $sort: sort === "price_asc" ? { price: 1 } :
+                    sort === "price_desc" ? { price: -1 } :
+                        sort === "discount" ? { discountPercent: -1, discount: -1 } :
+                            { createdAt: -1 }
+            },
             {
                 $facet: {
                     data: [
@@ -788,6 +790,8 @@ export const getPromotionProducts = async (req, res) => {
 
                 return {
                     ...card,
+                    mrp: Math.round(p.mrp),                      // ✅ round mrp
+                    price: Math.round(p.price),                  // ✅ round price
                     discountPercent: Math.max(0, Math.round(p.discountPercent ?? 0)),
                     discountAmount: Math.max(0, Math.round(p.discount ?? 0)),
                     badge,
