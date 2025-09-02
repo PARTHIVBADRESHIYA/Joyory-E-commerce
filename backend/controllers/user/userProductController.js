@@ -1,5 +1,6 @@
 import Product from '../../models/Product.js';
 import ProductViewLog from "../../models/ProductViewLog.js";
+import Promotion from '../../models/Promotion.js';
 import User from '../../models/User.js';
 import Review from '../../models/Review.js';
 import Order from '../../models/Order.js';
@@ -8,6 +9,8 @@ import Category from '../../models/Category.js';
 import { getDescendantCategoryIds,getCategoryFallbackChain } from '../../middlewares/utils/categoryUtils.js';
 import { getRecommendations } from '../../middlewares/utils/recommendationService.js';
 import { formatProductCard } from '../../middlewares/utils/recommendationService.js';
+import { applyFlatDiscount, asMoney, productMatchesPromo } from '../../controllers/user/userPromotionController.js'; // reuse helpers
+
 import mongoose from 'mongoose';
 
 // 🔧 Centralized helper for shades/colors
@@ -163,11 +166,12 @@ export const getAllFilteredProducts = async (req, res) => {
     }
 };
 // ✅ Single product with recommendations, messages & parent category fallback
+
 export const getSingleProduct = async (req, res) => {
     try {
         const productId = req.params.id;
 
-        // 🔹 Increment view count
+        // 🔹 Fetch product and increment views
         const product = await Product.findByIdAndUpdate(
             productId,
             { $inc: { views: 1 } },
@@ -175,7 +179,7 @@ export const getSingleProduct = async (req, res) => {
         );
         if (!product) return res.status(404).json({ message: 'Product not found' });
 
-        // 🔹 Track recent products & categories for logged-in users
+        // 🔹 Track recent products & categories
         if (req.user?.id) {
             const categoryValue = mongoose.Types.ObjectId.isValid(product.category)
                 ? product.category
@@ -202,18 +206,61 @@ export const getSingleProduct = async (req, res) => {
         }
 
         // 🔹 Calculate average rating
-        const allActiveReviews = await Review.find({ productId: product._id, status: "Active" }).select("rating");
-        const totalRating = allActiveReviews.reduce((sum, r) => sum + r.rating, 0);
-        const avgRating = allActiveReviews.length ? parseFloat((totalRating / allActiveReviews.length).toFixed(1)) : 0;
+        const reviews = await Review.find({ productId: product._id, status: "Active" }).select("rating");
+        const totalRating = reviews.reduce((sum, r) => sum + r.rating, 0);
+        const avgRating = reviews.length ? parseFloat((totalRating / reviews.length).toFixed(1)) : 0;
 
-        const { shadeOptions, colorOptions } = buildOptions(product);
+        // 🔹 Fetch all promotions
+        const promotions = await Promotion.find({}).lean();
 
-        // 🔹 Get recommendations from centralized service
-        const moreLikeThis = await getRecommendations({ mode: "moreLikeThis", productId: product._id, limit: 6 });
-        const boughtTogether = await getRecommendations({ mode: "boughtTogether", productId: product._id, limit: 6 });
-        const alsoViewed = await getRecommendations({ mode: "alsoViewed", productId: product._id, userId: req.user?.id, limit: 6 });
+        // 🔹 Find best applicable promotion for this product
+        let bestPromo = null;
+        let discountedPrice = product.price ?? product.mrp ?? 0;
+        let discountPercent = 0;
+        let discountAmount = 0;
+        let badge = null;
+        let promoMessage = null;
 
-        // 🔹 Return product + recommendations
+        promotions.forEach((promo) => {
+            if (productMatchesPromo(product, promo)) {
+                const { price, discountAmount: da, discountPercent: dp } = applyFlatDiscount(product.mrp ?? product.price, promo);
+                if (!bestPromo || dp > discountPercent) {
+                    bestPromo = promo;
+                    discountedPrice = price;
+                    discountPercent = dp;
+                    discountAmount = da;
+                }
+            }
+        });
+
+        // 🔹 Set badge & promoMessage
+        if (bestPromo) {
+            const promoType = bestPromo.promotionType;
+            if (promoType === "discount") {
+                badge = bestPromo.discountUnit === "percent"
+                    ? `${bestPromo.discountValue}% Off`
+                    : `₹${asMoney(bestPromo.discountValue)} Off`;
+                promoMessage = `Save ${badge} on this product`;
+            } else if (promoType === "tieredDiscount") {
+                const tiers = Array.isArray(bestPromo.promotionConfig?.tiers) ? bestPromo.promotionConfig.tiers : [];
+                const bestTierPercent = tiers.length ? Math.max(...tiers.map(t => t.discountPercent || 0)) : 0;
+                badge = `Buy More Save More (Up to ${bestTierPercent}%)`;
+                promoMessage = `Add more to save up to ${bestTierPercent}%`;
+            } else if (promoType === "bogo" || promoType === "buy1get1") {
+                const bq = bestPromo.promotionConfig?.buyQty ?? 1;
+                const gq = bestPromo.promotionConfig?.getQty ?? 1;
+                badge = `BOGO ${bq}+${gq}`;
+                promoMessage = `Buy ${bq}, Get ${gq} Free`;
+            } else if (promoType === "bundle") {
+                badge = "Bundle Deal";
+                promoMessage = "Special price when bought together";
+            } else if (promoType === "gift") {
+                badge = "Free Gift";
+                promoMessage = "Get a free gift on qualifying order";
+            }
+        }
+
+        // 🔹 Return product
         res.status(200).json({
             _id: product._id,
             name: product.name,
@@ -224,22 +271,19 @@ export const getSingleProduct = async (req, res) => {
             features: product.features || [],
             howToUse: product.howToUse || "",
             ingredients: product.ingredients || [],
-            price: product.price,
-            mrp: product.mrp,
-            discountPercent: product.mrp ? Math.round(((product.mrp - product.price) / product.mrp) * 100) : 0,
+            price: Math.round(discountedPrice),
+            mrp: Math.round(product.mrp ?? product.price),
+            discountPercent: Math.max(0, Math.round(discountPercent)),
+            discountAmount: Math.max(0, Math.round(discountAmount)),
+            badge,
+            promoMessage,
             images: normalizeImages(product.images || []),
             category: categoryObj,
-            shadeOptions,
-            colorOptions,
+            shadeOptions: buildOptions(product).shadeOptions,
+            colorOptions: buildOptions(product).colorOptions,
             foundationVariants: product.foundationVariants || [],
             avgRating,
-            totalRatings: allActiveReviews.length,
-            inStock: product.inStock ?? true,
-            recommendations: {
-                moreLikeThis: { products: moreLikeThis.products, message: moreLikeThis.message },
-                boughtTogether: { products: boughtTogether.products, message: boughtTogether.message },
-                alsoViewed: { products: alsoViewed.products, message: alsoViewed.message }
-            }
+            totalRatings: reviews.length,
         });
 
     } catch (err) {

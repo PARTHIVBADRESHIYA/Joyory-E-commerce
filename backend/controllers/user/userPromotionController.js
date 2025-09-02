@@ -24,12 +24,13 @@ export const getCountdown = (endDate) => {
 };
 
 export const productMatchesPromo = (product, promo) => {
-    // scope=product
+    // scope = product
     if (promo.scope === "product" && Array.isArray(promo.products) && promo.products.length) {
         const pid = product._id?.toString?.() || product._id;
         return promo.products.some((p) => p.toString() === pid);
     }
-    // scope=category
+
+    // scope = category
     if (promo.scope === "category" && Array.isArray(promo.categories) && promo.categories.length) {
         const catId = product.category?.toString?.();
         const matchesCat = promo.categories.some((c) => c?.category?.toString?.() === catId);
@@ -40,6 +41,16 @@ export const productMatchesPromo = (product, promo) => {
             : false;
         return matchesCat || matchesHierarchy;
     }
+
+    // scope = brand
+    if (promo.scope === "brand" && Array.isArray(promo.brands) && promo.brands.length) {
+        const productBrandId = product.brand?._id?.toString?.() || product.brand?.toString?.();
+        return promo.brands.some((b) => {
+            const bId = b?.brand?._id?.toString?.() || b?.brand?.toString?.();
+            return bId && bId === productBrandId;
+        });
+    }
+
     return false;
 };
 
@@ -195,7 +206,7 @@ export const getPromotionProducts = async (req, res) => {
         // 🔹 Base match
         const baseOr = [];
         if (promo.scope === "category" && promo.categories?.length) {
-            const catIds = promo.categories.map((c) => c?.category?._id).filter(Boolean).map((id) => new ObjectId(id));
+            const catIds = promo.categories.map((c) => c?.category?._id).filter(Boolean).map(id => new ObjectId(id));
             if (catIds.length) {
                 baseOr.push({ category: { $in: catIds } });
                 baseOr.push({ categoryHierarchy: { $in: catIds } });
@@ -203,7 +214,13 @@ export const getPromotionProducts = async (req, res) => {
         } else if (promo.scope === "product" && promo.products?.length) {
             const pids = promo.products.map((p) => new ObjectId(p._id ?? p));
             baseOr.push({ _id: { $in: pids } });
+        } else if (promo.scope === "brand" && promo.brands?.length) {
+            const brandIds = promo.brands.map((b) => new ObjectId(b?.brand?._id ?? b?.brand)).filter(Boolean);
+            if (brandIds.length) {
+                baseOr.push({ brand: { $in: brandIds } });
+            }
         }
+
 
         const match = {};
         if (baseOr.length) match.$or = baseOr;

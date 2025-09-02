@@ -615,15 +615,12 @@
 
 
 
-
-
-
 // controllers/admin/promotionController.js
 import Promotion from "../models/Promotion.js";
 import Category from "../models/Category.js";
 import Product from "../models/Product.js";
-import mongoose from "mongoose";
 import Brand from "../models/Brand.js";
+import mongoose from "mongoose";
 
 /* ---------- helpers ---------- */
 const isObjectId = (s) => typeof s === "string" && /^[0-9a-fA-F]{24}$/.test(s);
@@ -636,25 +633,21 @@ const calculateStatus = (start, end) => {
 };
 
 const resolveBrands = async (brands) => {
-  if (!brands || brands.length === 0) return [];
+  if (!brands?.length) return [];
   const resolved = await Promise.all(
     brands.map(async (b) => {
       if (typeof b === "object" && b._id)
         return { brand: b._id, slug: b.slug || "", customId: b._id.toString() };
-
       if (typeof b === "object" && b.brand)
         return { brand: b.brand, slug: b.slug || "", customId: b.brand.toString() };
-
       if (typeof b === "string" && isObjectId(b)) {
         const br = await Brand.findById(b).select("_id slug");
         return br ? { brand: br._id, slug: br.slug, customId: br._id.toString() } : null;
       }
-
       if (typeof b === "string") {
         const br = await Brand.findOne({ slug: b }).select("_id slug");
         return br ? { brand: br._id, slug: br.slug, customId: br._id.toString() } : null;
       }
-
       return null;
     })
   );
@@ -662,7 +655,7 @@ const resolveBrands = async (brands) => {
 };
 
 const resolveCategories = async (categories) => {
-  if (!categories || categories.length === 0) return [];
+  if (!categories?.length) return [];
   const resolved = await Promise.all(
     categories.map(async (c) => {
       if (typeof c === "object" && c._id)
@@ -683,114 +676,65 @@ const resolveCategories = async (categories) => {
   return resolved.filter(Boolean);
 };
 
-const resolveProducts = async (products) => {
-  if (!products || products.length === 0) return [];
-  const ids = products
-    .flatMap((p) => (typeof p === "string" ? p.split(",") : [p]))
-    .map((s) => s?.toString().trim())
-    .filter(Boolean)
-    .filter(isObjectId)
-    .map((id) => new mongoose.Types.ObjectId(id));
-  if (!ids.length) return [];
-  const found = await Product.find({ _id: { $in: ids } }).select("_id");
-  return found.map((p) => p._id);
-};
-
-// Validate + normalize per type
+// Validate & normalize promotion types
 const normalizeByType = async (body) => {
   const { promotionType, promotionConfig = {}, discountUnit, discountValue } = body;
 
   switch (promotionType) {
-    case "discount": {
-      if (discountUnit !== "percent" && discountUnit !== "amount") {
+    case "discount":
+      if (!["percent", "amount"].includes(discountUnit))
         throw new Error("discountUnit must be 'percent' or 'amount'");
-      }
-      if (typeof discountValue !== "number" || discountValue <= 0) {
-        throw new Error("discountValue must be a positive number");
-      }
+      if (!(discountValue > 0)) throw new Error("discountValue must be positive");
       return { promotionConfig: {} };
-    }
 
-    case "tieredDiscount": {
+    case "tieredDiscount":
       const tiers = promotionConfig.tiers || [];
-      if (!Array.isArray(tiers) || tiers.length === 0)
-        throw new Error("tieredDiscount requires non-empty tiers");
+      if (!tiers.length) throw new Error("tieredDiscount requires non-empty tiers");
       tiers.forEach((t) => {
-        if (typeof t.minQty !== "number" || t.minQty < 1)
-          throw new Error("Each tier requires minQty >= 1");
-        const pc = Number(t.discountPercent || 0);
-        if (pc <= 0 || pc > 95)
+        if (!(t.minQty >= 1)) throw new Error("Each tier requires minQty >= 1");
+        if (!(t.discountPercent > 0 && t.discountPercent <= 95))
           throw new Error("tier discountPercent must be 1..95");
       });
-      const tierScope =
-        promotionConfig.tierScope === "perOrder" ? "perOrder" : "perProduct";
-      return {
-        promotionConfig: { tiers: tiers.sort((a, b) => a.minQty - b.minQty), tierScope },
-      };
-    }
-
-    case "bundle": {
-      const bundleProducts = (promotionConfig.bundleProducts || []).filter(isObjectId);
-      const bundlePrice = Number(promotionConfig.bundlePrice || 0);
-      if (bundleProducts.length < 2)
-        throw new Error("bundle requires at least 2 bundleProducts");
-      if (!(bundlePrice > 0)) throw new Error("bundlePrice must be > 0");
-      return { promotionConfig: { bundleProducts, bundlePrice } };
-    }
-
-    case "gift": {
-      const minOrderValue = Number(promotionConfig.minOrderValue || 0);
-      const giftProductId = promotionConfig.giftProductId;
-      if (!(minOrderValue > 0)) throw new Error("gift requires minOrderValue > 0");
-      if (!isObjectId(giftProductId || ""))
-        throw new Error("gift requires valid giftProductId");
-      return { promotionConfig: { minOrderValue, giftProductId } };
-    }
-
-    case "freeShipping": {
-      const mov = Number(promotionConfig.minOrderValue || 0);
-      if (!(mov > 0)) throw new Error("freeShipping requires minOrderValue > 0");
-      return { promotionConfig: { minOrderValue: mov } };
-    }
-
-    case "newUser": {
-      const dp = Number(promotionConfig.discountPercent || 0);
-      const maxDiscount = Number(promotionConfig.maxDiscount || 0);
-      if (!(dp > 0 && dp <= 50))
-        throw new Error("newUser discountPercent must be 1..50");
-      if (!(maxDiscount >= 0))
-        throw new Error("newUser maxDiscount must be >= 0");
-      return { promotionConfig: { discountPercent: dp, maxDiscount } };
-    }
-
-    case "paymentOffer": {
-      const provider = (promotionConfig.provider || "").trim();
-      const methods = Array.isArray(promotionConfig.methods)
-        ? promotionConfig.methods
-        : [];
-      const dp = Number(promotionConfig.discountPercent || 0);
-      const maxDiscount = Number(promotionConfig.maxDiscount || 0);
-      const mov = Number(promotionConfig.minOrderValue || 0);
-      if (!provider) throw new Error("paymentOffer requires provider");
-      if (!methods.length) throw new Error("paymentOffer requires methods");
-      if (!(dp > 0 && dp <= 30))
-        throw new Error("paymentOffer discountPercent must be 1..30");
-      if (!(maxDiscount >= 0))
-        throw new Error("paymentOffer maxDiscount must be >= 0");
-      if (!(mov >= 0))
-        throw new Error("paymentOffer minOrderValue must be >= 0");
       return {
         promotionConfig: {
-          provider,
-          methods,
-          discountPercent: dp,
-          maxDiscount,
-          minOrderValue: mov,
+          tiers: tiers.sort((a, b) => a.minQty - b.minQty),
+          tierScope: promotionConfig.tierScope === "perOrder" ? "perOrder" : "perProduct",
         },
       };
-    }
 
-    case "bogo": {
+    case "bundle":
+      const bundleProducts = (promotionConfig.bundleProducts || []).filter(isObjectId);
+      const bundlePrice = Number(promotionConfig.bundlePrice || 0);
+      if (bundleProducts.length < 2) throw new Error("bundle requires at least 2 products");
+      if (!(bundlePrice > 0)) throw new Error("bundlePrice must be > 0");
+      return { promotionConfig: { bundleProducts, bundlePrice } };
+
+    case "gift":
+      const minOrderValue = Number(promotionConfig.minOrderValue || 0);
+      if (!(minOrderValue > 0)) throw new Error("gift requires minOrderValue > 0");
+      if (!isObjectId(promotionConfig.giftProductId || ""))
+        throw new Error("gift requires valid giftProductId");
+      return { promotionConfig: { minOrderValue, giftProductId: promotionConfig.giftProductId } };
+
+    case "freeShipping":
+      if (!(promotionConfig.minOrderValue > 0))
+        throw new Error("freeShipping requires minOrderValue > 0");
+      return { promotionConfig: { minOrderValue: promotionConfig.minOrderValue } };
+
+    case "newUser":
+      if (!(promotionConfig.discountPercent > 0 && promotionConfig.discountPercent <= 50))
+        throw new Error("newUser discountPercent must be 1..50");
+      if (!(promotionConfig.maxDiscount >= 0))
+        throw new Error("newUser maxDiscount must be >= 0");
+      return { promotionConfig };
+
+    case "paymentOffer":
+      if (!promotionConfig.provider) throw new Error("paymentOffer requires provider");
+      if (!Array.isArray(promotionConfig.methods) || !promotionConfig.methods.length)
+        throw new Error("paymentOffer requires methods");
+      return { promotionConfig };
+
+    case "bogo":
       const cfg = {
         buyQty: Number(promotionConfig.buyQty || 1),
         getQty: Number(promotionConfig.getQty || 1),
@@ -799,13 +743,9 @@ const normalizeByType = async (body) => {
       };
       if (cfg.buyQty < 1 || cfg.getQty < 1)
         throw new Error("bogo requires buyQty>=1 and getQty>=1");
-      if (!cfg.sameProduct && !isObjectId(cfg.freeProductId || "")) {
-        throw new Error(
-          "bogo with sameProduct=false requires valid freeProductId"
-        );
-      }
+      if (!cfg.sameProduct && !isObjectId(cfg.freeProductId || ""))
+        throw new Error("bogo with sameProduct=false requires valid freeProductId");
       return { promotionConfig: cfg };
-    }
 
     default:
       throw new Error("Unsupported promotionType");
@@ -818,35 +758,21 @@ const normalizeByType = async (body) => {
 const createPromotion = async (req, res) => {
   try {
     const status = calculateStatus(req.body.startDate, req.body.endDate);
-
     const categories = await resolveCategories(req.body.categories);
-    if (req.body.categories?.length && categories.length === 0) {
-      return res.status(400).json({ message: "Invalid categories provided" });
-    }
-
-    const products = await resolveProducts(req.body.products);
-    if (req.body.products?.length && products.length === 0) {
-      return res.status(400).json({ message: "Invalid products provided" });
-    }
-
     const brands = await resolveBrands(req.body.brands);
-    if (req.body.brands?.length && brands.length === 0) {
-      return res.status(400).json({ message: "Invalid brands provided" });
-    }
 
-    // images from multer + body
-    const images = [];
-    if (req.files?.length) images.push(...req.files.map((f) => f.path));
-    if (req.body.image) images.push(req.body.image);
-    if (Array.isArray(req.body.images)) images.push(...req.body.images.filter(Boolean));
+    // Images
+    const images = [
+      ...(req.files?.map((f) => f.path) || []),
+      ...(Array.isArray(req.body.images) ? req.body.images.filter(Boolean) : []),
+      ...(req.body.image ? [req.body.image] : []),
+    ];
 
-    // per-type normalize
     const { promotionConfig } = await normalizeByType(req.body);
 
     const promotion = await Promotion.create({
       ...req.body,
       categories,
-      products,
       brands,
       status,
       images,
@@ -855,9 +781,7 @@ const createPromotion = async (req, res) => {
 
     res.status(201).json({ message: "Promotion created", promotion });
   } catch (err) {
-    res
-      .status(400)
-      .json({ message: "Failed to create promotion", error: err.message });
+    res.status(400).json({ message: "Failed to create promotion", error: err.message });
   }
 };
 
@@ -868,25 +792,13 @@ const updatePromotion = async (req, res) => {
     const status = calculateStatus(req.body.startDate, req.body.endDate);
 
     const categories = await resolveCategories(req.body.categories);
-    if (req.body.categories?.length && categories.length === 0) {
-      return res.status(400).json({ message: "Invalid categories provided" });
-    }
-
-    const products = await resolveProducts(req.body.products);
-    if (req.body.products?.length && products.length === 0) {
-      return res.status(400).json({ message: "Invalid products provided" });
-    }
-
     const brands = await resolveBrands(req.body.brands);
-    if (req.body.brands?.length && brands.length === 0) {
-      return res.status(400).json({ message: "Invalid brands provided" });
-    }
 
-    const incomingImages = [];
-    if (req.files?.length) incomingImages.push(...req.files.map((f) => f.path));
-    if (req.body.image) incomingImages.push(req.body.image);
-    if (Array.isArray(req.body.images))
-      incomingImages.push(...req.body.images.filter(Boolean));
+    const incomingImages = [
+      ...(req.files?.map((f) => f.path) || []),
+      ...(Array.isArray(req.body.images) ? req.body.images.filter(Boolean) : []),
+      ...(req.body.image ? [req.body.image] : []),
+    ];
 
     const existing = await Promotion.findById(id).select("images");
     if (!existing) return res.status(404).json({ message: "Promotion not found" });
@@ -896,7 +808,6 @@ const updatePromotion = async (req, res) => {
     const updateData = {
       ...req.body,
       categories,
-      products,
       brands,
       status,
       promotionConfig,
@@ -909,13 +820,13 @@ const updatePromotion = async (req, res) => {
       new: true,
       runValidators: true,
     });
+
     res.status(200).json({ message: "Promotion updated", promotion });
   } catch (err) {
-    res
-      .status(400)
-      .json({ message: "Failed to update promotion", error: err.message });
+    res.status(400).json({ message: "Failed to update promotion", error: err.message });
   }
 };
+
 
 // ✅ Delete Promotion
 const deletePromotion = async (req, res) => {
