@@ -479,7 +479,8 @@ export const getSingleProduct = async (req, res) => {
             foundationVariants: product.foundationVariants || [],
             avgRating,
             totalRatings: count || 0,
-
+            // ✅ Add this
+            inStock: product.inStock ?? true,
             // ✅ Added recommendation sections
             recommendations: {
                 moreLikeThis,
