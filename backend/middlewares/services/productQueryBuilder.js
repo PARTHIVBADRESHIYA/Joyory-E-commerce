@@ -106,8 +106,8 @@ export const fetchProducts = async (options = {}) => {
         brandIds = [],
         minPrice,
         maxPrice,
-        discountMin,        // e.g. 20 (20%+)
-        ratingMin,          // e.g. 4 (4+ stars)
+        discountMin,
+        ratingMin,
         skinTypes = [],
         skinConcerns = [],
         shades = [],
@@ -119,11 +119,10 @@ export const fetchProducts = async (options = {}) => {
         ageGroup,
         occasion,
         inStock = true,
-        // 🔹 Newly added
-        descendantCategoryIds = [],   // auto expand subcategories
-        tags = [],                    // "Best Seller", "New", "Trending"
-        colorFamilies = [],           // "Red", "Nude", "Pink"
-        promoOnly = false,            // filter only promo-eligible products
+        descendantCategoryIds = [],
+        tags = [],
+        colorFamilies = [],
+        promoOnly = false,
         sort = "newest",
         page = 1,
         limit = 20,
@@ -131,12 +130,13 @@ export const fetchProducts = async (options = {}) => {
 
     const match = {};
 
-    if (search) {
-        match.name = { $regex: escapeRegex(search), $options: "i" };
-    }
-    if (categoryIds.length) match.category = { $in: categoryIds };
-    if (descendantCategoryIds.length) {
-        match.category = { $in: [...(match.category?.$in || []), ...descendantCategoryIds] };
+    if (search) match.name = { $regex: escapeRegex(search), $options: "i" };
+    if (categoryIds.length || descendantCategoryIds.length) {
+        const allCatIds = [...(categoryIds || []), ...(descendantCategoryIds || [])];
+        match.$or = [
+            { category: { $in: allCatIds } },
+            { categories: { $in: allCatIds } },
+        ];
     }
     if (brandIds.length) match.brand = { $in: brandIds };
     if (minPrice || maxPrice) {
@@ -144,12 +144,8 @@ export const fetchProducts = async (options = {}) => {
         if (minPrice) match.price.$gte = minPrice;
         if (maxPrice) match.price.$lte = maxPrice;
     }
-    if (discountMin) {
-        match.discountPercent = { $gte: discountMin };
-    }
-    if (ratingMin) {
-        match.rating = { $gte: ratingMin };
-    }
+    if (discountMin) match.discountPercent = { $gte: discountMin };
+    if (ratingMin) match.rating = { $gte: ratingMin };
     if (skinTypes.length) match.skinType = { $in: skinTypes };
     if (skinConcerns.length) match.skinConcern = { $in: skinConcerns };
     if (shades.length) match.shade = { $in: shades };
@@ -161,8 +157,6 @@ export const fetchProducts = async (options = {}) => {
     if (ageGroup) match.ageGroup = ageGroup;
     if (occasion) match.occasion = occasion;
     if (inStock) match.stock = { $gt: 0 };
-
-    // 🔹 New filters
     if (tags.length) match.tags = { $in: tags };
     if (colorFamilies.length) match.colorFamily = { $in: colorFamilies };
     if (promoOnly) match.hasPromotion = true;
@@ -175,7 +169,6 @@ export const fetchProducts = async (options = {}) => {
         discount: { discountPercent: -1 },
         rating: { rating: -1 },
         popular: { popularityScore: -1 },
-        // 🔹 Optional extras
         best_seller: { sales: -1 },
         most_reviewed: { reviewCount: -1 },
     };
@@ -197,6 +190,18 @@ export const fetchProducts = async (options = {}) => {
     const products = aggResult?.data ?? [];
     const total = aggResult?.totalArr?.[0]?.count ?? 0;
 
+    // ✅ Build user-friendly message
+    let message = null;
+    if (total === 0) {
+        if (search) {
+            message = `No products found matching “${search}”. Try adjusting your search.`;
+        } else if (brandIds.length || skinTypes.length || minPrice || maxPrice || discountMin || ratingMin) {
+            message = "No products found with the selected filters. Please try removing some filters.";
+        } else {
+            message = "No products available at the moment. Please check back later.";
+        }
+    }
+
     return {
         products,
         pagination: {
@@ -205,5 +210,6 @@ export const fetchProducts = async (options = {}) => {
             total,
             pages: Math.ceil(total / limit) || 1,
         },
+        message, // 👈 new field
     };
 };

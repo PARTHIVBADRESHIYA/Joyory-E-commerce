@@ -1,22 +1,24 @@
-import url from 'node:url';
-
-
 export function parseVideoSource(sourceUrl) {
     const u = new URL(sourceUrl);
     const host = u.hostname.replace('www.', '');
 
-
-    // YouTube long or short
+    // YouTube watch, shorts, youtu.be
     if (host.includes('youtube.com')) {
-        const id = u.searchParams.get('v');
-        if (!id) throw new Error('YouTube URL missing v param');
+        let id = u.searchParams.get('v');
+
+        // Handle Shorts
+        if (!id && u.pathname.startsWith('/shorts/')) {
+            id = u.pathname.split('/')[2]; // e.g. /shorts/Pt4UjdiWrmc
+        }
+
+        if (!id) throw new Error('YouTube URL missing valid video ID');
         return { provider: 'youtube', providerId: id, videoUrl: sourceUrl };
     }
+
     if (host === 'youtu.be') {
         const id = u.pathname.replace('/', '');
         return { provider: 'youtube', providerId: id, videoUrl: sourceUrl };
     }
-
 
     // Vimeo
     if (host.includes('vimeo.com')) {
@@ -24,12 +26,10 @@ export function parseVideoSource(sourceUrl) {
         return { provider: 'vimeo', providerId: id, videoUrl: sourceUrl };
     }
 
-
-    // Fallback: treat as direct MP4/stream
+    // MP4
     if (/\.mp4($|\?)/i.test(sourceUrl)) {
         return { provider: 'mp4', providerId: null, videoUrl: sourceUrl };
     }
-
 
     throw new Error('Unsupported video URL');
 }
@@ -38,6 +38,5 @@ export function parseVideoSource(sourceUrl) {
 export function buildEmbedUrl({ provider, providerId, videoUrl }) {
     if (provider === 'youtube') return `https://www.youtube.com/embed/${providerId}`;
     if (provider === 'vimeo') return `https://player.vimeo.com/video/${providerId}`;
-    // mp4 -> return raw url; frontend uses <video src>
-    return videoUrl;
+    return videoUrl; // mp4 direct
 }
