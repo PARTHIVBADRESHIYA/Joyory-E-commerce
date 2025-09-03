@@ -11,7 +11,6 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key';
 if (!JWT_SECRET) throw new Error("JWT_SECRET is not defined in env");
 ;
 
-
 export const verifyOrderOwnership = async (req, res, next) => {
     try {
         const userId = req.user._id;
@@ -73,33 +72,6 @@ export const authenticateUser = async (req, res, next) => {
         }
         next();
     };
-
-
-// const verifyAdminOrTeamMember = async (req, res, next) => {
-//     const authHeader = req.headers.authorization;
-//     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-//         return res.status(401).json({ message: 'Unauthorized admin: No token' });
-//     }
-
-//     const token = authHeader.split(' ')[1];
-
-//     try {
-//         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-//         const admin = await Admin.findById(decoded.id);
-
-//         if (!admin) {
-//             return res.status(401).json({ message: 'Unauthorized admin: Invalid token' });
-//         }
-
-//         req.admin = admin;
-//         next();
-//     } catch (err) {
-//         res.status(401).json({ message: 'Unauthorized admin: Token error', error: err.message });
-//     }
-// };
-
-// export { authenticateUser, verifyAdminOrTeamMember };
-
 
 export const verifyAdminOrTeamMember = async (req, res, next) => {
     const token = req.headers.authorization?.split(' ')[1];

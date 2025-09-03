@@ -1017,11 +1017,15 @@ const updateVariantImages = async (req, res) => {
             return res.status(400).json({ message: "❌ No images uploaded" });
         }
 
-        // Always replace whatever is there (if nothing, it just sets new)
         const product = await Product.findOneAndUpdate(
             { _id: id, "foundationVariants.sku": sku },
             {
-                $set: { "foundationVariants.$.images": uploadedImages }
+                $push: {
+                    "foundationVariants.$.images": {
+                        $each: uploadedImages,
+                        $slice: -5   // ✅ keep only the last 5 images
+                    }
+                }
             },
             { new: true }
         );
@@ -1039,6 +1043,7 @@ const updateVariantImages = async (req, res) => {
         res.status(500).json({ message: "Failed to update variant images", error: err.message });
     }
 };
+
 
 
 export { addProductController, getSingleProductById, getAllProducts, updateProductStock, updateProductById, deleteProduct, updateVariantImages };

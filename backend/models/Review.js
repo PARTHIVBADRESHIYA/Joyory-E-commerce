@@ -82,6 +82,7 @@ const reviewSchema = new mongoose.Schema({
 
     // Engagement
     helpfulVotes: { type: Number, default: 0 },
+    helpfulVoters: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     reactions: {
         like: { type: Number, default: 0 },
         love: { type: Number, default: 0 },

@@ -401,16 +401,30 @@ const submitReview = async (req, res) => {
  */
 const voteReviewHelpful = async (req, res) => {
     try {
-        const { vote } = req.body; // "up" or "down"
         const { id } = req.params;
+        const userId = req.user._id; // assuming you have auth middleware that sets req.user
 
         const review = await Review.findById(id);
         if (!review) return res.status(404).json({ message: "Review not found" });
 
-        review.helpfulVotes += vote === "up" ? 1 : -1;
+        const alreadyVoted = review.helpfulVoters.includes(userId);
+
+        if (alreadyVoted) {
+            // User cancels vote
+            review.helpfulVoters.pull(userId);
+            review.helpfulVotes = Math.max(0, review.helpfulVotes - 1);
+        } else {
+            // User adds vote
+            review.helpfulVoters.push(userId);
+            review.helpfulVotes += 1;
+        }
+
         await review.save();
 
-        res.json({ message: "Vote recorded", helpfulVotes: review.helpfulVotes });
+        res.json({
+            message: alreadyVoted ? "Vote removed" : "Vote added",
+            helpfulVotes: review.helpfulVotes
+        });
     } catch (err) {
         res.status(500).json({ message: "Failed to vote", error: err.message });
     }
