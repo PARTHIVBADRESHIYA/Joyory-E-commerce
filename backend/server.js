@@ -657,6 +657,8 @@ import testPickUpRoutes from "./routes/testPickUpRoutes.js";
 import mockShippingRoutes from "./routes/mockShippingRoutes.js";
 import shadeFinderRoutes from "./routes/shadeFinderRoutes.js";
 import skinTypeAdminRoutes from "./routes/skinTypeRoutes.js";
+import giftCardRoutes from "./routes/giftCardTemplateRoutes.js";
+
 // User side
 import userProductRoutes from "./routes/user/userProductRoutes.js";
 import userCartAndOrderRoutes from "./routes/user/userCartAndOrderRoutes.js";
@@ -668,6 +670,7 @@ import userVideoRoutes from "./routes/user/userVideoRoutes.js";
 import userBrandRoutes from "./routes/user/userBrandRoutes.js";
 import userDiscountRoutes from "./routes/user/userDiscountRoutes.js";
 import userShadeFinderRoutes from "./routes/user/userShadeFinderRoutes.js";
+import userGiftCardRoutes from "./routes/user/userGiftCardRoutes.js";
 
 // ================= CONNECT DB =================
 connectDB();
@@ -751,6 +754,7 @@ app.use("/api/security", securityRoutes);
 app.use("/api/comments", commentRoutes);
 app.use("/api", testRoutes);
 app.use("/api/shadefinder", shadeFinderRoutes);
+app.use("/api/giftcards", giftCardRoutes);
 app.use("/api/skintypes", skinTypeAdminRoutes);
 app.use("/api/webhooks", webhookRoutes);
 app.use("/api/brands", brandRoutes);
@@ -769,6 +773,7 @@ app.use("/api/user/videos", userVideoRoutes);
 app.use("/api/user/brands", userBrandRoutes);
 app.use("/api/user/discounts", userDiscountRoutes);
 app.use("/api/user/shadefinder", userShadeFinderRoutes);
+app.use("/api/user/giftcards", userGiftCardRoutes);
 
 // ================= TEST ROUTE =================
 app.get("/", (req, res) => res.send("✅ API is running..."));

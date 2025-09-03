@@ -3,7 +3,8 @@ import Order from '../../../models/Order.js';
 import { encrypt, decrypt } from '../../../middlewares/utils/encryption.js';
 // import { createShiprocketOrder } from "../../../middlewares/services/shiprocket.js";
 import { createShipment } from "../../../middlewares/services/shippingProvider.js";
-
+import GiftCard from "../../../models/GiftCard.js"; // ✅ Import your GiftCard model
+import { sendEmail } from "../../../middlewares/utils/emailService.js"; // ✅ assume you already have an email service
 import Product from '../../../models/Product.js';
 import Affiliate from '../../../models/Affiliate.js';
 import mongoose from 'mongoose';
@@ -360,6 +361,291 @@ export const verifyRazorpayPayment = async (req, res) => {
     }
 };
 
+//after giftcard use this
+// export const verifyRazorpayPayment = async (req, res) => {
+//     try {
+//         const {
+//             orderId,
+//             razorpay_order_id,
+//             razorpay_payment_id,
+//             razorpay_signature,
+//             shippingAddress,
+//         } = req.body;
+
+//         console.log("📥 Incoming payment verification request:", req.body);
+
+//         // STEP 1: Validate fields
+//         if (!orderId || !razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+//             console.error("❌ Missing fields:", { orderId, razorpay_order_id, razorpay_payment_id, razorpay_signature });
+//             return res.status(400).json({
+//                 step: "FIELD_VALIDATION",
+//                 success: false,
+//                 message: "Missing required payment fields",
+//                 debug: { orderId, razorpay_order_id, razorpay_payment_id, razorpay_signature }
+//             });
+//         }
+
+//         // STEP 2: Fetch order
+//         const order = await Order.findById(orderId)
+//             .populate("user")
+//             .populate("products.productId");
+
+//         if (!order) {
+//             console.error("❌ Order not found:", orderId);
+//             return res.status(404).json({
+//                 step: "ORDER_FETCH",
+//                 success: false,
+//                 message: "Order not found",
+//                 orderId
+//             });
+//         }
+
+//         // STEP 3: Idempotency check
+//         if (order.paid) {
+//             console.warn("⚠️ Order already paid:", order._id);
+//             return res.status(200).json({
+//                 step: "IDEMPOTENCY",
+//                 success: true,
+//                 message: "Order already verified & paid",
+//                 order
+//             });
+//         }
+
+//         // STEP 4: Razorpay Order match
+//         if (order.razorpayOrderId && order.razorpayOrderId !== razorpay_order_id) {
+//             console.error("❌ Razorpay Order ID mismatch", { expected: order.razorpayOrderId, got: razorpay_order_id });
+//             return res.status(400).json({
+//                 step: "ORDER_MATCH",
+//                 success: false,
+//                 message: "Order mismatch",
+//                 debug: { expected: order.razorpayOrderId, got: razorpay_order_id }
+//             });
+//         }
+
+//         // STEP 5: Signature verification
+//         const signBody = `${razorpay_order_id}|${razorpay_payment_id}`;
+//         const expectedSignature = crypto
+//             .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+//             .update(signBody)
+//             .digest("hex");
+
+//         if (expectedSignature !== razorpay_signature) {
+//             console.error("❌ Invalid signature", { expectedSignature, got: razorpay_signature });
+//             return res.status(400).json({
+//                 step: "SIGNATURE",
+//                 success: false,
+//                 message: "Invalid signature / payment failed",
+//                 debug: { expectedSignature, got: razorpay_signature }
+//             });
+//         }
+//         console.log("✅ Signature verified");
+
+//         // STEP 6: Fetch payment from Razorpay
+//         let rpPayment;
+//         try {
+//             rpPayment = await razorpay.payments.fetch(razorpay_payment_id);
+//             console.log("✅ Razorpay payment fetched:", rpPayment);
+//         } catch (fetchErr) {
+//             console.error("❌ Error fetching Razorpay payment:", fetchErr.response?.data || fetchErr.message);
+//             return res.status(500).json({
+//                 step: "RAZORPAY_FETCH",
+//                 success: false,
+//                 message: "Failed to fetch payment from Razorpay",
+//                 error: fetchErr.message,
+//                 details: fetchErr.response?.data || null
+//             });
+//         }
+
+//         // STEP 7: Payment status check
+//         if (rpPayment.status !== "captured") {
+//             console.error("❌ Payment not captured:", rpPayment.status);
+//             return res.status(400).json({
+//                 step: "PAYMENT_STATUS",
+//                 success: false,
+//                 message: `Payment not captured (status: ${rpPayment.status})`,
+//                 debug: rpPayment
+//             });
+//         }
+
+//         // STEP 8: Amount check
+//         const paidAmountInInr = rpPayment.amount / 100;
+//         if (paidAmountInInr !== order.amount) {
+//             console.error("❌ Amount mismatch", { razorpayAmount: paidAmountInInr, orderAmount: order.amount });
+//             return res.status(400).json({
+//                 step: "AMOUNT_CHECK",
+//                 success: false,
+//                 message: "Amount mismatch",
+//                 debug: { razorpayAmount: paidAmountInInr, orderAmount: order.amount }
+//             });
+//         }
+
+
+//         // STEP 9: Deduct stock (Only if it's a product order)
+//         if (order.orderType !== "giftcard") {
+//             for (const item of order.products) {
+//                 const product = await Product.findById(item.productId._id);
+//                 if (!product) {
+//                     console.warn("⚠️ Product not found:", item.productId._id);
+//                     continue;
+//                 }
+
+//                 if (product.quantity < item.quantity) {
+//                     console.error("❌ Insufficient stock:", { product: product.name, available: product.quantity, requested: item.quantity });
+//                     return res.status(400).json({
+//                         step: "STOCK_CHECK",
+//                         success: false,
+//                         message: `Insufficient stock for ${product.name}`,
+//                         debug: { available: product.quantity, requested: item.quantity }
+//                     });
+//                 }
+
+//                 product.quantity -= item.quantity;
+//                 product.sales = (product.sales || 0) + item.quantity;
+//                 product.status =
+//                     product.quantity <= 0
+//                         ? "Out of stock"
+//                         : product.quantity < product.thresholdValue
+//                             ? "Low stock"
+//                             : "In-stock";
+
+//                 await product.save();
+//                 console.log(`✅ Stock updated for product ${product.name}`);
+//             }
+//         }
+
+//         // STEP 10: Mark order as paid
+//         order.paid = true;
+//         order.paymentStatus = "success";
+//         order.paymentMethod === "COD" ? "COD" : "Prepaid"
+//         order.transactionId = razorpay_payment_id;
+//         order.razorpayOrderId = razorpay_order_id;
+//         order.orderStatus = "Processing";
+
+//         if (shippingAddress) {
+//             order.shippingAddress = shippingAddress;
+//         }
+
+//         // STEP 11: Save Payment record (unchanged)
+//         try {
+//             await Payment.create({
+//                 order: order._id,
+//                 method: rpPayment.method || "Razorpay",
+//                 status: "Completed",
+//                 transactionId: razorpay_payment_id,
+//                 amount: order.amount,
+//                 cardHolderName: rpPayment.card ? rpPayment.card.name : undefined,
+//                 cardNumber: rpPayment.card ? rpPayment.card.last4 : undefined,
+//                 expiryDate: rpPayment.card
+//                     ? `${rpPayment.card.expiry_month}/${rpPayment.card.expiry_year}`
+//                     : undefined,
+//                 isActive: true,
+//             });
+//             console.log("✅ Payment record saved");
+//         } catch (paymentErr) {
+//             console.error("❌ Error saving Payment record:", paymentErr);
+//         }
+
+//         // STEP 12: Clear user cart (only if normal product order)
+//         if (order.orderType !== "giftcard") {
+//             try {
+//                 const user = await User.findById(order.user._id);
+//                 if (user) {
+//                     user.cart = [];
+//                     await user.save();
+//                     console.log("✅ User cart cleared");
+//                 }
+//             } catch (userErr) {
+//                 console.error("❌ Error clearing user cart:", userErr);
+//             }
+//         }
+
+//         // ✅ STEP 13: GiftCard Flow
+//         if (order.orderType === "giftcard") {
+//             try {
+//                 const { recipientEmail, recipientName, message } = order.giftDetails;
+
+//                 const giftCard = await GiftCard.create({
+//                     code: "GC-" + Math.random().toString(36).substr(2, 8).toUpperCase(),
+//                     pin: Math.floor(100000 + Math.random() * 900000).toString(),
+//                     amount: order.amount,
+//                     sender: order.user._id,
+//                     recipientEmail,
+//                     recipientName,
+//                     message,
+//                     status: "active",
+//                 });
+
+//                 console.log("🎁 Gift Card generated:", giftCard);
+
+//                 // Send email to recipient
+//                 await sendGiftCardEmail({
+//                     to: recipientEmail,
+//                     fromName: order.user.name,
+//                     recipientName,
+//                     code: giftCard.code,
+//                     pin: giftCard.pin,
+//                     amount: giftCard.amount,
+//                     message,
+//                 });
+
+//                 console.log("📧 Gift Card sent to:", recipientEmail);
+
+//                 // Update order
+//                 order.orderStatus = "GiftCard Sent";
+//             } catch (giftErr) {
+//                 console.error("❌ Gift Card flow failed:", giftErr);
+//             }
+//         } else {
+//             // ✅ STEP 13: Shiprocket Integration (existing for product orders)
+//             let shiprocketRes = null;
+//             try {
+//                 shiprocketRes = await createShipment(order);
+//                 order.shipment = shiprocketRes.shipmentDetails;
+//                 console.log("✅ Shiprocket order created:", order.shipment);
+//             } catch (shipErr) {
+//                 console.error("❌ Shiprocket error:", shipErr.response?.data || shipErr.message);
+//                 return res.status(502).json({
+//                     step: "SHIPROCKET",
+//                     success: false,
+//                     message: "Shiprocket order creation failed",
+//                     error: shipErr.message,
+//                     details: shipErr.response?.data || null
+//                 });
+//             }
+//         }
+
+//         // STEP 14: Tracking history (common)
+//         if (!order.trackingHistory) order.trackingHistory = [];
+//         order.trackingHistory.push(
+//             { status: "Payment Successful", timestamp: new Date(), location: "Online Payment - Razorpay" },
+//             { status: order.orderType === "giftcard" ? "GiftCard Sent" : "Processing", timestamp: new Date(), location: "Store" }
+//         );
+
+//         await order.save();
+//         console.log("✅ Order updated successfully");
+
+//         return res.status(200).json({
+//             step: "COMPLETE",
+//             success: true,
+//             message: order.orderType === "giftcard"
+//                 ? "Payment verified & Gift Card sent 🎁"
+//                 : "Payment verified, stock updated, order paid & shipment created",
+//             paymentMethod: rpPayment.method,
+//             order,
+//         });
+
+//     } catch (err) {
+//         console.error("🔥 Fatal error verifying Razorpay payment:", err);
+//         res.status(500).json({
+//             step: "FATAL",
+//             success: false,
+//             message: "Unexpected server error during payment verification",
+//             error: err.message,
+//             stack: err.stack,
+//             details: err.response?.data || null
+//         });
+//     }
+// };
 
 export const payForOrder = async (req, res) => {
     try {

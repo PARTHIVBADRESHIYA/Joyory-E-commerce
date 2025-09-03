@@ -9,6 +9,18 @@ const orderSchema = new mongoose.Schema({
             price: { type: Number, required: true }
         }
     ],
+    // 🔹 Gift card purchase (optional if order is for a gift card)
+    giftCard: {
+        templateId: { type: mongoose.Schema.Types.ObjectId, ref: "GiftCardTemplate" },
+        recipient: {
+            name: String,
+            email: String,
+            phone: String
+        },
+        senderMessage: String,
+        amount: Number
+    },
+
     orderId: { type: String, required: true, unique: true },
     orderNumber: { type: Number, required: true, unique: true },
     customOrderId: { type: String, index: true, sparse: true },
