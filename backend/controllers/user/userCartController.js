@@ -725,6 +725,149 @@ export const removeFromCart = async (req, res) => {
 
 
 
+// export const getCartSummary = async (req, res) => {
+//   try {
+//     if (!req.user || !req.user._id) {
+//       return res.status(401).json({ message: "Unauthorized" });
+//     }
+
+//     const user = await User.findById(req.user._id).populate("cart.product");
+//     if (!user) return res.status(404).json({ message: "User not found" });
+
+//     const validCartItems = (user.cart || []).filter((item) => item.product);
+//     if (!validCartItems.length) {
+//       return res.status(400).json({ message: "Cart is empty" });
+//     }
+
+//     /* -------------------- 🔥 Apply Promotions -------------------- */
+//     const itemsInput = validCartItems.map((i) => ({
+//       productId: String(i.product._id),
+//       qty: i.quantity,
+//     }));
+
+//     const promoResult = await applyPromotions(itemsInput, {
+//       userContext: { isNewUser: user.isNewUser },
+//     });
+
+//     const { items, summary, appliedPromotions } = promoResult;
+
+//     /* -------------------- 🎟️ Coupon Discounts -------------------- */
+//     const allDiscountDocs = await Discount.find({ status: "Active" }).lean();
+
+//     // 🛡️ Build a sub-cart with ONLY non-promo items
+//     const nonPromoItemsInput = items
+//       .filter((i) => !i.discounts || i.discounts.length === 0)
+//       .map((i) => ({
+//         productId: i.productId,
+//         qty: i.qty,
+//       }));
+
+//     const availableCoupons = await Promise.all(
+//       allDiscountDocs.map(async (d) => {
+//         try {
+//           if (!nonPromoItemsInput.length) {
+//             return {
+//               code: d.code,
+//               label: d.name,
+//               type: d.type,
+//               value: d.value,
+//               status: "Not applicable",
+//               message: "Not valid with ongoing offers",
+//             };
+//           }
+
+//           await validateDiscountForCartInternal({
+//             code: d.code,
+//             cart: nonPromoItemsInput,
+//             userId: req.user._id,
+//           });
+
+//           return {
+//             code: d.code,
+//             label: d.name,
+//             type: d.type,
+//             value: d.value,
+//             status: "Applicable",
+//             message: `You can apply code ${d.code} and save ${
+//               d.type === "Percentage" ? d.value + "%" : "₹" + d.value
+//             } on non-promotional items`,
+//           };
+//         } catch {
+//           return {
+//             code: d.code,
+//             label: d.name,
+//             type: d.type,
+//             value: d.value,
+//             status: "Not applicable",
+//             message: "Not valid for current cart",
+//           };
+//         }
+//       })
+//     );
+
+//     let appliedCoupon = null;
+//     let discountFromCoupon = 0;
+
+//     if (req.query.discount && nonPromoItemsInput.length) {
+//       try {
+//         const result = await validateDiscountForCartInternal({
+//           code: req.query.discount.trim(),
+//           cart: nonPromoItemsInput, // ✅ only non-promo items
+//           userId: req.user._id,
+//         });
+
+//         // 🛡️ Cap discount
+//         const COUPON_MAX_CAP = 500;
+//         discountFromCoupon = Math.min(
+//           result.priced.discountAmount,
+//           COUPON_MAX_CAP
+//         );
+
+//         appliedCoupon = {
+//           code: result.discount.code,
+//           discount: discountFromCoupon,
+//         };
+//       } catch {
+//         appliedCoupon = null;
+//         discountFromCoupon = 0;
+//       }
+//     }
+
+//     /* -------------------- 📊 Final Totals -------------------- */
+//     const grandTotal = Math.max(0, summary.payable - discountFromCoupon);
+
+//     /* -------------------- ✅ Response -------------------- */
+//     res.json({
+//       cart: items, // enriched lines from applyPromotions
+//       priceDetails: {
+//         bagMrp: summary.mrpTotal,
+//         bagDiscount:
+//           summary.mrpTotal -
+//           items.reduce((s, i) => s + i.basePrice * i.qty, 0),
+//         autoDiscount: summary.savings,
+//         couponDiscount: discountFromCoupon,
+//         shipping: 0,
+//         payable: grandTotal,
+//       },
+//       appliedCoupon,
+//       availableCoupons,
+//       appliedPromotions,
+//       grandTotal,
+//     });
+//   } catch (error) {
+//     console.error("getCartSummary error:", error);
+//     res.status(500).json({
+//       message: "Failed to get cart summary",
+//       error: error.message,
+//     });
+//   }
+// };
+
+
+
+
+
+
 export const getCartSummary = async (req, res) => {
   try {
     if (!req.user || !req.user._id) {
@@ -739,22 +882,6 @@ export const getCartSummary = async (req, res) => {
       return res.status(400).json({ message: "Cart is empty" });
     }
 
-    /* -------------------- 🛒 Build Cart Items (display only) -------------------- */
-    const cartItems = validCartItems.map((item) => {
-      const p = item.product;
-      const displayImage =
-        item.selectedVariant?.image ||
-        p.image ||
-        (Array.isArray(p.images) && p.images.length ? p.images[0] : null);
-
-      return {
-        productId: p._id.toString(),
-        name: p.name,
-        image: displayImage,
-        quantity: item.quantity,
-      };
-    });
-
     /* -------------------- 🔥 Apply Promotions -------------------- */
     const itemsInput = validCartItems.map((i) => ({
       productId: String(i.product._id),
@@ -765,29 +892,47 @@ export const getCartSummary = async (req, res) => {
       userContext: { isNewUser: user.isNewUser },
     });
 
-    // this contains correct `mrpTotal`, `savings`, `payable`
     const { items, summary, appliedPromotions } = promoResult;
 
     /* -------------------- 🎟️ Coupon Discounts -------------------- */
     const allDiscountDocs = await Discount.find({ status: "Active" }).lean();
 
-    const availableCoupons = await Promise.all(
+    // 🛡️ Sub-cart: only non-promo items
+    const nonPromoItemsInput = items
+      .filter((i) => !i.discounts || i.discounts.length === 0)
+      .map((i) => ({
+        productId: i.productId,
+        qty: i.qty,
+      }));
+
+    const couponsChecked = await Promise.all(
       allDiscountDocs.map(async (d) => {
         try {
+          if (!nonPromoItemsInput.length) {
+            return {
+              code: d.code,
+              label: d.name,
+              type: d.type,
+              value: d.value,
+              status: "Not applicable",
+              message: "All items already on offer – coupons not applicable 🎉",
+            };
+          }
+
           await validateDiscountForCartInternal({
             code: d.code,
-            cart: itemsInput,
+            cart: nonPromoItemsInput,
             userId: req.user._id,
           });
+
           return {
             code: d.code,
             label: d.name,
             type: d.type,
             value: d.value,
             status: "Applicable",
-            message: `You can apply code ${d.code} and save ${
-              d.type === "Percentage" ? d.value + "%" : "₹" + d.value
-            }`,
+            message: `Apply code ${d.code} and save ${d.type === "Percentage" ? d.value + "%" : "₹" + d.value
+              } on non-promotional items`,
           };
         } catch {
           return {
@@ -802,43 +947,54 @@ export const getCartSummary = async (req, res) => {
       })
     );
 
+    // Split for better UX
+    const applicableCoupons = couponsChecked.filter((c) => c.status === "Applicable");
+    const inapplicableCoupons = couponsChecked.filter((c) => c.status !== "Applicable");
+
     let appliedCoupon = null;
     let discountFromCoupon = 0;
 
-    if (req.query.discount) {
+    if (req.query.discount && nonPromoItemsInput.length) {
       try {
         const result = await validateDiscountForCartInternal({
           code: req.query.discount.trim(),
-          cart: itemsInput,
+          cart: nonPromoItemsInput,
           userId: req.user._id,
         });
-        discountFromCoupon = result.priced.discountAmount;
+
+        // 🛡️ Use per-coupon cap if defined, else default 500
+        const COUPON_MAX_CAP = result.discount.maxCap || 500;
+        discountFromCoupon = Math.min(result.priced.discountAmount, COUPON_MAX_CAP);
+
         appliedCoupon = {
           code: result.discount.code,
           discount: discountFromCoupon,
         };
       } catch {
         appliedCoupon = null;
+        discountFromCoupon = 0;
       }
     }
 
     /* -------------------- 📊 Final Totals -------------------- */
-    const grandTotal = Math.max(0, summary.payable - discountFromCoupon);
+    const round2 = (n) => Math.round(n * 100) / 100;
+    const grandTotal = round2(Math.max(0, summary.payable - discountFromCoupon));
 
     /* -------------------- ✅ Response -------------------- */
     res.json({
-      cart: items, // enriched cart lines from applyPromotions
+      cart: items, // enriched with discounts
       priceDetails: {
-        bagMrp: summary.mrpTotal,
-        bagDiscount: summary.mrpTotal - items.reduce((s, i) => s + i.basePrice * i.qty, 0), // catalog vs MRP
-        autoDiscount: summary.savings, // promotions applied
-        couponDiscount: discountFromCoupon,
+        bagMrp: round2(summary.mrpTotal),
+        bagDiscount: round2(summary.savings), // using summary directly
+        autoDiscount: round2(summary.savings),
+        couponDiscount: round2(discountFromCoupon),
         shipping: 0,
         payable: grandTotal,
       },
       appliedCoupon,
-      availableCoupons,
       appliedPromotions,
+      applicableCoupons,
+      inapplicableCoupons,
       grandTotal,
     });
   } catch (error) {
