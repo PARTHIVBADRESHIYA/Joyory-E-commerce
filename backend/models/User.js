@@ -19,6 +19,9 @@ const userSchema = new mongoose.Schema({
     ,
     gender: { type: String, enum: ['male', 'female', 'other'], default: null },
     dob: { type: Date, default: null },
+    marketingPrefs: {
+        celebrateBirthdayMonth: { type: Boolean, default: true } // birthday month vs exact day
+    },
 
     role: {
         type: String,

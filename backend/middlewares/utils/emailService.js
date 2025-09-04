@@ -12,13 +12,15 @@ const transporter = nodemailer.createTransport({
     },
 });
 
-export const sendEmail = async (to, subject, html) => {
+export const sendEmail = async (to, subject, html,attachments) => {
     try {
         const mailOptions = {
             from: `"Joyory" <${process.env.SMTP_FROM}>`,
             to,
             subject,
             html,
+            attachments, // 👉 allow optional attachments
+
         };
 
         const result = await transporter.sendMail(mailOptions);

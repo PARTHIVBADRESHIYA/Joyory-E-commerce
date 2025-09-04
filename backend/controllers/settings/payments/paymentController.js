@@ -12,10 +12,95 @@ import User from '../../../models/User.js';
 import Razorpay from "razorpay";
 import crypto from "crypto";
 
+import cloudinary from '../../../middlewares/utils/cloudinary.js';
+import { determineOccasions, craftMessage } from "../../../middlewares/services/ecardService.js";
+import { buildEcardPdf } from "../../../middlewares/services/ecardPdf.js";
+import { uploadPdfBuffer } from "../../../middlewares/upload.js";
+
 const razorpay = new Razorpay({
     key_id: process.env.RAZORPAY_KEY_ID,
     key_secret: process.env.RAZORPAY_KEY_SECRET
 });
+
+// export const createRazorpayOrder = async (req, res) => {
+//     try {
+//         const { orderId } = req.body;
+
+//         if (!orderId) {
+//             return res.status(400).json({ message: "❌ orderId is required" });
+//         }
+
+//         const order = await Order.findById(orderId).populate("user");
+//         if (!order) {
+//             return res.status(404).json({ message: "❌ Order not found" });
+//         }
+
+//         // ✅ Prevent duplicate payment attempt
+//         if (order.paid) {
+//             return res.status(400).json({ message: "⚠️ Order is already paid" });
+//         }
+
+//         if (!order.amount || order.amount <= 0) {
+//             return res.status(400).json({ message: "❌ Invalid order amount" });
+//         }
+
+//         // Convert amount to paise
+//         const amountInPaise = Math.round(order.amount * 100);
+
+//         // ✅ Create Razorpay order
+//         const razorpayOrder = await razorpay.orders.create({
+//             amount: amountInPaise,
+//             currency: "INR",
+//             receipt: order.orderId,
+//             payment_capture: 1, // auto-capture enabled
+//             notes: {
+//                 orderId: order._id.toString(),
+//                 customer: order.user?.name || "Guest User",
+//             },
+//         });
+
+//         // ✅ Save Razorpay orderId + update status
+//         order.razorpayOrderId = razorpayOrder.id;
+//         order.paymentStatus = "pending";
+//         order.orderStatus = "Awaiting Payment";
+
+//         // Initialize tracking history if empty
+//         if (!order.trackingHistory || order.trackingHistory.length === 0) {
+//             order.trackingHistory = [
+//                 {
+//                     status: "Order Placed",
+//                     timestamp: new Date(),
+//                     location: "Store",
+//                 },
+//                 {
+//                     status: "Awaiting Payment",
+//                     timestamp: new Date(),
+//                 },
+//             ];
+//         }
+
+//         await order.save();
+
+//         return res.status(200).json({
+//             success: true,
+//             message: "✅ Razorpay order created",
+//             razorpayOrderId: razorpayOrder.id,
+//             amount: order.amount,
+//             currency: "INR",
+//             orderId: order._id,
+//         });
+//     } catch (err) {
+//         console.error("🔥 Error creating Razorpay order:", err);
+//         res.status(500).json({
+//             success: false,
+//             message: "Failed to create Razorpay order",
+//             error: err.message,
+//         });
+//     }
+// };
+
+
+
 
 export const createRazorpayOrder = async (req, res) => {
     try {
@@ -47,7 +132,7 @@ export const createRazorpayOrder = async (req, res) => {
             amount: amountInPaise,
             currency: "INR",
             receipt: order.orderId,
-            payment_capture: 1, // auto-capture enabled
+            payment_capture: 1,
             notes: {
                 orderId: order._id.toString(),
                 customer: order.user?.name || "Guest User",
@@ -62,23 +147,76 @@ export const createRazorpayOrder = async (req, res) => {
         // Initialize tracking history if empty
         if (!order.trackingHistory || order.trackingHistory.length === 0) {
             order.trackingHistory = [
-                {
-                    status: "Order Placed",
-                    timestamp: new Date(),
-                    location: "Store",
-                },
-                {
-                    status: "Awaiting Payment",
-                    timestamp: new Date(),
-                },
+                { status: "Order Placed", timestamp: new Date(), location: "Store" },
+                { status: "Awaiting Payment", timestamp: new Date() },
             ];
+        }
+
+        // 🔹 E-card logic
+        const { occasion, festival } = await determineOccasions({
+            userId: order.user._id,
+            userDoc: order.user,
+        });
+
+        const message = craftMessage({
+            occasion,
+            user: order.user,
+            festival,
+        });
+
+        if (message) {
+            // 1. Build PDF → Buffer
+            const pdfBuffer = await buildEcardPdf({
+                title: "A Special Note from Joyory 🎉",
+                name: order.user?.name || "Customer",
+                message,
+            });
+
+            // 2. Upload Buffer to Cloudinary
+            const uploadResult = await new Promise((resolve, reject) => {
+                const uploadStream = cloudinary.uploader.upload_stream(
+                    {
+                        folder: "ecards",
+                        resource_type: "raw",
+                        public_id: `ecard-${order._id}`,
+                        access_mode: "public",
+                    },
+                    (error, result) => {
+                        if (error) return reject(error);
+                        resolve(result);
+                    }
+                );
+                uploadStream.end(pdfBuffer);
+            });
+
+            // 3. Send Email with Buffer (✅ no 401 problem)
+            await sendEmail(
+                order.user.email,
+                "🎁 Your Joyory E-Card",
+                `<p>${message}</p><p>We’ve also attached your special card as a PDF.</p>`,
+                [
+                    {
+                        filename: "ecard.pdf",
+                        content: pdfBuffer,
+                        contentType: "application/pdf",
+                    },
+                ]
+            );
+
+            // 4. Save in order
+            order.ecard = {
+                occasion, // ✅ single string
+                message,
+                emailSentAt: new Date(),
+                pdfUrl: uploadResult?.secure_url || null,
+            };
         }
 
         await order.save();
 
         return res.status(200).json({
             success: true,
-            message: "✅ Razorpay order created",
+            message: "✅ Razorpay order created (E-card processed if applicable)",
             razorpayOrderId: razorpayOrder.id,
             amount: order.amount,
             currency: "INR",

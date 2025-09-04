@@ -50,6 +50,14 @@ const orderSchema = new mongoose.Schema({
         default: "Pending"
     }
     ,
+    ecard: {
+        occasion: { type: String, enum: ['WELCOME', 'BIRTHDAY', 'FESTIVAL', 'TEST'] },
+        message: { type: String },
+        emailSentAt: { type: Date },
+        pdfUrl: { type: String },          // uploaded print asset (optional)
+        includePhysical: { type: Boolean, default: false }, // for packing team
+    },
+
     trackingHistory: [
         {
             status: { type: String },
