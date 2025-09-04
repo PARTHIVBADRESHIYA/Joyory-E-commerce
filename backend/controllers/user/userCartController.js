@@ -591,6 +591,140 @@ export const removeFromCart = async (req, res) => {
 // };
 
 
+// export const getCartSummary = async (req, res) => {
+//   try {
+//     if (!req.user || !req.user._id) {
+//       return res.status(401).json({ message: "Unauthorized" });
+//     }
+
+//     const user = await User.findById(req.user._id).populate("cart.product");
+//     if (!user) return res.status(404).json({ message: "User not found" });
+
+//     const validCartItems = (user.cart || []).filter((item) => item.product);
+//     if (!validCartItems.length) {
+//       return res.status(400).json({ message: "Cart is empty" });
+//     }
+
+//     /* -------------------- Build Cart Items -------------------- */
+//     const cartItems = validCartItems.map((item) => {
+//       const p = item.product;
+//       const displayImage =
+//         item.selectedVariant?.image ||
+//         p.image ||
+//         (Array.isArray(p.images) && p.images.length ? p.images[0] : null);
+
+//       return {
+//         productId: p._id.toString(),
+//         name: p.name,
+//         image: displayImage,
+//         quantity: item.quantity,
+//         mrp: Math.round(p.mrp ?? p.price),
+//         price: Math.round(p.price),
+//         subTotal: Math.round(p.price * item.quantity),
+//       };
+//     });
+
+//     const bagMrp = cartItems.reduce((sum, i) => sum + i.mrp * i.quantity, 0);
+//     let payableBeforeCoupons = cartItems.reduce((sum, i) => sum + i.subTotal, 0);
+
+//     /* -------------------- 🔥 Apply Auto Promotions -------------------- */
+//     const itemsInput = validCartItems.map((i) => ({
+//       productId: String(i.product._id),
+//       qty: i.quantity,
+//     }));
+
+//     const promoResult = await applyPromotions(itemsInput, {
+//       userContext: { isNewUser: user.isNewUser }, // optional flag if you have it
+//     });
+
+//     const autoDiscount = promoResult.summary?.savings || 0;
+//     payableBeforeCoupons = Math.max(0, promoResult.summary?.payable || payableBeforeCoupons);
+
+//     const appliedPromotions = promoResult.appliedPromotions || [];
+
+//     /* -------------------- 🎟️ Coupons -------------------- */
+//     const allDiscountDocs = await Discount.find({ status: "Active" }).lean();
+//     const availableCoupons = await Promise.all(
+//       allDiscountDocs.map(async (d) => {
+//         try {
+//           await validateDiscountForCartInternal({
+//             code: d.code,
+//             cart: itemsInput,
+//             userId: req.user._id,
+//           });
+//           return {
+//             code: d.code,
+//             label: d.name,
+//             type: d.type,
+//             value: d.value,
+//             status: "Applicable",
+//             message: `You can apply code ${d.code} and save ${
+//               d.type === "Percentage" ? d.value + "%" : "₹" + d.value
+//             }`,
+//           };
+//         } catch {
+//           return {
+//             code: d.code,
+//             label: d.name,
+//             type: d.type,
+//             value: d.value,
+//             status: "Not applicable",
+//             message: "Not valid for current cart",
+//           };
+//         }
+//       })
+//     );
+
+//     let appliedCoupon = null;
+//     let discountFromCoupon = 0;
+//     if (req.query.discount) {
+//       try {
+//         const result = await validateDiscountForCartInternal({
+//           code: req.query.discount.trim(),
+//           cart: itemsInput,
+//           userId: req.user._id,
+//         });
+//         discountFromCoupon = result.priced.discountAmount;
+//         appliedCoupon = {
+//           code: result.discount.code,
+//           discount: discountFromCoupon,
+//         };
+//       } catch {
+//         appliedCoupon = null;
+//       }
+//     }
+
+//     const bagDiscount = Math.max(0, bagMrp - payableBeforeCoupons);
+//     const grandTotal = Math.max(0, payableBeforeCoupons - discountFromCoupon);
+
+//     /* -------------------- ✅ Response -------------------- */
+//     res.json({
+//       cart: cartItems,
+//       priceDetails: {
+//         bagMrp,
+//         bagDiscount,
+//         autoDiscount,
+//         shipping: 0,
+//         payable: grandTotal,
+//       },
+//       appliedCoupon,
+//       availableCoupons,
+//       appliedPromotions,
+//       grandTotal,
+//     });
+//   } catch (error) {
+//     console.error("getCartSummary error:", error);
+//     res
+//       .status(500)
+//       .json({ message: "Failed to get cart summary", error: error.message });
+//   }
+// };
+
+
+
+
+
+
 export const getCartSummary = async (req, res) => {
   try {
     if (!req.user || !req.user._id) {
@@ -605,7 +739,7 @@ export const getCartSummary = async (req, res) => {
       return res.status(400).json({ message: "Cart is empty" });
     }
 
-    /* -------------------- Build Cart Items -------------------- */
+    /* -------------------- 🛒 Build Cart Items (display only) -------------------- */
     const cartItems = validCartItems.map((item) => {
       const p = item.product;
       const displayImage =
@@ -618,32 +752,25 @@ export const getCartSummary = async (req, res) => {
         name: p.name,
         image: displayImage,
         quantity: item.quantity,
-        mrp: Math.round(p.mrp ?? p.price),
-        price: Math.round(p.price),
-        subTotal: Math.round(p.price * item.quantity),
       };
     });
 
-    const bagMrp = cartItems.reduce((sum, i) => sum + i.mrp * i.quantity, 0);
-    let payableBeforeCoupons = cartItems.reduce((sum, i) => sum + i.subTotal, 0);
-
-    /* -------------------- 🔥 Apply Auto Promotions -------------------- */
+    /* -------------------- 🔥 Apply Promotions -------------------- */
     const itemsInput = validCartItems.map((i) => ({
       productId: String(i.product._id),
       qty: i.quantity,
     }));
 
     const promoResult = await applyPromotions(itemsInput, {
-      userContext: { isNewUser: user.isNewUser }, // optional flag if you have it
+      userContext: { isNewUser: user.isNewUser },
     });
 
-    const autoDiscount = promoResult.summary?.savings || 0;
-    payableBeforeCoupons = Math.max(0, promoResult.summary?.payable || payableBeforeCoupons);
+    // this contains correct `mrpTotal`, `savings`, `payable`
+    const { items, summary, appliedPromotions } = promoResult;
 
-    const appliedPromotions = promoResult.appliedPromotions || [];
-
-    /* -------------------- 🎟️ Coupons -------------------- */
+    /* -------------------- 🎟️ Coupon Discounts -------------------- */
     const allDiscountDocs = await Discount.find({ status: "Active" }).lean();
+
     const availableCoupons = await Promise.all(
       allDiscountDocs.map(async (d) => {
         try {
@@ -677,6 +804,7 @@ export const getCartSummary = async (req, res) => {
 
     let appliedCoupon = null;
     let discountFromCoupon = 0;
+
     if (req.query.discount) {
       try {
         const result = await validateDiscountForCartInternal({
@@ -694,16 +822,17 @@ export const getCartSummary = async (req, res) => {
       }
     }
 
-    const bagDiscount = Math.max(0, bagMrp - payableBeforeCoupons);
-    const grandTotal = Math.max(0, payableBeforeCoupons - discountFromCoupon);
+    /* -------------------- 📊 Final Totals -------------------- */
+    const grandTotal = Math.max(0, summary.payable - discountFromCoupon);
 
     /* -------------------- ✅ Response -------------------- */
     res.json({
-      cart: cartItems,
+      cart: items, // enriched cart lines from applyPromotions
       priceDetails: {
-        bagMrp,
-        bagDiscount,
-        autoDiscount,
+        bagMrp: summary.mrpTotal,
+        bagDiscount: summary.mrpTotal - items.reduce((s, i) => s + i.basePrice * i.qty, 0), // catalog vs MRP
+        autoDiscount: summary.savings, // promotions applied
+        couponDiscount: discountFromCoupon,
         shipping: 0,
         payable: grandTotal,
       },
@@ -714,8 +843,9 @@ export const getCartSummary = async (req, res) => {
     });
   } catch (error) {
     console.error("getCartSummary error:", error);
-    res
-      .status(500)
-      .json({ message: "Failed to get cart summary", error: error.message });
+    res.status(500).json({
+      message: "Failed to get cart summary",
+      error: error.message,
+    });
   }
 };
