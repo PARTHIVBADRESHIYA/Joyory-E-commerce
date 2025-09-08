@@ -3,7 +3,9 @@ import Product from '../models/Product.js';
 import cloudinary from '../middlewares/utils/cloudinary.js';
 import Category from '../models/Category.js';
 import Formulation from '../models/shade/Formulation.js';
+import Review from '../models/Review.js';
 import mongoose from 'mongoose';
+import { buildOptions, normalizeImages } from "../controllers/user/userProductController.js";
 
 export const resolveFormulationId = async (input) => {
     if (!input) return null;
@@ -701,37 +703,84 @@ const deleteProduct = async (req, res) => {
         res.status(500).json({ message: 'Failed to delete product', error: error.message });
     }
 }
-
 const getSingleProductById = async (req, res) => {
     try {
         const { id } = req.params;
 
-        // ✅ Validate ObjectId format
+        // ✅ Validate ObjectId
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({ message: 'Invalid product ID format' });
+            return res.status(400).json({ message: "Invalid product ID format" });
         }
 
-        // ✅ Find product and populate category names
+        // ✅ Find product
         const product = await Product.findById(id)
-            .populate('category', 'name slug')
-            .populate('categoryHierarchy', 'name slug')
+            .populate("category", "name slug")
+            .populate("brand", "name")
             .lean();
 
         if (!product) {
-            return res.status(404).json({ message: '❌ Product not found' });
+            return res.status(404).json({ message: "❌ Product not found" });
         }
 
+        // ✅ Ratings
+        const [{ avg = 0, count = 0 } = {}] = await Review.aggregate([
+            { $match: { productId: product._id, status: "Active" } },
+            { $group: { _id: "$productId", avg: { $avg: "$rating" }, count: { $sum: 1 } } }
+        ]);
+        const avgRating = Math.round((avg || 0) * 10) / 10;
+
+        // ✅ Price / Discount
+        const mrp = Number(product.mrp ?? product.price ?? 0) || 0;
+        const price = Number(product.price ?? product.mrp ?? 0) || 0;
+        const discountAmount = mrp > price ? mrp - price : 0;
+        const discountPercent = mrp > 0 ? Math.round((discountAmount / mrp) * 100) : 0;
+
+        // ✅ Badge / Promo Message
+        let badge = null;
+        let promoMessage = null;
+        if (discountPercent > 0) {
+            badge = `${discountPercent}% Off`;
+            promoMessage = `Save ₹${discountAmount} on this product`;
+        }
+
+        // ✅ Shade & Color Options (from foundationVariants too)
+        const shadeOptions = buildOptions(product).shadeOptions;
+        const colorOptions = buildOptions(product).colorOptions;
+
+        // ✅ Response (same shape as user-side, without recommendations/promo engine)
         res.status(200).json({
-            message: '✅ Product fetched successfully',
-            product
+            _id: product._id,
+            name: product.name,
+            brand: product.brand?.name || "",
+            variant: product.variant,
+            description: product.description || "",
+            summary: product.summary || "",
+            features: product.features || [],
+            howToUse: product.howToUse || "",
+            ingredients: product.ingredients || [],
+            mrp: Math.round(mrp),
+            price: Math.round(price),
+            discountPercent,
+            discountAmount,
+            badge,
+            promoMessage,
+            images: normalizeImages(product.images || []),
+            category: product.category,
+            shadeOptions,
+            colorOptions,
+            foundationVariants: product.foundationVariants || [],
+            avgRating,
+            totalRatings: count || 0,
+            inStock: product.quantity > 0,
+            views: product.views || 0,
+            sales: product.sales || 0,
+            createdAt: product.createdAt,
+            updatedAt: product.updatedAt
         });
 
     } catch (error) {
-        console.error("❌ Error fetching single product:", error);
-        res.status(500).json({
-            message: 'Failed to fetch product',
-            error: error.message
-        });
+        console.error("❌ Error fetching single product (admin):", error);
+        res.status(500).json({ message: "Failed to fetch product", error: error.message });
     }
 };
 
@@ -807,7 +856,7 @@ const updateVariantImages = async (req, res) => {
         console.error("updateVariantImages error:", err);
         res.status(500).json({ message: "Failed to update variant images", error: err.message });
     }
-};
+};                                                                                                                                                                                                                                                                                                                
 
 
 
