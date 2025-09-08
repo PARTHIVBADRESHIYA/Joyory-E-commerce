@@ -248,12 +248,13 @@ const getAllProducts = async (req, res) => {
         const query = req.query;
         const filter = {};
 
+        // Brand filter (IDs from query)
         if (query.brand) filter.brand = { $in: query.brand.split(',') };
 
+        // Category filter with subcategories
         if (query.category) {
             const categoryIds = query.category.split(',');
 
-            // Include subcategories automatically
             const allCategoryIds = new Set(categoryIds);
             const fetchChildren = async (parentId) => {
                 const children = await Category.find({ parent: parentId }, '_id');
@@ -264,16 +265,19 @@ const getAllProducts = async (req, res) => {
                     }
                 }
             };
+
             for (const id of categoryIds) {
                 await fetchChildren(id);
             }
             filter.category = { $in: Array.from(allCategoryIds) };
         }
 
+        // Other filters
         if (query.shadeOptions) filter.shadeOptions = { $in: query.shadeOptions.split(',') };
         if (query.colorOptions) filter.colorOptions = { $in: query.colorOptions.split(',') };
         if (query.productTags) filter.productTags = { $in: query.productTags.split(',') };
 
+        // Dynamic tag filters
         const dynamicFilters = [
             'preference', 'ingredients', 'benefits', 'concern', 'skinType',
             'makeupFinish', 'formulation', 'color', 'skinTone', 'gender', 'age', 'conscious'
@@ -284,14 +288,20 @@ const getAllProducts = async (req, res) => {
             }
         });
 
+        // Price range filter
         if (query.minPrice || query.maxPrice) {
             filter.price = {};
             if (query.minPrice) filter.price.$gte = Number(query.minPrice);
             if (query.maxPrice) filter.price.$lte = Number(query.maxPrice);
         }
 
-        const products = await Product.find(filter).sort({ createdAt: -1 }).populate('category', 'name');
+        // Fetch products with populated category & brand
+        const products = await Product.find(filter)
+            .sort({ createdAt: -1 })
+            .populate('category', 'name')
+            .populate('brand', 'name'); // ✅ brand name instead of id
 
+        // Format response
         const dashboardData = products.map(p => ({
             _id: p._id,
             name: p.name,
@@ -299,12 +309,12 @@ const getAllProducts = async (req, res) => {
             image: Array.isArray(p.images) ? p.images[0] : p.image,
             price: p.price,
             summary: p.summary || p.description?.slice(0, 100),
-            ingredients: p.ingredients?.slice(0, 100)   ,
+            ingredients: p.ingredients?.slice(0, 100),
             sales: p.sales,
             remaining: p.quantity,
             status: p.status,
             category: p.category?.name || '',
-            brand: p.brand,
+            brand: p.brand?.name || '',  // ✅ now returns brand name
         }));
 
         res.status(200).json(dashboardData);
