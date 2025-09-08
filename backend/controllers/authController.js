@@ -374,56 +374,62 @@ const getUserAnalytics = async (req, res) => {
     }
 };
 
-// controllers/analyticsController.js
-
+// ✅ Full customer analytics (for admin dashboard)
 const getFullCustomerAnalytics = async (req, res) => {
     try {
         const [totalCustomers, incomeAgg, monthlySpend, refundOrders] = await Promise.all([
-            // Total customers with role 'user'
-            User.countDocuments({ role: 'user' }),
 
-            // Total income from delivered or completed orders
+            // Total customers
+            User.countDocuments({ role: "user" }),
+
+            // Total income (Delivered + Completed orders)
             Order.aggregate([
-                { $match: { status: { $in: ['Delivered', 'Completed'] } } },
+                { $match: { status: { $in: ["Delivered", "Completed"] } } },
                 { $group: { _id: null, total: { $sum: "$amount" } } }
             ]),
 
-            // Monthly spend from delivered or completed orders
+            // Monthly spend
             Order.aggregate([
-                { $match: { status: { $in: ['Delivered', 'Completed'] } } },
+                { $match: { status: { $in: ["Delivered", "Completed"] } } },
                 {
                     $group: {
                         _id: {
-                            month: { $month: "$createdAt" },
-                            year: { $year: "$createdAt" }
+                            year: { $year: "$createdAt" },
+                            month: { $month: "$createdAt" }
                         },
-                        totalSpend: { $sum: "$amount" }
+                        totalSpend: { $sum: "$amount" },
+                        orders: { $sum: 1 }
                     }
-                }
+                },
+                { $sort: { "_id.year": 1, "_id.month": 1 } }
             ]),
 
-            // All orders where refund.isRefunded is true
+            // Refunds
             Order.find({ "refund.isRefunded": true }, { refund: 1 })
         ]);
 
-        // Calculate refundCount and totalRefundAmount from refundOrders
+        // Refund calculations
         const refundCount = refundOrders.length;
-        const totalRefundAmount = refundOrders.reduce((sum, order) => {
-            return sum + (order.refund?.refundAmount || 0);
-        }, 0);
+        const totalRefundAmount = refundOrders.reduce(
+            (sum, order) => sum + (order.refund?.refundAmount || 0),
+            0
+        );
 
-        res.json({
+        res.status(200).json({
             totalCustomers,
-            totalIncome: incomeAgg[0]?.total || 0,
+            totalIncome: incomeAgg.length ? incomeAgg[0].total : 0,
             monthlySpend,
             refundCount,
             totalRefundAmount
         });
 
     } catch (err) {
+        console.error("🔥 Error in getFullCustomerAnalytics:", err);
         res.status(500).json({ error: err.message });
     }
 };
+
+
 
 export {
     adminRegister,

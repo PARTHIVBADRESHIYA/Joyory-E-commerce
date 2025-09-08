@@ -40,33 +40,6 @@ export const createDiscount = async (req, res) => {
     }
 };
 
-// Fetch all discounts (summary-style)
-export const getAllDiscounts = async (req, res) => {
-    try {
-        const discounts = await Discount.find();
-
-        const summary = discounts.map(d => {
-            const expiry = d.endDate
-                ? new Date(d.endDate).toLocaleDateString('en-GB') // Format: DD/MM/YYYY
-                : 'No Expiry';
-
-            return {
-                code: d.code,
-                type: d.type,
-                discount: d.type === 'Percentage' ? `${d.value}%` : `₹${d.value}`,
-                usage: `${d.usageCount || 0}/${d.totalLimit || '∞'}`,
-                expiry,
-                status: d.status
-            };
-        });
-
-        res.json(summary);
-    } catch (err) {
-        res.status(500).json({ message: 'Error fetching discounts', error: err.message });
-    }
-};
-
-
 // Update discount
 export const updateDiscount = async (req, res) => {
     try {
@@ -89,9 +62,118 @@ export const deleteDiscount = async (req, res) => {
     }
 };
 
+export const getAllDiscounts = async (req, res) => {
+    try {
+        const {
+            code,
+            type,
+            status,
+            minValue,
+            maxValue,
+            minUsage,
+            maxUsage,
+            activeOnly,
+            expiredOnly,
+            startDateFrom,
+            startDateTo,
+            endDateFrom,
+            endDateTo
+        } = req.query;
+
+        const filter = {};
+
+        // 🔍 Search by exact code
+        if (code) {
+            filter.code = { $regex: code, $options: "i" }; // case-insensitive
+        }
+
+        // 🔍 Filter by type (Percentage / Flat)
+        if (type) {
+            filter.type = type;
+        }
+
+        // 🔍 Status (Active / Inactive)
+        if (status) {
+            filter.status = status;
+        }
+
+        // 🔍 Value range
+        if (minValue || maxValue) {
+            filter.value = {};
+            if (minValue) filter.value.$gte = Number(minValue);
+            if (maxValue) filter.value.$lte = Number(maxValue);
+        }
+
+        // 🔍 Usage range
+        if (minUsage || maxUsage) {
+            filter.usageCount = {};
+            if (minUsage) filter.usageCount.$gte = Number(minUsage);
+            if (maxUsage) filter.usageCount.$lte = Number(maxUsage);
+        }
+
+        // 🔍 Active only (valid date & limit not reached)
+        if (activeOnly === "true") {
+            const now = new Date();
+            filter.$and = [
+                { $or: [{ startDate: { $exists: false } }, { startDate: { $lte: now } }] },
+                { $or: [{ endDate: { $exists: false } }, { endDate: { $gte: now } }] },
+                { $or: [{ totalLimit: { $exists: false } }, { $expr: { $lt: ["$usageCount", "$totalLimit"] } }] }
+            ];
+        }
+
+        // 🔍 Expired only
+        if (expiredOnly === "true") {
+            const now = new Date();
+            filter.endDate = { $lt: now };
+        }
+
+        // 🔍 Start date range
+        if (startDateFrom || startDateTo) {
+            filter.startDate = {};
+            if (startDateFrom) filter.startDate.$gte = new Date(startDateFrom);
+            if (startDateTo) filter.startDate.$lte = new Date(startDateTo);
+        }
+
+        // 🔍 End date range
+        if (endDateFrom || endDateTo) {
+            filter.endDate = {};
+            if (endDateFrom) filter.endDate.$gte = new Date(endDateFrom);
+            if (endDateTo) filter.endDate.$lte = new Date(endDateTo);
+        }
+
+        const discounts = await Discount.find(filter);
+
+        const summary = discounts.map(d => {
+            const expiry = d.endDate
+                ? new Date(d.endDate).toLocaleDateString('en-GB')
+                : "No Expiry";
+
+            return {
+                code: d.code,
+                type: d.type,
+                discount: d.type === "Percentage" ? `${d.value}%` : `₹${d.value}`,
+                usage: `${d.usageCount || 0}/${d.totalLimit || "∞"}`,
+                expiry,
+                status: d.status
+            };
+        });
+
+        res.json(summary);
+    } catch (err) {
+        res.status(500).json({ message: "Error fetching discounts", error: err.message });
+    }
+};
+
 export const getDiscountDashboardAnalytics = async (req, res) => {
     try {
-        const allDiscounts = await Discount.find();
+        const { type, status, code } = req.query;
+
+        const filter = {};
+        if (type) filter.type = type;
+        if (status) filter.status = status;
+        if (code) filter.code = { $regex: code, $options: "i" };
+
+        const allDiscounts = await Discount.find(filter);
 
         const activeDiscounts = allDiscounts.filter(d => {
             const now = new Date();
@@ -104,55 +186,40 @@ export const getDiscountDashboardAnalytics = async (req, res) => {
 
         const totalUses = allDiscounts.reduce((sum, d) => sum + (d.usageCount || 0), 0);
 
+        // Restrict Order analytics only for matched discount codes
+        const discountCodes = allDiscounts.map(d => d.code);
+        const matchOrders = discountCodes.length ? { discountCode: { $in: discountCodes } } : { discountCode: { $exists: true, $ne: null } };
+
         const revenueImpact = await Order.aggregate([
-            { $match: { discountCode: { $exists: true, $ne: null } } },
-            { $group: { _id: null, total: { $sum: '$discountAmount' } } }
+            { $match: matchOrders },
+            { $group: { _id: null, total: { $sum: "$discountAmount" } } }
         ]);
 
-        // ✅ Calculate average discount percentage from all discounted orders
         const avgDiscountPercentage = await Order.aggregate([
-            {
-                $match: {
-                    discountCode: { $exists: true, $ne: null },
-                    discountAmount: { $gt: 0 },
-                    amount: { $gt: 0 }
-                }
-            },
+            { $match: { ...matchOrders, discountAmount: { $gt: 0 }, amount: { $gt: 0 } } },
             {
                 $project: {
                     discountPercent: {
-                        $multiply: [
-                            { $divide: ['$discountAmount', '$amount'] },
-                            100
-                        ]
+                        $multiply: [{ $divide: ["$discountAmount", "$amount"] }, 100]
                     }
                 }
             },
-            {
-                $group: {
-                    _id: null,
-                    avg: { $avg: '$discountPercent' }
-                }
-            }
+            { $group: { _id: null, avg: { $avg: "$discountPercent" } } }
         ]);
 
-        // Optional: avg discount flat value
         const avgDiscountAmount = await Order.aggregate([
-            { $match: { discountAmount: { $gt: 0 } } },
-            { $group: { _id: null, avg: { $avg: '$discountAmount' } } }
+            { $match: { ...matchOrders, discountAmount: { $gt: 0 } } },
+            { $group: { _id: null, avg: { $avg: "$discountAmount" } } }
         ]);
 
         res.status(200).json({
             activeDiscounts: activeDiscounts.length,
             totalUses,
             revenueImpact: revenueImpact[0]?.total || 0,
-            avgDiscount: Math.round(avgDiscountPercentage[0]?.avg || 0), // 🔥 unified percentage
-            avgDiscountAmount: Math.round(avgDiscountAmount[0]?.avg || 0) // raw value (₹)
+            avgDiscount: Math.round(avgDiscountPercentage[0]?.avg || 0),
+            avgDiscountAmount: Math.round(avgDiscountAmount[0]?.avg || 0)
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 };
-
-
-

@@ -3,13 +3,11 @@ import {
     getAnalyticsDashboard, getCustomerVolumeAnalytics,
     getCustomerBehaviorAnalytics
 } from "../controllers/analyticsController.js";
-import { payForOrder } from "../controllers/settings/payments/paymentController.js";
 import { authenticateUser, verifyAdminOrTeamMember } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 
 router.get("/admin/analytics", getAnalyticsDashboard);
-router.post("/pay/:orderId", authenticateUser, payForOrder);
 
 router.get('/dashboard/customer-insights', verifyAdminOrTeamMember, async (req, res) => {
     try {
