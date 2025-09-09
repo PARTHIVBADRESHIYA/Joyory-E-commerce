@@ -12,6 +12,8 @@ import TeamMember from '../models/settings/admin/TeamMember.js';
 import User from '../models/User.js';
 import Referral from "../models/Referral.js";
 import ReferralConfig from "../models/ReferralConfig.js";
+import { getOrCreateWallet } from "../middlewares/utils/walletHelpers.js";
+import {addRewardPoints } from '../controllers/user/userWalletController.js';
 
 import {
     sendOtpSchema,
@@ -207,71 +209,153 @@ export const resetPasswordWithOtp = async (req, res) => {
 
 
 
-export const verifyEmailOtp = async (req, res) => {
-    const { error } = verifyEmailOtpSchema.validate(req.body, { allowUnknown: true });
-    if (error) return res.status(400).json({ message: error.details[0].message });
+// export const verifyEmailOtp = async (req, res) => {
+//     const { error } = verifyEmailOtpSchema.validate(req.body, { allowUnknown: true });
+//     if (error) return res.status(400).json({ message: error.details[0].message });
 
-    const { email, otp } = req.body;
-    const user = await User.findOne({ email: email.trim().toLowerCase() });
-    if (!user) return res.status(404).json({ message: "User not found" });
-    if (user.isVerified) return res.status(400).json({ message: "User already verified" });
+//     const { email, otp } = req.body;
+//     const user = await User.findOne({ email: email.trim().toLowerCase() });
+//     if (!user) return res.status(404).json({ message: "User not found" });
+//     if (user.isVerified) return res.status(400).json({ message: "User already verified" });
 
-    // Check OTP existence & expiry
-    if (!user.otp?.code || new Date() > new Date(user.otp.expiresAt)) {
-        user.otp = undefined;
-        await user.save();
-        return res.status(400).json({ message: "OTP expired or not requested" });
-    }
+//     // Check OTP existence & expiry
+//     if (!user.otp?.code || new Date() > new Date(user.otp.expiresAt)) {
+//         user.otp = undefined;
+//         await user.save();
+//         return res.status(400).json({ message: "OTP expired or not requested" });
+//     }
 
-    // Check attempts
-    if (user.otp.attemptsLeft <= 0) {
-        user.otp = undefined;
-        await user.save();
-        return res.status(429).json({ message: "Too many invalid attempts. Request a new OTP." });
-    }
+//     // Check attempts
+//     if (user.otp.attemptsLeft <= 0) {
+//         user.otp = undefined;
+//         await user.save();
+//         return res.status(429).json({ message: "Too many invalid attempts. Request a new OTP." });
+//     }
 
-    // Validate OTP
-    const isValid = await bcrypt.compare(otp, user.otp.code);
-    if (!isValid) {
-        user.otp.attemptsLeft -= 1;
-        await user.save();
-        return res.status(401).json({ message: `Invalid OTP. ${user.otp.attemptsLeft} attempts left.` });
-    }
+//     // Validate OTP
+//     const isValid = await bcrypt.compare(otp, user.otp.code);
+//     if (!isValid) {
+//         user.otp.attemptsLeft -= 1;
+//         await user.save();
+//         return res.status(401).json({ message: `Invalid OTP. ${user.otp.attemptsLeft} attempts left.` });
+//     }
 
-    // ✅ Success: verify user & clear OTP
-    user.isVerified = true;
-    user.otp = undefined;
-    user.otpRequests = [];
+//     // ✅ Success: verify user & clear OTP
+//     user.isVerified = true;
+//     user.otp = undefined;
+//     user.otpRequests = [];
 
-    // ✅ Handle referral rewards instantly
-    if (user.referredBy) {
-        const config = await ReferralConfig.findOne();
-        if (config) {
-            const referrer = await User.findById(user.referredBy);
+//     // ✅ Handle referral rewards instantly
+//     if (user.referredBy) {
+//         const config = await ReferralConfig.findOne();
+//         if (config) {
+//             const referrer = await User.findById(user.referredBy);
 
-            if (referrer) {
-                // reward referrer
-                referrer.walletBalance += config.rewardForReferrer;
-                await referrer.save();
+//             if (referrer) {
+//                 // reward referrer
+//                 referrer.walletBalance += config.rewardForReferrer;
+//                 await referrer.save();
 
-                // reward referee
-                user.walletBalance += config.rewardForReferee;
-            }
-        }
-    }
+//                 // reward referee
+//                 user.walletBalance += config.rewardForReferee;
+//             }
+//         }
+//     }
 
-    await user.save();
+//     await user.save();
 
-    return res.status(200).json({
-        message:
-            "Email verified successfully. Referral rewards applied instantly (if any). You can now login.",
-        walletBalance: user.walletBalance,
-    });
-};
+//     return res.status(200).json({
+//         message:
+//             "Email verified successfully. Referral rewards applied instantly (if any). You can now login.",
+//         walletBalance: user.walletBalance,
+//     });
+// };
 
 // ====================== ADMIN OTP FLOWS ===================== //
 
 // Send OTP to Admin
+
+
+
+export const verifyEmailOtp = async (req, res) => {
+    try {
+        // 1️⃣ Validate request
+        const { error } = verifyEmailOtpSchema.validate(req.body, { allowUnknown: true });
+        if (error) return res.status(400).json({ message: error.details[0].message });
+
+        const { email, otp } = req.body;
+        const user = await User.findOne({ email: email.trim().toLowerCase() });
+        if (!user) return res.status(404).json({ message: "User not found" });
+        if (user.isVerified) return res.status(400).json({ message: "User already verified" });
+
+        // 2️⃣ Check OTP existence & expiry
+        if (!user.otp?.code || new Date() > new Date(user.otp.expiresAt)) {
+            user.otp = undefined;
+            await user.save();
+            return res.status(400).json({ message: "OTP expired or not requested" });
+        }
+
+        // 3️⃣ Check attempts
+        if (user.otp.attemptsLeft <= 0) {
+            user.otp = undefined;
+            await user.save();
+            return res.status(429).json({ message: "Too many invalid attempts. Request a new OTP." });
+        }
+
+        // 4️⃣ Validate OTP
+        const isValid = await bcrypt.compare(otp, user.otp.code);
+        if (!isValid) {
+            user.otp.attemptsLeft -= 1;
+            await user.save();
+            return res.status(401).json({ message: `Invalid OTP. ${user.otp.attemptsLeft} attempts left.` });
+        }
+
+        // 5️⃣ ✅ Success: verify user & clear OTP
+        user.isVerified = true;
+        user.otp = undefined;
+        user.otpRequests = [];
+        await user.save();
+
+        // 6️⃣ Handle referral rewards
+        if (user.referredBy) {
+            const config = await ReferralConfig.findOne();
+            if (config) {
+                const referrer = await User.findById(user.referredBy);
+                if (referrer) {
+                    // Reward referrer in Wallet
+                    await addRewardPoints({
+                        userId: referrer._id,
+                        points: config.rewardForReferrer,
+                        description: `Referral reward for inviting ${user.name}`,
+                    });
+
+                    // Reward referee in Wallet
+                    await addRewardPoints({
+                        userId: user._id,
+                        points: config.rewardForReferee,
+                        description: "Referral signup reward",
+                    });
+                }
+            }
+        }
+
+        // 7️⃣ Fetch wallet of current user to return points
+        const wallet = await getOrCreateWallet(user._id);
+
+        return res.status(200).json({
+            message: "Email verified successfully. Referral rewards applied instantly (if any). You can now login.",
+            walletBalance: wallet.joyoryCash + wallet.rewardPoints,
+            joyoryCash: wallet.joyoryCash,
+            rewardPoints: wallet.rewardPoints,
+            transactions: wallet.transactions.slice().reverse().slice(0, 50),
+        });
+    } catch (err) {
+        console.error("Error verifying email OTP:", err);
+        return res.status(500).json({ message: "Server error", error: err.message });
+    }
+};
+
+
 export const sendOtpToAdmin = async (req, res) => {
     const { email, preferredOtpMethod } = req.body;
 

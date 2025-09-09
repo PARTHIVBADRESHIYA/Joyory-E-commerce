@@ -195,60 +195,30 @@ const razorpay = new Razorpay({
 export const getWallet = async (req, res) => {
     try {
         const wallet = await getOrCreateWallet(req.user._id);
+
+        // Fetch config for conversion rate
         const config = (await WalletConfig.findOne()) || {};
-        const pointsRate = config.pointsToCurrencyRate ?? 1;
+        const pointsRate = config.pointsToCurrencyRate ?? 0.1; // example: 1 point = 0.1 ₹
+
+        // Convert reward points to currency
         const pointsValue = wallet.rewardPoints * pointsRate;
+
         return res.json({
-            joyoryCash: wallet.joyoryCash,
-            rewardPoints: wallet.rewardPoints,
-            pointsValue,
-            walletBalance: wallet.joyoryCash + pointsValue,
-            transactions: wallet.transactions.slice().reverse().slice(0, 50), // latest 50
+            joyoryCash: wallet.joyoryCash,              // actual wallet money
+            rewardPoints: wallet.rewardPoints,          // raw points
+            pointsValue: pointsValue,                   // points in ₹
+            walletBalance: wallet.joyoryCash + pointsValue, // total usable balance
+            transactions: wallet.transactions
+                .slice()
+                .reverse()
+                .slice(0, 50), // latest 50 transactions
         });
     } catch (err) {
-        return res
-            .status(500)
-            .json({ message: "Error fetching wallet", error: err.message });
+        return res.status(500).json({ message: "Error fetching wallet", error: err.message });
     }
 };
 
-// STEP 1: create razorpay order for wallet top-up
-// POST /api/wallet/create-order { amount }
-// export const createWalletOrder = async (req, res) => {
-//     try {
-//         const { amount } = req.body;
-//         if (!amount || amount <= 0)
-//             return res.status(400).json({ message: "Invalid amount" });
 
-//         const config = (await WalletConfig.findOne()) || {};
-//         if (config.minAddAmount && amount < config.minAddAmount) {
-//             return res
-//                 .status(400)
-//                 .json({ message: `Minimum add amount is ${config.minAddAmount}` });
-//         }
-
-//         const options = {
-//             amount: amount * 100, // in paise
-//             currency: "INR",
-//             receipt: `wallet_${req.user._id}_${Date.now()}`,
-//             notes: {
-//                 purpose: "Wallet Top-up",
-//                 userId: req.user._id.toString(),
-//             },
-//         };
-
-//         const order = await razorpay.orders.create(options);
-//         return res.json({ order });
-//     } catch (err) {
-//         return res
-//             .status(500)
-//             .json({ message: "Error creating Razorpay order", error: err.message });
-//     }
-// };
-// -------------------------
-// STEP 1: Create Wallet Order
-// POST /api/wallet/create-order { amount }
-// -------------------------
 export const createWalletOrder = async (req, res) => {
     try {
         const { amount } = req.body;
