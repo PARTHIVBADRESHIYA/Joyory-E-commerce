@@ -857,6 +857,8 @@ import mockShippingRoutes from "./routes/mockShippingRoutes.js";
 import shadeFinderRoutes from "./routes/shadeFinderRoutes.js";
 import skinTypeAdminRoutes from "./routes/skinTypeRoutes.js";
 import giftCardRoutes from "./routes/giftCardTemplateRoutes.js";
+import referralRoutes from "./routes/referralRoutes.js";
+
 
 // User side
 import userProductRoutes from "./routes/user/userProductRoutes.js";
@@ -961,6 +963,8 @@ app.use("/api/user/brands", userBrandRoutes);
 app.use("/api/user/discounts", userDiscountRoutes);
 app.use("/api/user/shadefinder", userShadeFinderRoutes);
 app.use("/api/user/giftcards", userGiftCardRoutes);
+app.use("/api/referral", referralRoutes);
+
 
 // ================= TEST ROUTE =================
 app.get("/", (req, res) => res.send("✅ API is running..."));

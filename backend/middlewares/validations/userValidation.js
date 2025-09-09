@@ -7,6 +7,7 @@ export const userSignupSchema = Joi.object({
     password: Joi.string().min(6).required(),
     phone: Joi.string().pattern(/^\+?[0-9]{10,15}$/).optional(), // for India: 10-digit
     preferredOtpMethod: Joi.string().valid('email', 'sms').optional(),
+    referralCode: Joi.string().optional(),
     createdBy: Joi.string().valid('admin', 'self').optional()
 });
 

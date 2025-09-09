@@ -91,6 +91,11 @@ const userSchema = new mongoose.Schema({
         image: String
     },
 
+    referralCode: { type: String, unique: true },
+    referredBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+
+    walletBalance: { type: Number, default: 0 },
+
     createdBy: {
         type: String,
         enum: ['admin', 'self'],

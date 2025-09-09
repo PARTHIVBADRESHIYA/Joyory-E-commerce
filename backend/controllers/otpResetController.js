@@ -160,6 +160,49 @@ export const resetPasswordWithOtp = async (req, res) => {
 };
 
 // Verify OTP
+// export const verifyEmailOtp = async (req, res) => {
+//     const { error } = verifyEmailOtpSchema.validate(req.body, { allowUnknown: true });
+//     if (error) return res.status(400).json({ message: error.details[0].message });
+
+//     const { email, otp } = req.body;
+//     const user = await User.findOne({ email: email.trim().toLowerCase() });
+//     if (!user) return res.status(404).json({ message: 'User not found' });
+//     if (user.isVerified) return res.status(400).json({ message: 'User already verified' });
+
+//     // Check OTP existence & expiry
+//     if (!user.otp?.code || new Date() > new Date(user.otp.expiresAt)) {
+//         user.otp = undefined;
+//         await user.save();
+//         return res.status(400).json({ message: 'OTP expired or not requested' });
+//     }
+
+//     // Check attempts
+//     if (user.otp.attemptsLeft <= 0) {
+//         user.otp = undefined;
+//         await user.save();
+//         return res.status(429).json({ message: 'Too many invalid attempts. Request a new OTP.' });
+//     }
+
+//     // Validate OTP
+//     const isValid = await bcrypt.compare(otp, user.otp.code);
+//     if (!isValid) {
+//         user.otp.attemptsLeft -= 1;
+//         await user.save();
+//         return res.status(401).json({ message: `Invalid OTP. ${user.otp.attemptsLeft} attempts left.` });
+//     }
+
+//     // Success: verify user & clear OTP data
+//     user.isVerified = true;
+//     user.otp = undefined;
+//     user.otpRequests = [];
+//     await user.save();
+
+//     return res.status(200).json({ message: 'Email verified successfully. You can now login.' });
+// };
+
+
+
+// Verify OTP
 export const verifyEmailOtp = async (req, res) => {
     const { error } = verifyEmailOtpSchema.validate(req.body, { allowUnknown: true });
     if (error) return res.status(400).json({ message: error.details[0].message });
@@ -191,17 +234,28 @@ export const verifyEmailOtp = async (req, res) => {
         return res.status(401).json({ message: `Invalid OTP. ${user.otp.attemptsLeft} attempts left.` });
     }
 
-    // Success: verify user & clear OTP data
+    // ✅ Success: verify user & clear OTP
     user.isVerified = true;
     user.otp = undefined;
     user.otpRequests = [];
+
+    // 🆕 Step 6: Handle referral rewards
+    if (user.referredBy) {
+        const referrer = await User.findById(user.referredBy);
+        if (referrer) {
+            referrer.walletBalance += 100; // reward for referrer
+            await referrer.save();
+
+            user.walletBalance += 50; // reward for referee
+        }
+    }
+
     await user.save();
 
-    return res.status(200).json({ message: 'Email verified successfully. You can now login.' });
+    return res.status(200).json({
+        message: 'Email verified successfully. Referral rewards (if any) have been applied. You can now login.'
+    });
 };
-
-
-
 
 
 // ====================== ADMIN OTP FLOWS ===================== //

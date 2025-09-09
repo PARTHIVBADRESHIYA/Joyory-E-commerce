@@ -1,6 +1,7 @@
 import User from '../../models/User.js';
 import Order from '../../models/Order.js';
-
+import { generateUniqueReferralCode } from '../../middlewares/utils/referral.js';
+import Referral from '../../models/Referral.js';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { generateOTP } from '../../middlewares/utils/generateOTP.js';
@@ -19,9 +20,68 @@ const generateToken = (user) => {
 
 // ====================== USER SECTION ===================== //
 // 📌 User Signup
+// const userSignup = async (req, res) => {
+//     try {
+//         const { name, email, password, phone, preferredOtpMethod } = req.body;
+//         if (!name || !email || !password) {
+//             return res.status(400).json({ message: 'name, email and password are required' });
+//         }
+
+//         const existing = await User.findOne({ email });
+//         if (existing) return res.status(400).json({ message: 'Email already registered' });
+
+//         const method = (preferredOtpMethod && ['email', 'sms'].includes(preferredOtpMethod.toLowerCase()))
+//             ? preferredOtpMethod.toLowerCase()
+//             : 'email';
+//         const willUseSms = method === 'sms' && phone;
+//         const actualMethod = willUseSms ? 'sms' : 'email';
+
+//         const plainOtp = generateOTP();
+//         const hashedOtp = await bcrypt.hash(plainOtp, 10);
+//         const hashedPassword = await bcrypt.hash(password, 10);
+
+//         const user = await User.create({
+//             name,
+//             email,
+//             phone,
+//             password: hashedPassword,
+//             role: 'user',
+//             isManual: true,
+//             isVerified: false,
+//             preferredOtpMethod: actualMethod,
+//             otp: { code: hashedOtp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) }
+//         });
+
+//         try {
+//             if (actualMethod === 'sms') {
+//                 await sendSms(phone, `Your verification OTP is: ${plainOtp}`);
+//             } else {
+//                 await sendEmail(email, 'Verify your account', `<p>Your verification OTP is: <b>${plainOtp}</b></p>`);
+//             }
+//         } catch (err) {
+//             console.error('OTP send failed:', err);
+//             return res.status(500).json({
+//                 message: 'Signup succeeded but sending OTP failed. Please request OTP again.',
+//                 error: err.message
+//             });
+//         }
+
+//         return res.status(201).json({
+//             message: 'Signup successful. OTP sent.',
+//             method: actualMethod,
+//             email: user.email
+//         });
+//     } catch (err) {
+//         console.error('Signup error:', err);
+//         res.status(500).json({ message: 'Signup failed', error: err.message });
+//     }
+// };
+
+
+// 📌 User Signup with Referral
 const userSignup = async (req, res) => {
     try {
-        const { name, email, password, phone, preferredOtpMethod } = req.body;
+        const { name, email, password, phone, preferredOtpMethod, referralCode } = req.body;
         if (!name || !email || !password) {
             return res.status(400).json({ message: 'name, email and password are required' });
         }
@@ -29,6 +89,7 @@ const userSignup = async (req, res) => {
         const existing = await User.findOne({ email });
         if (existing) return res.status(400).json({ message: 'Email already registered' });
 
+        // OTP + verification method
         const method = (preferredOtpMethod && ['email', 'sms'].includes(preferredOtpMethod.toLowerCase()))
             ? preferredOtpMethod.toLowerCase()
             : 'email';
@@ -39,7 +100,11 @@ const userSignup = async (req, res) => {
         const hashedOtp = await bcrypt.hash(plainOtp, 10);
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        const user = await User.create({
+        // generate unique referral code for this user
+        const myReferralCode = await generateUniqueReferralCode();
+
+        // create user object
+        const user = new User({
             name,
             email,
             phone,
@@ -48,9 +113,37 @@ const userSignup = async (req, res) => {
             isManual: true,
             isVerified: false,
             preferredOtpMethod: actualMethod,
-            otp: { code: hashedOtp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) }
+            otp: { code: hashedOtp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) },
+            referralCode: myReferralCode
         });
 
+        let referrer = null;
+        if (referralCode) {
+            referrer = await User.findOne({ referralCode: referralCode.toUpperCase() });
+            if (!referrer) {
+                return res.status(400).json({ message: 'Invalid referral code' });
+            }
+            if (referrer.email === email) {
+                return res.status(400).json({ message: 'You cannot use your own referral code' });
+            }
+            user.referredBy = referrer._id;
+        }
+
+        await user.save();
+
+        // if referred, create referral record in "pending" state
+        if (referrer) {
+            await Referral.create({
+                referrer: referrer._id,
+                referee: user._id,
+                status: 'pending',
+                rewardForReferrer: 200,   // ₹200 to referrer (configurable)
+                rewardForReferee: 200,    // ₹200 to referee
+                minOrderAmount: 100       // order must be ≥ ₹100
+            });
+        }
+
+        // send OTP
         try {
             if (actualMethod === 'sms') {
                 await sendSms(phone, `Your verification OTP is: ${plainOtp}`);
@@ -65,16 +158,21 @@ const userSignup = async (req, res) => {
             });
         }
 
+        // send response with referral link
         return res.status(201).json({
             message: 'Signup successful. OTP sent.',
             method: actualMethod,
-            email: user.email
+            email: user.email,
+            referralCode: user.referralCode,
+            referralLink: `${process.env.APP_URL || 'https://yourdomain.com'}/signup?ref=${user.referralCode}`
         });
     } catch (err) {
         console.error('Signup error:', err);
         res.status(500).json({ message: 'Signup failed', error: err.message });
     }
 };
+
+
 // @desc    User Login (5 attempts → 5min lock)
 const userLogin = async (req, res) => {
     try {
