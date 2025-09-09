@@ -245,7 +245,7 @@ export const createWalletOrder = async (req, res) => {
         const receipt = `wallet_${shortUserId}_${shortTimestamp}`;
 
         const options = {
-            amount: amount * 1, 
+            amount: amount * 1,
             currency: "INR",
             receipt: receipt,
             notes: {
@@ -407,13 +407,34 @@ export const refundToWallet = async (req, res) => {
     }
 };
 
-// Utility: add reward points
+// // Utility: add reward points
+// export const addRewardPoints = async ({
+//     userId,
+//     points = 0,
+//     description = "Reward",
+// }) => {
+//     if (!userId || !points) return null;
+//     const wallet = await getOrCreateWallet(userId);
+//     wallet.rewardPoints += points;
+//     wallet.transactions.push({
+//         type: "REWARD",
+//         amount: points,
+//         mode: "POINTS",
+//         description,
+//     });
+//     await wallet.save();
+//     return wallet;
+// };
+
+
 export const addRewardPoints = async ({
     userId,
     points = 0,
     description = "Reward",
 }) => {
     if (!userId || !points) return null;
+
+    // get or create wallet
     const wallet = await getOrCreateWallet(userId);
     wallet.rewardPoints += points;
     wallet.transactions.push({
@@ -423,5 +444,14 @@ export const addRewardPoints = async ({
         description,
     });
     await wallet.save();
+
+    // update User document too
+    const user = await User.findById(userId);
+    if (user) {
+        user.rewardPoints = wallet.rewardPoints;
+        user.joyoryCash = wallet.joyoryCash;
+        await user.save();
+    }
+
     return wallet;
 };

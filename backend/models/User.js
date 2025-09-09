@@ -94,7 +94,8 @@ const userSchema = new mongoose.Schema({
     referralCode: { type: String, unique: true },
     referredBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
 
-    walletBalance: { type: Number, default: 0 },
+rewardPoints: { type: Number, default: 0 }, // points user has
+joyoryCash: { type: Number, default: 0 }, // cash added to wallet
 
     createdBy: {
         type: String,
