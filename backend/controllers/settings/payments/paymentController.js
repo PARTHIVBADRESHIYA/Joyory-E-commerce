@@ -238,7 +238,6 @@ export const verifyRazorpayPayment = async (req, res) => {
             razorpay_payment_id,
             razorpay_signature,
             shippingAddress,
-            pointsUsed = 0, // new field: points user wants to redeem
         } = req.body;
 
         console.log("📥 Incoming payment verification request:", req.body);
@@ -268,7 +267,6 @@ export const verifyRazorpayPayment = async (req, res) => {
                 orderId
             });
         }
-        console.log("📦 Fetched order:", order._id, "for user:", order.user.email);
 
         // STEP 3: Idempotency check
         if (order.paid) {
@@ -291,7 +289,6 @@ export const verifyRazorpayPayment = async (req, res) => {
                 debug: { expected: order.razorpayOrderId, got: razorpay_order_id }
             });
         }
-        console.log("🔗 Razorpay Order ID match verified");
 
         // STEP 5: Signature verification
         const signBody = `${razorpay_order_id}|${razorpay_payment_id}`;
@@ -311,26 +308,7 @@ export const verifyRazorpayPayment = async (req, res) => {
         }
         console.log("✅ Signature verified");
 
-        // STEP 6: Apply points redemption
-        let pointsDiscount = 0;
-        if (pointsUsed > 0) {
-            if (pointsUsed > order.user.points) {
-                return res.status(400).json({
-                    step: "POINTS_CHECK",
-                    success: false,
-                    message: `You tried to use ${pointsUsed} points, but only ${order.user.points} are available.`
-                });
-            }
-            pointsDiscount = pointsUsed * 0.1; // 1 point = 0.1 INR
-            order.amount -= pointsDiscount;
-            if (order.amount < 0) order.amount = 0;
-
-            order.user.points -= pointsUsed;
-            await order.user.save();
-            console.log(`✅ ${pointsUsed} points redeemed → ₹${pointsDiscount} discount applied`);
-        }
-
-        // STEP 7: Fetch payment from Razorpay
+        // STEP 6: Fetch payment from Razorpay
         let rpPayment;
         try {
             rpPayment = await razorpay.payments.fetch(razorpay_payment_id);
@@ -346,7 +324,7 @@ export const verifyRazorpayPayment = async (req, res) => {
             });
         }
 
-        // STEP 8: Payment status check
+        // STEP 7: Payment status check
         if (rpPayment.status !== "captured") {
             console.error("❌ Payment not captured:", rpPayment.status);
             return res.status(400).json({
@@ -356,9 +334,8 @@ export const verifyRazorpayPayment = async (req, res) => {
                 debug: rpPayment
             });
         }
-        console.log("💳 Payment status verified:", rpPayment.status);
 
-        // STEP 9: Amount check
+        // STEP 8: Amount check
         const paidAmountInInr = rpPayment.amount / 100;
         if (paidAmountInInr !== order.amount) {
             console.error("❌ Amount mismatch", { razorpayAmount: paidAmountInInr, orderAmount: order.amount });
@@ -369,14 +346,17 @@ export const verifyRazorpayPayment = async (req, res) => {
                 debug: { razorpayAmount: paidAmountInInr, orderAmount: order.amount }
             });
         }
-        console.log("💵 Amount verified:", paidAmountInInr);
 
-        // STEP 10: Deduct stock
+        // STEP 9: Deduct stock
         for (const item of order.products) {
             const product = await Product.findById(item.productId._id);
-            if (!product) continue;
+            if (!product) {
+                console.warn("⚠️ Product not found:", item.productId._id);
+                continue;
+            }
 
             if (product.quantity < item.quantity) {
+                console.error("❌ Insufficient stock:", { product: product.name, available: product.quantity, requested: item.quantity });
                 return res.status(400).json({
                     step: "STOCK_CHECK",
                     success: false,
@@ -388,64 +368,98 @@ export const verifyRazorpayPayment = async (req, res) => {
             product.quantity -= item.quantity;
             product.sales = (product.sales || 0) + item.quantity;
             product.status =
-                product.quantity <= 0 ? "Out of stock" :
-                product.quantity < product.thresholdValue ? "Low stock" : "In-stock";
+                product.quantity <= 0
+                    ? "Out of stock"
+                    : product.quantity < product.thresholdValue
+                        ? "Low stock"
+                        : "In-stock";
 
             await product.save();
+            console.log(`✅ Stock updated for product ${product.name}`);
         }
 
-        // STEP 11: Mark order as paid
+        // STEP 10: Mark order as paid
         order.paid = true;
         order.paymentStatus = "success";
-        order.paymentMethod = order.paymentMethod === "COD" ? "COD" : "Prepaid";
+        order.paymentMethod === "COD" ? "COD" : "Prepaid"
         order.transactionId = razorpay_payment_id;
         order.razorpayOrderId = razorpay_order_id;
         order.orderStatus = "Processing";
 
-        if (shippingAddress) order.shippingAddress = shippingAddress;
-
-        // STEP 12: Save Payment record
-        await Payment.create({
-            order: order._id,
-            method: rpPayment.method || "Razorpay",
-            status: "Completed",
-            transactionId: razorpay_payment_id,
-            amount: order.amount,
-            cardHolderName: rpPayment.card ? rpPayment.card.name : undefined,
-            cardNumber: rpPayment.card ? rpPayment.card.last4 : undefined,
-            expiryDate: rpPayment.card ? `${rpPayment.card.expiry_month}/${rpPayment.card.expiry_year}` : undefined,
-            isActive: true,
-        });
-
-        // STEP 13: Clear user cart
-        const user = await User.findById(order.user._id);
-        if (user) {
-            user.cart = [];
-            await user.save();
+        if (shippingAddress) {
+            order.shippingAddress = shippingAddress;
         }
 
-        // STEP 14: Shiprocket Integration
+        // STEP 11: Save Payment record
+        try {
+            await Payment.create({
+                order: order._id,
+                method: rpPayment.method || "Razorpay",
+                status: "Completed",
+                transactionId: razorpay_payment_id,
+                amount: order.amount,
+                cardHolderName: rpPayment.card ? rpPayment.card.name : undefined,
+                cardNumber: rpPayment.card ? rpPayment.card.last4 : undefined,
+                expiryDate: rpPayment.card
+                    ? `${rpPayment.card.expiry_month}/${rpPayment.card.expiry_year}`
+                    : undefined,
+                isActive: true,
+            });
+            console.log("✅ Payment record saved");
+        } catch (paymentErr) {
+            console.error("❌ Error saving Payment record:", paymentErr);
+        }
+
+        // STEP 12: Clear user cart
+        try {
+            const user = await User.findById(order.user._id);
+            if (user) {
+                user.cart = [];
+                await user.save();
+                console.log("✅ User cart cleared");
+            }
+        } catch (userErr) {
+            console.error("❌ Error clearing user cart:", userErr);
+        }
+
+        // STEP 13: Shiprocket Integration
         let shiprocketRes = null;
         try {
+            // shiprocketRes = await createShiprocketOrder(order); // my updated version returns { shipmentDetails, rawResponses }
             shiprocketRes = await createShipment(order);
             order.shipment = shiprocketRes.shipmentDetails;
+            console.log("✅ Shiprocket order created:", order.shipment);
         } catch (shipErr) {
-            console.warn("⚠️ Shipment creation failed but continuing order processing.");
+            console.error("❌ Shiprocket error:", shipErr.response?.data || shipErr.message);
+            return res.status(502).json({
+                step: "SHIPROCKET",
+                success: false,
+                message: "Shiprocket order creation failed",
+                error: shipErr.message,
+                details: shipErr.response?.data || null
+            });
         }
 
-        // STEP 15: Referral rewards (non-blocking)
-        try {
-            const referral = await Referral.findOne({ referee: order.user._id, status: "pending" });
-            if (referral && order.amount >= referral.minOrderAmount) {
-                await User.findByIdAndUpdate(referral.referee, { $inc: { walletBalance: referral.rewardForReferee } });
-                await User.findByIdAndUpdate(referral.referrer, { $inc: { walletBalance: referral.rewardForReferrer } });
-                referral.status = "rewarded";
-                referral.rewardedAt = new Date();
-                await referral.save();
-            }
-        } catch (refErr) { console.error(refErr.message); }
 
-        // STEP 16: Tracking history
+
+        // // STEP 13: Shiprocket Integration (Non-blocking)
+        // let shiprocketRes = null;
+        // try {
+        //     shiprocketRes = await createShiprocketOrder(order); // returns { shipmentDetails, rawResponses }
+        //     order.shipment = shiprocketRes.shipmentDetails;
+        //     console.log("✅ Shiprocket order created:", order.shipment);
+        // } catch (shipErr) {
+        //     console.error("❌ Shiprocket error:", shipErr.response?.data || shipErr.message);
+
+        //     // Mark shipping as pending but don't fail the payment
+        //     order.shipment = {
+        //         status: "Unshipped",
+        //         error: shipErr.response?.data?.message || shipErr.message
+        //     };
+        //     console.warn("⚠️ Payment success but Shiprocket failed → order marked as Processing, shipment pending.");
+        // }
+
+        // STEP 14: Tracking history
         if (!order.trackingHistory) order.trackingHistory = [];
         order.trackingHistory.push(
             { status: "Payment Successful", timestamp: new Date(), location: "Online Payment - Razorpay" },
@@ -454,21 +468,44 @@ export const verifyRazorpayPayment = async (req, res) => {
 
         await order.save();
 
+        // STEP 15: Deduct walletBalance (referral/points) after successful payment
+        try {
+            if (order.pointsUsed && order.pointsUsed > 0) {
+                const user = await User.findById(order.user._id);
+                if (user) {
+                    const pointsValue = order.pointsUsed * 0.1; // 1 point = 0.1 INR
+                    if (user.walletBalance >= pointsValue) {
+                        user.walletBalance -= pointsValue;
+                    } else {
+                        console.warn(`⚠️ Wallet balance insufficient. Available: ${user.walletBalance}, Required: ${pointsValue}`);
+                        user.walletBalance = 0; // deduct whatever is left
+                    }
+                    await user.save();
+                    console.log(`✅ Wallet points deducted: ${order.pointsUsed} points → ₹${pointsValue}`);
+                } else {
+                    console.error("❌ User not found for wallet deduction", { userId: order.user._id });
+                }
+            }
+        } catch (walletErr) {
+            console.error("🔥 Error deducting wallet points:", walletErr);
+        }
+
+        console.log("✅ Order updated successfully");
+
         return res.status(200).json({
             step: "COMPLETE",
             success: true,
-            message: shiprocketRes ? 
-                "Payment verified, stock updated, order paid & shipment created" :
-                "Payment verified, stock updated, order paid (shipment pending)",
+            message: shiprocketRes
+                ? "Payment verified, stock updated, order paid & shipment created"
+                : "Payment verified, stock updated, order paid (shipment pending)",
             paymentMethod: rpPayment.method,
             order,
-            pointsUsed,
-            pointsValueInRupees: pointsDiscount,
             debug: {
                 razorpayPayment: rpPayment,
                 shiprocket: shiprocketRes?.rawResponses || null
             }
         });
+
 
     } catch (err) {
         console.error("🔥 Fatal error verifying Razorpay payment:", err);
