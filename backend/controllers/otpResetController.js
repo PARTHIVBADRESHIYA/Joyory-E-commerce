@@ -10,6 +10,8 @@ import PendingAdmin from "../models/PendingAdmin.js";
 import AdminRoleAdmin from '../models/settings/admin/AdminRoleAdmin.js';
 import TeamMember from '../models/settings/admin/TeamMember.js';
 import User from '../models/User.js';
+import Referral from "../models/Referral.js";
+import ReferralConfig from "../models/ReferralConfig.js";
 
 import {
     sendOtpSchema,
@@ -202,28 +204,30 @@ export const resetPasswordWithOtp = async (req, res) => {
 
 
 
-// Verify OTP
+
+
+
 export const verifyEmailOtp = async (req, res) => {
     const { error } = verifyEmailOtpSchema.validate(req.body, { allowUnknown: true });
     if (error) return res.status(400).json({ message: error.details[0].message });
 
     const { email, otp } = req.body;
     const user = await User.findOne({ email: email.trim().toLowerCase() });
-    if (!user) return res.status(404).json({ message: 'User not found' });
-    if (user.isVerified) return res.status(400).json({ message: 'User already verified' });
+    if (!user) return res.status(404).json({ message: "User not found" });
+    if (user.isVerified) return res.status(400).json({ message: "User already verified" });
 
     // Check OTP existence & expiry
     if (!user.otp?.code || new Date() > new Date(user.otp.expiresAt)) {
         user.otp = undefined;
         await user.save();
-        return res.status(400).json({ message: 'OTP expired or not requested' });
+        return res.status(400).json({ message: "OTP expired or not requested" });
     }
 
     // Check attempts
     if (user.otp.attemptsLeft <= 0) {
         user.otp = undefined;
         await user.save();
-        return res.status(429).json({ message: 'Too many invalid attempts. Request a new OTP.' });
+        return res.status(429).json({ message: "Too many invalid attempts. Request a new OTP." });
     }
 
     // Validate OTP
@@ -239,24 +243,31 @@ export const verifyEmailOtp = async (req, res) => {
     user.otp = undefined;
     user.otpRequests = [];
 
-    // 🆕 Step 6: Handle referral rewards
+    // ✅ Handle referral rewards instantly
     if (user.referredBy) {
-        const referrer = await User.findById(user.referredBy);
-        if (referrer) {
-            referrer.walletBalance += 100; // reward for referrer
-            await referrer.save();
+        const config = await ReferralConfig.findOne();
+        if (config) {
+            const referrer = await User.findById(user.referredBy);
 
-            user.walletBalance += 50; // reward for referee
+            if (referrer) {
+                // reward referrer
+                referrer.walletBalance += config.rewardForReferrer;
+                await referrer.save();
+
+                // reward referee
+                user.walletBalance += config.rewardForReferee;
+            }
         }
     }
 
     await user.save();
 
     return res.status(200).json({
-        message: 'Email verified successfully. Referral rewards (if any) have been applied. You can now login.'
+        message:
+            "Email verified successfully. Referral rewards applied instantly (if any). You can now login.",
+        walletBalance: user.walletBalance,
     });
 };
-
 
 // ====================== ADMIN OTP FLOWS ===================== //
 

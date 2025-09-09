@@ -858,6 +858,7 @@ import shadeFinderRoutes from "./routes/shadeFinderRoutes.js";
 import skinTypeAdminRoutes from "./routes/skinTypeRoutes.js";
 import giftCardRoutes from "./routes/giftCardTemplateRoutes.js";
 import referralRoutes from "./routes/referralRoutes.js";
+import adminReferralConfigRoutes from "./routes/adminReferralConfigRoutes.js";
 
 
 // User side
@@ -944,6 +945,7 @@ app.use("/api", testRoutes);
 app.use("/api/shadefinder", shadeFinderRoutes);
 app.use("/api/giftcards", giftCardRoutes);
 app.use("/api/skintypes", skinTypeAdminRoutes);
+app.use("/api/admin-referral-config", adminReferralConfigRoutes);
 app.use("/api/webhooks", webhookRoutes);
 app.use("/api/brands", brandRoutes);
 app.use("/api/test", testPickUpRoutes);
