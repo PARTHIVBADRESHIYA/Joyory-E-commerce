@@ -16,6 +16,7 @@ import {
   applyFlatDiscount,
   bestTierForQty, isObjectId, asMoney
 } from "../../controllers/user/userPromotionController.js";
+import { getOrCreateWallet } from "../../middlewares/utils/walletHelpers.js";
 
 import { applyPromotions } from "../../middlewares/services/promotionEngine.js";
 import Referral from "../../models/Referral.js";
@@ -514,16 +515,19 @@ export const getCartSummary = async (req, res) => {
     let pointsDiscount = 0;
     let pointsMessage = "";
 
+    // Fetch the user's wallet instead of using user.walletBalance
+    const wallet = await getOrCreateWallet(req.user._id);
+
     if (req.query.pointsToUse) {
       pointsUsed = Number(req.query.pointsToUse);
-      if (!isNaN(pointsUsed) && pointsUsed > 0 && user.walletBalance > 0) {
-        if (pointsUsed > user.walletBalance) pointsUsed = user.walletBalance;
+
+      if (!isNaN(pointsUsed) && pointsUsed > 0 && wallet.rewardPoints > 0) {
+        if (pointsUsed > wallet.rewardPoints) pointsUsed = wallet.rewardPoints;
 
         pointsDiscount = pointsUsed * 0.1; // 1 point = ₹0.1
         pointsMessage = `🎉 You used ${pointsUsed} points from your wallet! Discount applied: ₹${pointsDiscount}`;
       }
     }
-
     /* -------------------- 📊 Final Totals -------------------- */
     const round2 = (n) => Math.round(n * 100) / 100;
     const grandTotal = round2(Math.max(0, summary.payable - discountFromCoupon - pointsDiscount));
