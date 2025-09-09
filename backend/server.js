@@ -859,7 +859,7 @@ import skinTypeAdminRoutes from "./routes/skinTypeRoutes.js";
 import giftCardRoutes from "./routes/giftCardTemplateRoutes.js";
 import referralRoutes from "./routes/referralRoutes.js";
 import adminReferralConfigRoutes from "./routes/adminReferralConfigRoutes.js";
-
+import adminWalletRoutes from "./routes/adminWalletRoutes.js";
 
 // User side
 import userProductRoutes from "./routes/user/userProductRoutes.js";
@@ -873,6 +873,7 @@ import userBrandRoutes from "./routes/user/userBrandRoutes.js";
 import userDiscountRoutes from "./routes/user/userDiscountRoutes.js";
 import userShadeFinderRoutes from "./routes/user/userShadeFinderRoutes.js";
 import userGiftCardRoutes from "./routes/user/userGiftCardRoutes.js";
+import userWalletRoutes from "./routes/user/userWalletRoutes.js";
 
 // ================= CONNECT DB =================
 connectDB();
@@ -949,6 +950,7 @@ app.use("/api/admin-referral-config", adminReferralConfigRoutes);
 app.use("/api/webhooks", webhookRoutes);
 app.use("/api/brands", brandRoutes);
 app.use("/api/test", testPickUpRoutes);
+app.use("/api/wallet", adminWalletRoutes);
 if ((process.env.SHIPPING_PROVIDER || "mock").toLowerCase() === "mock") {
     app.use("/api/shipping", mockShippingRoutes);
 }
@@ -966,6 +968,7 @@ app.use("/api/user/discounts", userDiscountRoutes);
 app.use("/api/user/shadefinder", userShadeFinderRoutes);
 app.use("/api/user/giftcards", userGiftCardRoutes);
 app.use("/api/referral", referralRoutes);
+app.use("/api/user/wallet", userWalletRoutes);
 
 
 // ================= TEST ROUTE =================
