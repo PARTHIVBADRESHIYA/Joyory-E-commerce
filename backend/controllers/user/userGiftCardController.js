@@ -481,6 +481,75 @@ export const createGiftCardOrder = async (req, res) => {
     }
 };
 
+// // ------------------- Step 2: Verify Payment & Issue Gift Card -------------------
+// // POST /api/giftcard/verify-payment
+// export const verifyGiftCardPayment = async (req, res) => {
+//     try {
+//         const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+//         if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+//             return res.status(400).json({ message: "Invalid Razorpay payload" });
+//         }
+
+//         // Verify Razorpay signature
+//         const body = razorpay_order_id + "|" + razorpay_payment_id;
+//         const expectedSignature = crypto
+//             .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+//             .update(body.toString())
+//             .digest("hex");
+
+//         if (expectedSignature !== razorpay_signature) {
+//             return res.status(400).json({ message: "Payment verification failed" });
+//         }
+
+//         // Fetch Razorpay order
+//         const order = await razorpay.orders.fetch(razorpay_order_id);
+//         const amountInRupees = order.amount / 100;
+//         const notes = order.notes;
+
+//         // ✅ Create & Save Gift Card
+//         const giftCard = new GiftCard({
+//             templateId: notes.templateId,
+//             code: generateGiftCardCode(),
+//             pin: generatePin(),
+//             amount: amountInRupees,
+//             balance: amountInRupees,
+//             expiryDate: new Date(new Date().setFullYear(new Date().getFullYear() + 1)), // 1 year validity
+//             recipient: { name: notes.recipientName, email: notes.recipientEmail },
+//             sender: { name: notes.senderName, phone: notes.senderPhone },
+//             message: notes.message || "",
+//             status: "active",
+//         });
+
+//         await giftCard.save();
+
+//         // Send email to recipient
+//         try {
+//             await sendEmail({
+//                 to: notes.recipientEmail,
+//                 subject: "🎁 You’ve received a Joyory Gift Card!",
+//                 html: `
+//                     <h2>Hello ${notes.recipientName},</h2>
+//                     <p><b>${notes.senderName}</b> has sent you a gift card worth <b>₹${amountInRupees}</b>!</p>
+//                     <p><b>Gift Card Code:</b> ${giftCard.code}</p>
+//                     <p><b>PIN:</b> ${giftCard.pin}</p>
+//                     <p><b>Expiry Date:</b> ${giftCard.expiryDate.toDateString()}</p>
+//                     <p><b>Message:</b> ${notes.message || "Enjoy your gift!"}</p>
+//                     <br/>
+//                     <p>Happy Shopping on Joyory 💄✨</p>
+//                 `,
+//             });
+//         } catch (emailErr) {
+//             console.error("Email sending failed:", emailErr.message);
+//         }
+
+//         res.json({ success: true, message: "Gift card issued successfully", giftCard });
+//     } catch (err) {
+//         res.status(500).json({ message: "Error verifying payment", error: err.message });
+//     }
+// };
+
+
 // ------------------- Step 2: Verify Payment & Issue Gift Card -------------------
 // POST /api/giftcard/verify-payment
 export const verifyGiftCardPayment = async (req, res) => {
@@ -523,12 +592,14 @@ export const verifyGiftCardPayment = async (req, res) => {
 
         await giftCard.save();
 
-        // Send email to recipient
+        // ✅ Send email to recipient
         try {
-            await sendEmail({
-                to: notes.recipientEmail,
-                subject: "🎁 You’ve received a Joyory Gift Card!",
-                html: `
+            console.log("📧 Sending gift card email to:", notes.recipientEmail);
+
+            const emailResult = await sendEmail(
+                notes.recipientEmail,
+                "🎁 You’ve received a Joyory Gift Card!",
+                `
                     <h2>Hello ${notes.recipientName},</h2>
                     <p><b>${notes.senderName}</b> has sent you a gift card worth <b>₹${amountInRupees}</b>!</p>
                     <p><b>Gift Card Code:</b> ${giftCard.code}</p>
@@ -537,17 +608,31 @@ export const verifyGiftCardPayment = async (req, res) => {
                     <p><b>Message:</b> ${notes.message || "Enjoy your gift!"}</p>
                     <br/>
                     <p>Happy Shopping on Joyory 💄✨</p>
-                `,
-            });
+                `
+            );
+
+            console.log("✅ Email sent:", emailResult.messageId || emailResult);
+
         } catch (emailErr) {
-            console.error("Email sending failed:", emailErr.message);
+            console.error("❌ Gift card email failed:", emailErr.message);
         }
 
-        res.json({ success: true, message: "Gift card issued successfully", giftCard });
+        res.json({
+            success: true,
+            message: "Gift card issued successfully",
+            giftCard,
+        });
+
     } catch (err) {
-        res.status(500).json({ message: "Error verifying payment", error: err.message });
+        console.error("❌ Gift card payment verification error:", err.message);
+        res.status(500).json({
+            success: false,
+            message: "Error verifying payment",
+            error: err.message,
+        });
     }
 };
+
 
 // ------------------- Redeem Gift Card -------------------
 export const redeemGiftCard = async (req, res) => {
