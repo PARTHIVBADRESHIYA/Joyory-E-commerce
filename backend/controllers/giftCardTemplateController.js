@@ -86,17 +86,18 @@ import GiftCardTemplate from "../models/GiftCardTemplate.js";
 // ✅ Create template
 export const createGiftCardTemplate = async (req, res) => {
     try {
-        const { title, description, minAmount, maxAmount } = req.body;
+        const { title, description, minAmount, maxAmount,tag } = req.body;
         const image = req.file ? req.file.path : null;
 
-        if (!title || !description || !image) {
-            return res.status(400).json({ message: "Title, description, and image are required" });
+        if (!title || !description || !image || !tag) {
+            return res.status(400).json({ message: "Title, description,tag  and image are required" });
         }
 
         const template = new GiftCardTemplate({
             title,
             description,
             image,
+            tag,
             minAmount,
             maxAmount
         });
