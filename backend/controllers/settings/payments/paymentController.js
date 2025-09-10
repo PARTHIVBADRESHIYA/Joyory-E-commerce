@@ -493,22 +493,8 @@ export const verifyRazorpayPayment = async (req, res) => {
 
         console.log("✅ Order updated successfully");
 
-        return res.status(200).json({
-            step: "COMPLETE",
-            success: true,
-            message: shiprocketRes
-                ? "Payment verified, stock updated, order paid & shipment created"
-                : "Payment verified, stock updated, order paid (shipment pending)",
-            paymentMethod: rpPayment.method,
-            order,
-            debug: {
-                razorpayPayment: rpPayment,
-                shiprocket: shiprocketRes?.rawResponses || null
-            }
-        });
 
-
-
+        
         // STEP 16: Generate Invoice PDF
         try {
             const { pdfBuffer, pdfUrl } = await generateInvoice(order, order.user);
@@ -540,6 +526,23 @@ export const verifyRazorpayPayment = async (req, res) => {
         } catch (invoiceErr) {
             console.error("❌ Failed to generate invoice:", invoiceErr);
         }
+
+
+        return res.status(200).json({
+            step: "COMPLETE",
+            success: true,
+            message: shiprocketRes
+                ? "Payment verified, stock updated, order paid & shipment created"
+                : "Payment verified, stock updated, order paid (shipment pending)",
+            paymentMethod: rpPayment.method,
+            order,
+            debug: {
+                razorpayPayment: rpPayment,
+                shiprocket: shiprocketRes?.rawResponses || null
+            }
+        });
+
+
 
     } catch (err) {
         console.error("🔥 Fatal error verifying Razorpay payment:", err);
