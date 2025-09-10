@@ -17,6 +17,7 @@ import cloudinary from '../../../middlewares/utils/cloudinary.js';
 import { determineOccasions, craftMessage } from "../../../middlewares/services/ecardService.js";
 import { buildEcardPdf } from "../../../middlewares/services/ecardPdf.js";
 import { uploadPdfBuffer } from "../../../middlewares/upload.js";
+import { generateInvoice } from "../../../middlewares/services/invoiceService.js";
 
 const razorpay = new Razorpay({
     key_id: process.env.RAZORPAY_KEY_ID,
@@ -506,6 +507,39 @@ export const verifyRazorpayPayment = async (req, res) => {
             }
         });
 
+
+
+        // STEP 16: Generate Invoice PDF
+        try {
+            const { pdfBuffer, pdfUrl } = await generateInvoice(order, order.user);
+
+            // Save invoice details in order
+            order.invoice = {
+                number: `INV-${order._id}`,
+                generatedAt: new Date(),
+                pdfUrl,
+            };
+            await order.save();
+
+            // Email Invoice
+            await sendEmail(
+                order.user.email,
+                "🧾 Your Invoice from Joyory",
+                `<p>Hi ${order.user.name},</p>
+         <p>Thank you for your purchase! Please find your invoice attached.</p>`,
+                [
+                    {
+                        filename: "invoice.pdf",
+                        content: pdfBuffer,
+                        contentType: "application/pdf",
+                    },
+                ]
+            );
+
+            console.log("✅ Invoice generated & emailed");
+        } catch (invoiceErr) {
+            console.error("❌ Failed to generate invoice:", invoiceErr);
+        }
 
     } catch (err) {
         console.error("🔥 Fatal error verifying Razorpay payment:", err);

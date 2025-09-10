@@ -65,7 +65,12 @@ const orderSchema = new mongoose.Schema({
             location: { type: String }
         }
     ],
-
+    invoice: {
+        number: String,
+        pdfUrl: String,
+        generatedAt: Date,
+    }
+,
     amount: { type: Number, required: true },
     promotionUsed: {
         promotionId: { type: mongoose.Schema.Types.ObjectId, ref: "Promotion" },
