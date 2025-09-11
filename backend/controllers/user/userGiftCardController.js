@@ -250,6 +250,7 @@ export const checkGiftCardBalance = async (req, res) => {
 
 
 // ------------------- Get My Gift Cards (sent by logged-in user) -------------------
+
 // export const getMyGiftCards = async (req, res) => {
 //     try {
 //         const giftCards = await GiftCard.find({ "sender.name": req.user.name })
@@ -271,18 +272,27 @@ export const checkGiftCardBalance = async (req, res) => {
 //                 statusMessage = "No balance left";
 //             }
 
+//             // 👇 calculate used amount
+//             const usedAmount = gc.initialAmount
+//                 ? gc.initialAmount - gc.balance
+//                 : null;
+
 //             return {
 //                 code: gc.code,
 //                 pin: gc.pin,
+//                 initialAmount: gc.initialAmount || gc.balance, // fallback if not stored
+//                 usedAmount: usedAmount !== null ? usedAmount : "Not tracked",
 //                 balance: gc.balance,
 //                 expiryDate: gc.expiryDate,
 //                 status: gc.status,
 //                 statusMessage,
-//                 template: gc.templateId ? {
-//                     title: gc.templateId.title,
-//                     description: gc.templateId.description,
-//                     image: gc.templateId.image,
-//                 } : null,
+//                 template: gc.templateId
+//                     ? {
+//                         title: gc.templateId.title,
+//                         description: gc.templateId.description,
+//                         image: gc.templateId.image,
+//                     }
+//                     : null,
 //                 sender: gc.sender,
 //                 receiver: gc.receiver,
 //             };
@@ -304,10 +314,11 @@ export const checkGiftCardBalance = async (req, res) => {
 //     }
 // };
 
-export const getMyGiftCards = async (req, res) => {
+
+export const getMyGiftCardsList = async (req, res) => {
     try {
         const giftCards = await GiftCard.find({ "sender.name": req.user.name })
-            .populate("templateId");
+            .populate("templateId", "title image"); // only get title & image
 
         if (!giftCards.length) {
             return res.status(404).json({
@@ -317,48 +328,20 @@ export const getMyGiftCards = async (req, res) => {
             });
         }
 
-        const detailedCards = giftCards.map((gc) => {
-            let statusMessage = "Active and usable";
-            if (gc.expiryDate < new Date()) {
-                statusMessage = "Expired";
-            } else if (gc.balance <= 0) {
-                statusMessage = "No balance left";
-            }
-
-            // 👇 calculate used amount
-            const usedAmount = gc.initialAmount
-                ? gc.initialAmount - gc.balance
-                : null;
-
-            return {
-                code: gc.code,
-                pin: gc.pin,
-                initialAmount: gc.initialAmount || gc.balance, // fallback if not stored
-                usedAmount: usedAmount !== null ? usedAmount : "Not tracked",
-                balance: gc.balance,
-                expiryDate: gc.expiryDate,
-                status: gc.status,
-                statusMessage,
-                template: gc.templateId
-                    ? {
-                        title: gc.templateId.title,
-                        description: gc.templateId.description,
-                        image: gc.templateId.image,
-                    }
-                    : null,
-                sender: gc.sender,
-                receiver: gc.receiver,
-            };
-        });
+        // Map to minimal info
+        const listData = giftCards.map(gc => ({
+            _id: gc._id,
+            title: gc.templateId?.title || "No title",
+            image: gc.templateId?.image || null,
+        }));
 
         res.json({
             success: true,
-            message: "Fetched your sent gift cards successfully",
-            total: detailedCards.length,
-            giftCards: detailedCards,
+            total: listData.length,
+            giftCards: listData,
         });
     } catch (err) {
-        console.error("getMyGiftCards error:", err);
+        console.error("getMyGiftCardsList error:", err);
         res.status(500).json({
             success: false,
             message: "Failed to fetch gift cards",
@@ -366,6 +349,65 @@ export const getMyGiftCards = async (req, res) => {
         });
     }
 };
+
+
+
+export const getGiftCardDetails = async (req, res) => {
+    try {
+        const { id } = req.params; // gift card id
+        const gc = await GiftCard.findById(id).populate("templateId");
+
+        if (!gc) {
+            return res.status(404).json({
+                success: false,
+                message: "Gift card not found",
+            });
+        }
+
+        // calculate used amount
+        const usedAmount = gc.initialAmount ? gc.initialAmount - gc.balance : null;
+        const statusMessage = gc.expiryDate < new Date()
+            ? "Expired"
+            : gc.balance <= 0
+                ? "No balance left"
+                : "Active and usable";
+
+        const details = {
+            _id: gc._id,
+            code: gc.code,
+            pin: gc.pin,
+            initialAmount: gc.initialAmount || gc.balance,
+            usedAmount: usedAmount !== null ? usedAmount : "Not tracked",
+            balance: gc.balance,
+            expiryDate: gc.expiryDate,
+            status: gc.status,
+            statusMessage,
+            template: gc.templateId
+                ? {
+                    title: gc.templateId.title,
+                    description: gc.templateId.description,
+                    image: gc.templateId.image,
+                }
+                : null,
+            sender: gc.sender,
+            receiver: gc.receiver,
+        };
+
+        res.json({
+            success: true,
+            giftCard: details,
+        });
+    } catch (err) {
+        console.error("getGiftCardDetails error:", err);
+        res.status(500).json({
+            success: false,
+            message: "Failed to fetch gift card details",
+            error: err.message,
+        });
+    }
+};
+
+
 
 // ✅ Get all templates
 export const getAllGiftCardTemplates = async (req, res) => {

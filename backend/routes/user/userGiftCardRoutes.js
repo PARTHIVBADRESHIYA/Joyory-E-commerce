@@ -45,7 +45,8 @@ import {
     verifyGiftCardPayment,
     redeemGiftCard,
     checkGiftCardBalance,
-    getMyGiftCards,
+    getMyGiftCardsList,
+    getGiftCardDetails,
     getAllGiftCardTemplates
 } from "../../controllers/user/userGiftCardController.js";
 import { protect } from "../../middlewares/authMiddleware.js";
@@ -65,7 +66,8 @@ router.post("/redeem", protect, redeemGiftCard);
 router.get("/balance/:code/:pin", protect, checkGiftCardBalance);
 
 // My sent gift cards
-router.get("/my", protect, getMyGiftCards);
+router.get("/list", protect, getMyGiftCardsList); // minimal list view
+router.get("/details/:id", protect, getGiftCardDetails); // full detail view by id
 
 // Get all gift card templates
 router.get("/templates", getAllGiftCardTemplates);
