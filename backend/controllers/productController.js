@@ -225,7 +225,8 @@ const addProductController = async (req, res) => {
             commentsCount: 0,
             affiliateEarnings: 0,
             affiliateClicks: 0,
-            attributes // 👈 dynamic attributes
+            attributes, // 👈 dynamic attributes,
+            seller: req.body.seller || null,
         });
 
         await product.save();
@@ -299,7 +300,7 @@ const getAllProducts = async (req, res) => {
             image: Array.isArray(p.images) ? p.images[0] : p.image,
             price: p.price,
             summary: p.summary || p.description?.slice(0, 100),
-            ingredients: p.ingredients?.slice(0, 100)   ,
+            ingredients: p.ingredients?.slice(0, 100),
             sales: p.sales,
             remaining: p.quantity,
             status: p.status,
@@ -333,220 +334,6 @@ const updateProductStock = async (req, res) => {
         res.status(500).json({ message: 'Error updating stock', error });
     }
 };
-
-// const updateProductById = async (req, res) => {
-//     try {
-//         const { id } = req.params;
-
-//         const parseArray = (input) => {
-//             try {
-//                 if (typeof input === 'string') return JSON.parse(input);
-//                 return Array.isArray(input) ? input : [input];
-//             } catch {
-//                 return [input];
-//             }
-//         };
-
-//         const updateData = { ...req.body };
-
-//         if (req.body.price) updateData.price = Number(req.body.price);
-//         if (req.body.buyingPrice) updateData.buyingPrice = Number(req.body.buyingPrice);
-//         if (req.body.quantity) updateData.quantity = Number(req.body.quantity);
-//         if (req.body.thresholdValue) updateData.thresholdValue = Number(req.body.thresholdValue);
-
-//         if (req.body.shadeOptions) updateData.shadeOptions = parseArray(req.body.shadeOptions);
-//         if (req.body.colorOptions) updateData.colorOptions = parseArray(req.body.colorOptions);
-//         if (req.body.productTags) updateData.productTags = parseArray(req.body.productTags);
-
-//         if (req.files?.length > 0) {
-//             updateData.images = req.files.map(file => file.path);
-//         } else if (req.body.images || req.body.imageUrls) {
-//             let raw = req.body.images || req.body.imageUrls;
-//             try {
-//                 if (typeof raw === 'string') raw = JSON.parse(raw);
-//             } catch (err) {
-//                 console.warn("⚠️ Could not parse imageUrls:", raw);
-//             }
-//             updateData.images = Array.isArray(raw) ? raw : [raw];
-//         }
-
-//         if (updateData.quantity !== undefined && updateData.thresholdValue !== undefined) {
-//             if (updateData.quantity === 0) {
-//                 updateData.status = 'Out of stock';
-//             } else if (updateData.quantity < updateData.thresholdValue) {
-//                 updateData.status = 'Low stock';
-//             } else {
-//                 updateData.status = 'In-stock';
-//             }
-//         }
-
-//         // ✅ Validate new category if updated
-//         if (updateData.category) {
-//             let categoryDoc;
-
-//             // Check if value is a valid ObjectId
-//             if (mongoose.Types.ObjectId.isValid(updateData.category)) {
-//                 categoryDoc = await Category.findById(updateData.category);
-//             } else {
-//                 categoryDoc = await Category.findOne({ name: updateData.category });
-//             }
-
-//             if (!categoryDoc) {
-//                 return res.status(400).json({ message: 'Invalid category (ID or name not found)' });
-//             }
-
-//             updateData.category = categoryDoc._id;
-//         }
-
-
-//         const updated = await Product.findByIdAndUpdate(id, updateData, { new: true });
-
-//         if (!updated) {
-//             return res.status(404).json({ message: '❌ Product not found' });
-//         }
-
-//         res.status(200).json({ message: '✅ Product updated successfully', product: updated });
-
-//     } catch (error) {
-//         console.error("❌ Product update error:", error);
-//         res.status(500).json({ message: 'Failed to update product', error: error.message });
-//     }
-// };
-// const updateProductById = async (req, res) => {
-//     try {
-//         const { id } = req.params;
-
-//         const parseArray = (input) => {
-//             try {
-//                 if (typeof input === 'string') return JSON.parse(input);
-//                 return Array.isArray(input) ? input : [input];
-//             } catch {
-//                 return [input];
-//             }
-//         };
-
-//         const updateData = { ...req.body };
-
-//         if (req.body.price) updateData.price = Number(req.body.price);
-//         if (req.body.buyingPrice) updateData.buyingPrice = Number(req.body.buyingPrice);
-//         if (req.body.quantity) updateData.quantity = Number(req.body.quantity);
-//         if (req.body.thresholdValue) updateData.thresholdValue = Number(req.body.thresholdValue);
-
-//         if (req.body.shadeOptions) updateData.shadeOptions = parseArray(req.body.shadeOptions);
-//         if (req.body.colorOptions) updateData.colorOptions = parseArray(req.body.colorOptions);
-//         if (req.body.productTags) updateData.productTags = parseArray(req.body.productTags);
-
-//         // ✅ Handle images
-//         if (req.files?.length > 0) {
-//             updateData.images = req.files.map(file => file.path);
-//         } else if (req.body.images || req.body.imageUrls) {
-//             let raw = req.body.images || req.body.imageUrls;
-//             try {
-//                 if (typeof raw === 'string') raw = JSON.parse(raw);
-//             } catch (err) {
-//                 console.warn("⚠️ Could not parse imageUrls:", raw);
-//             }
-//             updateData.images = Array.isArray(raw) ? raw : [raw];
-//         }
-
-//         // ✅ Auto status based on stock
-//         if (updateData.quantity !== undefined && updateData.thresholdValue !== undefined) {
-//             if (updateData.quantity === 0) {
-//                 updateData.status = 'Out of stock';
-//             } else if (updateData.quantity < updateData.thresholdValue) {
-//                 updateData.status = 'Low stock';
-//             } else {
-//                 updateData.status = 'In-stock';
-//             }
-//         }
-
-//         // ✅ Validate category if updated
-//         if (updateData.category) {
-//             let categoryDoc;
-//             if (mongoose.Types.ObjectId.isValid(updateData.category)) {
-//                 categoryDoc = await Category.findById(updateData.category);
-//             } else {
-//                 categoryDoc = await Category.findOne({ name: updateData.category });
-//             }
-
-//             if (!categoryDoc) {
-//                 return res.status(400).json({ message: 'Invalid category (ID or name not found)' });
-//             }
-
-//             updateData.category = categoryDoc._id;
-//         }
-
-//         // ✅ Sync shadeOptions & colorOptions from foundationVariants
-//         if (req.body.foundationVariants) {
-//             let variants = req.body.foundationVariants;
-//             if (typeof variants === "string") {
-//                 try {
-//                     variants = JSON.parse(variants);
-//                 } catch (err) {
-//                     console.warn("⚠️ Could not parse foundationVariants JSON:", err.message);
-//                     variants = [];
-//                 }
-//             }
-
-//             if (Array.isArray(variants)) {
-//                 updateData.foundationVariants = variants;
-
-//                 // Auto-fill shadeOptions & colorOptions
-//                 updateData.shadeOptions = variants.map(v => v.shadeName).filter(Boolean);
-//                 updateData.colorOptions = variants.map(v => v.hex).filter(Boolean);
-//             }
-//         }
-
-//         // ✅ Sync skinTypes
-//         if (req.body.skinTypes) {
-//             let skinTypes = req.body.skinTypes;
-
-//             // Handle stringified array
-//             if (typeof skinTypes === "string") {
-//                 try {
-//                     skinTypes = JSON.parse(skinTypes);
-//                 } catch {
-//                     skinTypes = [skinTypes];
-//                 }
-//             }
-
-//             // Ensure always an array
-//             if (!Array.isArray(skinTypes)) {
-//                 skinTypes = [skinTypes];
-//             }
-
-//             // Cast only valid ObjectIds
-//             updateData.skinTypes = skinTypes
-//                 .map(id => mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null)
-//                 .filter(Boolean);
-//         }
-
-//         // ✅ Handle formulation update
-//         if (req.body.formulation) {
-//             try {
-//                 updateData.formulation = await resolveFormulationId(req.body.formulation);
-//             } catch (err) {
-//                 return res.status(400).json({ message: err.message });
-//             }
-//         }
-
-
-//         // ✅ Update product
-//         const updated = await Product.findByIdAndUpdate(id, updateData, { new: true });
-
-//         if (!updated) {
-//             return res.status(404).json({ message: '❌ Product not found' });
-//         }
-
-//         res.status(200).json({ message: '✅ Product updated successfully', product: updated });
-
-//     } catch (error) {
-//         console.error("❌ Product update error:", error);
-//         res.status(500).json({ message: 'Failed to update product', error: error.message });
-//     }
-// };
-
-
 
 const updateProductById = async (req, res) => {
     try {

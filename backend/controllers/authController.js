@@ -93,8 +93,9 @@
 import User from '../models/User.js';
 import Admin from '../models/Admin.js';
 import PendingAdmin from '../models/PendingAdmin.js';
+import Product from '../models/Product.js';
 import Order from '../models/Order.js';
-
+import Seller from '../models/Seller.js';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { notifyMainAdmins } from '../middlewares/utils/notifyMainAdmins.js';
@@ -430,6 +431,25 @@ const getFullCustomerAnalytics = async (req, res) => {
 };
 
 
+export const listSellers = async (req, res) => {
+    const q = {};
+    if (req.query.status) q.status = req.query.status;
+    const sellers = await Seller.find(q).populate('user').sort({ createdAt: -1 });
+    res.json(sellers);
+};
+
+export const changeSellerStatus = async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+    const seller = await Seller.findByIdAndUpdate(id, { status }, { new: true });
+    res.json({ message: 'Status updated', seller });
+};
+
+export const approveProduct = async (req, res) => {
+    const { productId } = req.params;
+    const product = await Product.findByIdAndUpdate(productId, { status: 'In-stock' }, { new: true });
+    res.json({ message: 'Product approved', product });
+};
 
 export {
     adminRegister,

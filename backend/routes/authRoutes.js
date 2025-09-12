@@ -16,7 +16,10 @@ import {
     updateUserByAdmin,
     deleteUser,
     getUserAnalytics,
-    getFullCustomerAnalytics
+    getFullCustomerAnalytics,
+    listSellers,
+    approveProduct, 
+    changeSellerStatus
 } from './../controllers/authController.js';
 
 import { addProductController } from './../controllers/productController.js';
@@ -41,5 +44,9 @@ router.get('/:id', verifyAdminOrTeamMember, getUserById);
 router.put('/:id', verifyAdminOrTeamMember, updateUserByAdmin);
 router.delete('/:id', verifyAdminOrTeamMember, deleteUser);
 router.get('/analytics/:id', verifyAdminOrTeamMember, getUserAnalytics);
+
+router.get('/sellers', verifyAdminOrTeamMember, listSellers);
+router.put('/sellers/:id/approve', verifyAdminOrTeamMember, approveProduct);
+router.put('/sellers/:id/status', verifyAdminOrTeamMember, changeSellerStatus);
 
 export default router;

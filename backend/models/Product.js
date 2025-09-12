@@ -75,6 +75,13 @@ const productSchema = new mongoose.Schema({
     avgRating: { type: Number, default: 0 },
     commentsCount: { type: Number, default: 0 },
     totalRatings: { type: Number, default: 0 },
+    // add seller reference so products belong to a seller
+    seller: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Seller',
+        required: false, // optional for legacy products
+        index: true
+    },
 
     ratingsBreakdown: {
         Excellent: { type: Number, default: 0 },
@@ -92,6 +99,7 @@ productSchema.index({ brand: 1 });
 productSchema.index({ brand: 1, category: 1 });
 productSchema.index({ createdAt: -1 });
 
+productSchema.index({ seller: 1, category: 1 });
 
 
 // shade finder indexes (helpful for queries)

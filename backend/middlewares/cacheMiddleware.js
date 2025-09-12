@@ -6,7 +6,6 @@ export const cacheMiddleware = (req, res, next) => {
 
     const cachedData = cache.get(key);
     if (cachedData) {
-        console.log("📦 Serving from cache:", key);
         return res.json(cachedData);
     }
 

@@ -19,3 +19,16 @@ export const decrypt = (encryptedText) => {
     decrypted += decipher.final('utf8');
     return decrypted;
 };
+
+
+
+// helper to mask account number for display
+export function maskAccountNumber(encrypted) {
+    try {
+        const acc = decryptText(encrypted);
+        if (!acc) return null;
+        return acc.slice(-4).padStart(acc.length, '*');
+    } catch {
+        return null;
+    }
+}

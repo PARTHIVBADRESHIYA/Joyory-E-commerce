@@ -2,19 +2,119 @@ import crypto from "crypto";
 import Order from "../models/Order.js";
 import Payment from "../models/settings/payments/Payment.js";
 import { io } from "../server.js"; // ✅ import socket.io instance
+import { splitOrderForPersistence } from "../middlewares/services/orderSplit.js"; // ✅ your split service
 
 /**
  * 🔹 Razorpay Webhook
  * Handles → payment.captured, payment.failed
  */
+// export const razorpayWebhook = async (req, res) => {
+//     try {
+//         const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+//         const signature = req.headers["x-razorpay-signature"];
+//         const rawBody = req.body instanceof Buffer ? req.body.toString() : JSON.stringify(req.body);
+
+//         // ✅ Verify signature
+//         if (!(process.env.NODE_ENV === "development" || process.env.SKIP_SIGNATURE === "true")) {
+//             const expectedSignature = crypto
+//                 .createHmac("sha256", secret)
+//                 .update(rawBody)
+//                 .digest("hex");
+
+//             if (signature !== expectedSignature) {
+//                 console.error("❌ Razorpay Webhook Invalid Signature");
+//                 return res.status(400).json({ status: "failed", message: "Invalid signature" });
+//             }
+//         }
+
+//         const eventPayload = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+//         const event = eventPayload.event;
+
+//         console.log("✅ Razorpay Webhook Event:", event);
+
+//         // ========== PAYMENT CAPTURED ==========
+//         if (event === "payment.captured") {
+//             const payment = eventPayload.payload.payment.entity;
+//             const order = await Order.findOne({ razorpayOrderId: payment.order_id }).populate("user");
+
+//             if (!order) {
+//                 console.error("❌ Order not found for Razorpay orderId:", payment.order_id);
+//                 return res.status(404).json({ message: "Order not found" });
+//             }
+
+//             if (!order.paid) {
+//                 order.paid = true;
+//                 order.paymentStatus = "success";
+//                 order.paymentMethod  === "COD" ? "COD" : "Prepaid"
+//                 order.transactionId = payment.id;
+//                 order.orderStatus = "Paid";
+//                 await order.save();
+
+//                 await Payment.create({
+//                     order: order._id,
+//                     method: payment.method || "Razorpay",
+//                     status: "Completed",
+//                     transactionId: payment.id,
+//                     amount: payment.amount / 100,
+//                     cardHolderName: payment.card?.name,
+//                     cardNumber: payment.card?.last4,
+//                     expiryDate: payment.card
+//                         ? `${payment.card.expiry_month}/${payment.card.expiry_year}`
+//                         : undefined,
+//                     isActive: true,
+//                 });
+
+//                 // ✅ Emit one unified event
+//                 io.to(order.user._id.toString()).emit("orderUpdated", {
+//                     orderId: order._id,
+//                     status: "Paid",
+//                     paymentId: payment.id,
+//                 });
+
+//                 console.log(`💰 Order ${order._id} marked as Paid & emitted orderUpdated`);
+//             }
+//         }
+
+//         // ========== PAYMENT FAILED ==========
+//         if (event === "payment.failed") {
+//             const payment = eventPayload.payload.payment.entity;
+//             const order = await Order.findOne({ razorpayOrderId: payment.order_id });
+
+//             if (order) {
+//                 order.paymentStatus = "failed";
+//                 order.orderStatus = "Payment Failed";
+//                 await order.save();
+
+//                 // ✅ Emit unified event
+//                 io.to(order.user._id.toString()).emit("orderUpdated", {
+//                     orderId: order._id,
+//                     status: "Payment Failed",
+//                 });
+
+//                 console.log(`⚠️ Order ${order._id} marked as Failed & emitted orderUpdated`);
+//             }
+//         }
+
+//         return res.status(200).json({ status: "ok" });
+
+//     } catch (err) {
+//         console.error("🔥 Razorpay Webhook Error:", err);
+//         return res.status(500).json({ status: "error", error: err.message });
+//     }
+// };
+
 export const razorpayWebhook = async (req, res) => {
     try {
         const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
         const signature = req.headers["x-razorpay-signature"];
-        const rawBody = req.body instanceof Buffer ? req.body.toString() : JSON.stringify(req.body);
+        const rawBody =
+            req.body instanceof Buffer ? req.body.toString() : JSON.stringify(req.body);
 
-        // ✅ Verify signature
-        if (!(process.env.NODE_ENV === "development" || process.env.SKIP_SIGNATURE === "true")) {
+        // 🔹 Verify Razorpay signature (skip in dev if SKIP_SIGNATURE flag set)
+        if (
+            !(process.env.NODE_ENV === "development" ||
+                process.env.SKIP_SIGNATURE === "true")
+        ) {
             const expectedSignature = crypto
                 .createHmac("sha256", secret)
                 .update(rawBody)
@@ -22,33 +122,43 @@ export const razorpayWebhook = async (req, res) => {
 
             if (signature !== expectedSignature) {
                 console.error("❌ Razorpay Webhook Invalid Signature");
-                return res.status(400).json({ status: "failed", message: "Invalid signature" });
+                return res
+                    .status(400)
+                    .json({ status: "failed", message: "Invalid signature" });
             }
         }
 
-        const eventPayload = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+        const eventPayload =
+            typeof req.body === "string" ? JSON.parse(req.body) : req.body;
         const event = eventPayload.event;
 
         console.log("✅ Razorpay Webhook Event:", event);
 
-        // ========== PAYMENT CAPTURED ==========
+        // ================= PAYMENT CAPTURED =================
         if (event === "payment.captured") {
             const payment = eventPayload.payload.payment.entity;
-            const order = await Order.findOne({ razorpayOrderId: payment.order_id }).populate("user");
+            const order = await Order.findOne({
+                razorpayOrderId: payment.order_id,
+            }).populate("user");
 
             if (!order) {
-                console.error("❌ Order not found for Razorpay orderId:", payment.order_id);
+                console.error(
+                    "❌ Order not found for Razorpay orderId:",
+                    payment.order_id
+                );
                 return res.status(404).json({ message: "Order not found" });
             }
 
             if (!order.paid) {
                 order.paid = true;
                 order.paymentStatus = "success";
-                order.paymentMethod  === "COD" ? "COD" : "Prepaid"
+                order.paymentMethod =
+                    order.paymentMethod === "COD" ? "COD" : "Prepaid";
                 order.transactionId = payment.id;
                 order.orderStatus = "Paid";
                 await order.save();
 
+                // ✅ Create Payment record
                 await Payment.create({
                     order: order._id,
                     method: payment.method || "Razorpay",
@@ -63,18 +173,31 @@ export const razorpayWebhook = async (req, res) => {
                     isActive: true,
                 });
 
-                // ✅ Emit one unified event
+                // ✅ Create seller splitOrders
+                try {
+                    await splitOrderForPersistence(order);
+                    splitOrderForPersistence(order)
+                    console.log(
+                        `📦 Split orders generated for sellers in Order ${order._id}`
+                    );
+                } catch (splitErr) {
+                    console.error("❌ Failed to split order for sellers:", splitErr);
+                }
+
+                // ✅ Notify user via socket
                 io.to(order.user._id.toString()).emit("orderUpdated", {
                     orderId: order._id,
                     status: "Paid",
                     paymentId: payment.id,
                 });
 
-                console.log(`💰 Order ${order._id} marked as Paid & emitted orderUpdated`);
+                console.log(
+                    `💰 Order ${order._id} marked Paid, payment saved, socket emitted`
+                );
             }
         }
 
-        // ========== PAYMENT FAILED ==========
+        // ================= PAYMENT FAILED =================
         if (event === "payment.failed") {
             const payment = eventPayload.payload.payment.entity;
             const order = await Order.findOne({ razorpayOrderId: payment.order_id });
@@ -84,18 +207,19 @@ export const razorpayWebhook = async (req, res) => {
                 order.orderStatus = "Payment Failed";
                 await order.save();
 
-                // ✅ Emit unified event
+                // ✅ Notify user via socket
                 io.to(order.user._id.toString()).emit("orderUpdated", {
                     orderId: order._id,
                     status: "Payment Failed",
                 });
 
-                console.log(`⚠️ Order ${order._id} marked as Failed & emitted orderUpdated`);
+                console.log(
+                    `⚠️ Order ${order._id} marked Failed & user notified`
+                );
             }
         }
 
         return res.status(200).json({ status: "ok" });
-
     } catch (err) {
         console.error("🔥 Razorpay Webhook Error:", err);
         return res.status(500).json({ status: "error", error: err.message });

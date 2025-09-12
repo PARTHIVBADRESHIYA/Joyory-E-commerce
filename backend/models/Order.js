@@ -57,6 +57,24 @@ const orderSchema = new mongoose.Schema({
         pdfUrl: { type: String },          // uploaded print asset (optional)
         includePhysical: { type: Boolean, default: false }, // for packing team
     },
+    // optional splitOrders created after payment is captured
+    splitOrders: [
+        {
+            seller: { type: mongoose.Schema.Types.ObjectId, ref: 'Seller' },
+            items: [
+                {
+                    productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+                    qty: Number,
+                    price: Number,
+                    name: String
+                }
+            ],
+            amount: { type: Number, default: 0 },
+            status: { type: String, enum: ['pending', 'processing', 'shipped', 'delivered', 'cancelled'], default: 'pending' },
+            trackingNumber: String,
+            courierName: String
+        }
+    ],
 
     trackingHistory: [
         {
@@ -70,7 +88,7 @@ const orderSchema = new mongoose.Schema({
         pdfUrl: String,
         generatedAt: Date,
     }
-,
+    ,
     amount: { type: Number, required: true },
     promotionUsed: {
         promotionId: { type: mongoose.Schema.Types.ObjectId, ref: "Promotion" },
@@ -100,6 +118,8 @@ const orderSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
+// in Order schema (if you can edit schema)
+orderSchema.index({ 'splitOrders.seller': 1 });
 
 
 export default mongoose.model('Order', orderSchema);
