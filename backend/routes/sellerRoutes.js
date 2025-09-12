@@ -1,25 +1,11 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+// routes/sellerRoutes.js
 import express from "express";
 import { uploadSeller, uploadProduct } from "../middlewares/upload.js";
-import { protect } from "../middlewares/authMiddleware.js";
-import { requireActiveSeller } from "../middlewares/sellerMiddleware.js";
+import { authenticateSeller } from "../middlewares/authMiddleware.js";
 
 import {
-    registerSeller,
     uploadKyc,
+    uploadLicences,
     getSellerProfile,
     updateSeller,
     listSellerOrders,
@@ -33,37 +19,49 @@ import {
 
 const router = express.Router();
 
-// ================= Seller Onboarding =================
-router.post("/apply", protect, registerSeller);
-router.post("/kyc", protect, uploadSeller.array("kycDocs", 5), uploadKyc);
+/* ================= Seller KYC ================= */
+router.post(
+    "/kyc",
+    authenticateSeller,
+    uploadSeller.array("kycDocs", 5), // up to 5 KYC documents
+    uploadKyc
+);
 
-// ================= Seller Products =================
+/* ================= Seller Licences ================= */
+router.post(
+    "/licences",
+    authenticateSeller,
+    uploadSeller.single("licenceDoc"), // one licence doc per category
+    uploadLicences
+);
+
+/* ================= Seller Products ================= */
 router.post(
     "/products",
-    protect,
-    requireActiveSeller,
-    uploadProduct.array("images", 5), // allow up to 5 images
+    authenticateSeller,
+    uploadProduct.array("images", 5), // up to 5 product images
     addProductBySeller
 );
-router.get("/products", protect, requireActiveSeller, listSellerProducts);
+
+router.get("/products", authenticateSeller, listSellerProducts);
+
 router.put(
     "/products/:id",
-    protect,
-    requireActiveSeller,
+    authenticateSeller,
     uploadProduct.array("images", 5),
     updateProductBySeller
 );
 
-// ================= Seller Profile =================
-router.get("/me", protect, getSellerProfile);
-router.put("/me", protect, updateSeller);
+/* ================= Seller Profile ================= */
+router.get("/me", authenticateSeller, getSellerProfile);
+router.put("/me", authenticateSeller, updateSeller);
 
-// ================= Seller Orders =================
-router.get("/orders", protect, requireActiveSeller, listSellerOrders);
-router.post("/orders/:orderId/ship", protect, requireActiveSeller, shipOrder);
+/* ================= Seller Orders ================= */
+router.get("/orders", authenticateSeller, listSellerOrders);
+router.post("/orders/:orderId/ship", authenticateSeller, shipOrder);
 
-// ================= Seller Payouts =================
-router.get("/payouts", protect, requireActiveSeller, getPayouts);
-router.post("/payouts/request", protect, requireActiveSeller, requestPayout);
+/* ================= Seller Payouts ================= */
+router.get("/payouts", authenticateSeller, getPayouts);
+router.post("/payouts/request", authenticateSeller, requestPayout);
 
 export default router;

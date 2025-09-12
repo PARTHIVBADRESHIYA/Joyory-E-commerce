@@ -13,7 +13,7 @@ import User from '../models/User.js';
 import Referral from "../models/Referral.js";
 import ReferralConfig from "../models/ReferralConfig.js";
 import { getOrCreateWallet } from "../middlewares/utils/walletHelpers.js";
-import {addRewardPoints } from '../controllers/user/userWalletController.js';
+import { addRewardPoints } from '../controllers/user/userWalletController.js';
 
 import {
     sendOtpSchema,
@@ -32,6 +32,7 @@ const getUserByType = async (type, email) => {
         case 'roleAdmin': return AdminRoleAdmin.findOne({ email });
         case 'teamMember': return TeamMember.findOne({ email });
         case 'user': return User.findOne({ email });
+        case "seller": return Seller.findOne({ email }); // ✅ added
         default: return null;
     }
 };

@@ -1,47 +1,47 @@
-import mongoose from 'mongoose';
-
-const BankSchema = new mongoose.Schema({
-    accountHolderName: { type: String },
-    accountNumberEncrypted: { type: String },
-    ifsc: { type: String },
-    bankName: { type: String },
-});
+import mongoose from "mongoose";
+import bcrypt from "bcryptjs";
 
 const SellerSchema = new mongoose.Schema({
-    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
-    businessName: { type: String, required: true },
-    sellerCode: { type: String, unique: true },
-    gstNumber: { type: String },
-    panNumber: { type: String },
-    addresses: [
-        {
-            line1: String,
-            city: String,
-            state: String,
-            pincode: String,
-            country: String,
-        },
-    ],
-    bankDetails: BankSchema,
-    kycDocs: [
-        { url: String, filename: String, uploadedAt: Date, public_id: String },
-    ],
-    status: {
-        type: String,
-        enum: ['pending', 'active', 'rejected', 'suspended'],
-        default: 'pending',
+    email: { type: String, required: true, unique: true },
+    phone: { type: String },
+    password: { type: String, required: true },
+    businessName: String,
+    gstNumber: String,
+    panNumber: String,
+    addresses: [{ line1: String, city: String, state: String, pincode: String, country: String }],
+    bankDetails: {
+        accountHolderName: String,
+        accountNumberEncrypted: String,
+        ifsc: String,
+        bankName: String,
     },
-    commissionRate: { type: Number, default: 0.15 },
-    createdAt: { type: Date, default: Date.now },
-    updatedAt: { type: Date },
+    kycDocs: [{ url: String, filename: String, uploadedAt: Date, public_id: String }],
+    status: { type: String, enum: ["active", "inactive", "suspended"], default: "active" },
+    licences: [
+        {
+            category: { type: String, required: true },   // e.g. "Cosmetics", "Skincare"
+            docUrl: { type: String, required: true },     // Cloudinary link
+            approved: { type: Boolean, default: false },  // admin approval required
+            uploadedAt: { type: Date, default: Date.now } // timestamp
+        }
+    ],
+
+    // OTP flows
+    otp: {
+        code: String,
+        expiresAt: Date,
+        attemptsLeft: Number
+    },
+    otpRequests: [Date],
+
+    createdAt: { type: Date, default: Date.now }
 });
 
-SellerSchema.pre('save', function (next) {
-    this.updatedAt = new Date();
-    if (!this.sellerCode) {
-        this.sellerCode = `SLR-${Math.random().toString(36).slice(2, 9).toUpperCase()}`;
-    }
+// Hash password before save
+SellerSchema.pre("save", async function (next) {
+    if (!this.isModified("password")) return next();
+    this.password = await bcrypt.hash(this.password, 10);
     next();
 });
 
-export default mongoose.model('Seller', SellerSchema);
+export default mongoose.model("Seller", SellerSchema);

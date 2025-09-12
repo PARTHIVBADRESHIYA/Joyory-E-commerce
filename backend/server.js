@@ -861,6 +861,9 @@ import referralRoutes from "./routes/referralRoutes.js";
 import adminReferralConfigRoutes from "./routes/adminReferralConfigRoutes.js";
 import adminWalletRoutes from "./routes/adminWalletRoutes.js";
 import sellerRoutes from "./routes/sellerRoutes.js";
+import sellerApplicationRoutes from "./routes/sellerApplicationRoutes.js";
+import sellerAuthRoutes from "./routes/sellerAuthRoutes.js";
+
 // User side
 import userProductRoutes from "./routes/user/userProductRoutes.js";
 import userCartAndOrderRoutes from "./routes/user/userCartAndOrderRoutes.js";
@@ -952,6 +955,8 @@ app.use("/api/brands", brandRoutes);
 app.use("/api/test", testPickUpRoutes);
 app.use("/api/wallet", adminWalletRoutes);
 app.use("/api/sellers", sellerRoutes);
+app.use("/api/seller-applications", sellerApplicationRoutes);
+app.use("/api/seller-auth", sellerAuthRoutes);
 
 if ((process.env.SHIPPING_PROVIDER || "mock").toLowerCase() === "mock") {
     app.use("/api/shipping", mockShippingRoutes);

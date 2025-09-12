@@ -6,6 +6,7 @@ import Admin from '../models/Admin.js';
 import TeamMember from '../models/settings/admin/TeamMember.js';
 import AdminRoleAdmin from '../models/settings/admin/AdminRoleAdmin.js';
 import Order from '../models/Order.js';
+import Seller from "../models/Seller.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key';
 if (!JWT_SECRET) throw new Error("JWT_SECRET is not defined in env");
@@ -53,25 +54,44 @@ export const authenticateUser = async (req, res, next) => {
     }
 };
 
+/* ===============================
+   SELLER AUTHENTICATION
+================================ */
+export const authenticateSeller = async (req, res, next) => {
+    try {
+        const token = req.headers.authorization?.split(" ")[1];
+        if (!token) return res.status(401).json({ message: "Unauthorized" });
 
-    export const optionalAuth = async (req, res, next) => {
-        const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith("Bearer ")) {
-            return next(); // no token → guest
-        }
+        const decoded = jwt.verify(token, JWT_SECRET);
 
-        const token = authHeader.split(" ")[1];
-        try {
-            const decoded = jwt.verify(token, JWT_SECRET);
-            const user = await User.findById(decoded.id);
-            if (user) {
-                req.user = user; // only attach if valid
-            }
-        } catch (err) {
-            console.warn("⚠️ Invalid token, continuing as guest");
-        }
+        const seller = await Seller.findById(decoded.id);
+        if (!seller) return res.status(403).json({ message: "Seller not found" });
+
+        req.seller = seller;
         next();
-    };
+    } catch (err) {
+        return res.status(401).json({ message: "Invalid token", error: err.message });
+    }
+};
+
+export const optionalAuth = async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return next(); // no token → guest
+    }
+
+    const token = authHeader.split(" ")[1];
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const user = await User.findById(decoded.id);
+        if (user) {
+            req.user = user; // only attach if valid
+        }
+    } catch (err) {
+        console.warn("⚠️ Invalid token, continuing as guest");
+    }
+    next();
+};
 
 export const verifyAdminOrTeamMember = async (req, res, next) => {
     const token = req.headers.authorization?.split(' ')[1];
@@ -166,3 +186,4 @@ export const verifyRoleAdmin = async (req, res, next) => {
 
 export const protect = authenticateUser;
 export const isAdmin = verifyAdminOrTeamMember;
+export const isSeller = authenticateSeller;   // seller only

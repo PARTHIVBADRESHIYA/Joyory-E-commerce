@@ -351,6 +351,8 @@ export const createRazorpayOrder = async (req, res) => {
         } catch (ecardErr) {
             console.warn("⚠️ E-Card skipped:", ecardErr.message);
         }
+        
+        order.amount = grandTotal; // store final payable after discounts
 
         await order.save();
 
