@@ -250,10 +250,12 @@ export const createRazorpayOrder = async (req, res) => {
             return res.status(400).json({ message: "⚠️ Order is already paid" });
         }
 
+        // ✅ Ensure final payable amount is already saved in DB
         if (!order.amount || order.amount <= 0) {
             return res.status(400).json({ message: "❌ Invalid order amount" });
         }
 
+        // Convert to paise
         const amountInPaise = Math.round(order.amount * 100);
 
         // ✅ Create Razorpay order
@@ -289,7 +291,7 @@ export const createRazorpayOrder = async (req, res) => {
             });
         }
 
-        // 🎁 E-Card generation (optional)
+        // 🎁 Optional: E-Card generation
         try {
             const { occasion, festival } = await determineOccasions({
                 userId: order.user._id,
@@ -351,8 +353,6 @@ export const createRazorpayOrder = async (req, res) => {
         } catch (ecardErr) {
             console.warn("⚠️ E-Card skipped:", ecardErr.message);
         }
-        
-        order.amount = grandTotal; // store final payable after discounts
 
         await order.save();
 
@@ -360,7 +360,7 @@ export const createRazorpayOrder = async (req, res) => {
             success: true,
             message: "✅ Razorpay order created (E-card processed if applicable)",
             razorpayOrderId: razorpayOrder.id,
-            amount: order.amount,
+            amount: order.amount, // ✅ final discounted total
             currency: "INR",
             orderId: order._id,
         });
@@ -373,6 +373,7 @@ export const createRazorpayOrder = async (req, res) => {
         });
     }
 };
+
 
 export const verifyRazorpayPayment = async (req, res) => {
     try {
