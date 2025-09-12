@@ -1,7 +1,7 @@
 // routes/sellerRoutes.js
 import express from "express";
 import { uploadSeller, uploadProduct } from "../middlewares/upload.js";
-import { authenticateSeller } from "../middlewares/authMiddleware.js";
+import { authenticateSeller ,isAdmin} from "../middlewares/authMiddleware.js";
 
 import {
     uploadKyc,
@@ -15,6 +15,7 @@ import {
     addProductBySeller,
     listSellerProducts,
     updateProductBySeller,
+    approveLicence
 } from "../controllers/sellerController.js";
 
 const router = express.Router();
@@ -64,4 +65,6 @@ router.post("/orders/:orderId/ship", authenticateSeller, shipOrder);
 router.get("/payouts", authenticateSeller, getPayouts);
 router.post("/payouts/request", authenticateSeller, requestPayout);
 
+/* ================= Seller Approve Licence ================= */
+router.post("/:sellerId/licences/:licenceId/approve", isAdmin, approveLicence);
 export default router;

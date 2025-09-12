@@ -821,6 +821,7 @@ import connectDB from "./config/db.js";
 import cron from "node-cron";
 import { autoSendScheduledCampaigns } from "./middlewares/utils/cron/autoSendCampaigns.js";
 import { startTrackingJob } from "./middlewares/utils/cron/shiprocketTrackingJob.js";
+import "./middlewares/utils/cron/autoPayout.js";
 
 // 🔹 Routes
 import authRoutes from "./routes/authRoutes.js";
