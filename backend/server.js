@@ -980,8 +980,14 @@ app.use("/api/referral", referralRoutes);
 app.use("/api/user/wallet", userWalletRoutes);
 
 
+
+app.get("/health", (req, res) => {
+    res.status(200).send("OK");
+});
+
 // ================= TEST ROUTE =================
 app.get("/", (req, res) => res.send("✅ API is running..."));
+
 
 // ================= ERROR HANDLER =================
 app.use((err, req, res, next) => {
