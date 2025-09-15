@@ -82,7 +82,8 @@ const productSchema = new mongoose.Schema({
         required: false, // optional for legacy products
         index: true
     },
-
+    isPublished: { type: Boolean, default: true },
+    scheduledAt: { type: Date, default: null },
     ratingsBreakdown: {
         Excellent: { type: Number, default: 0 },
         VeryGood: { type: Number, default: 0 },

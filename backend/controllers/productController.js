@@ -29,7 +29,7 @@ const addProductController = async (req, res) => {
         const {
             name, variant, summary, description, ingredients, features, howToUse,
             price, buyingPrice, brand, category, categories,
-            quantity, expiryDate
+            quantity, expiryDate, scheduledAt
         } = req.body;
 
         // ✅ Prevent duplicate product names
@@ -43,6 +43,30 @@ const addProductController = async (req, res) => {
         // ✅ Ensure at least one category provided
         if (!category && (!categories || categories.length === 0)) {
             return res.status(400).json({ message: 'Category is required' });
+        }
+
+        // ✅ Handle scheduling
+        let isPublished = true;
+        let scheduleDate = null;
+
+        if (req.body.scheduledAt) {
+            const parsedDate = new Date(req.body.scheduledAt);
+
+            if (isNaN(parsedDate.getTime())) {
+                return res.status(400).json({ message: "❌ Invalid scheduledAt date" });
+            }
+
+            const now = new Date();
+
+            if (parsedDate > now) {
+                // Future: schedule publishing
+                isPublished = false;
+                scheduleDate = parsedDate.toISOString(); // ⬅️ no extra offset
+            } else {
+                // Past or immediate: publish now
+                isPublished = true;
+                scheduleDate = null;
+            }
         }
 
         // ✅ Normalize categories
@@ -220,6 +244,8 @@ const addProductController = async (req, res) => {
             shadeOptions,
             colorOptions,
             foundationVariants,
+            isPublished,
+            scheduledAt: scheduleDate,
             sales: 0,
             views: 0,
             commentsCount: 0,
@@ -241,7 +267,6 @@ const addProductController = async (req, res) => {
         });
     }
 };
-
 
 // GET ALL PRODUCTS (supports nested category filtering)
 const getAllProducts = async (req, res) => {
@@ -512,42 +537,6 @@ const getSingleProductById = async (req, res) => {
     }
 };
 
-
-
-// const updateVariantImages = async (req, res) => {
-//     try {
-//         const { id, sku } = req.params;
-
-//         // If multer-cloudinary is used, uploaded file URLs are available in req.files
-//         const uploadedImages = req.files.map(file => file.path);
-
-//         // Update only that foundationVariant's images
-//         const product = await Product.findOneAndUpdate(
-//             { _id: id, "foundationVariants.sku": sku },
-//             {
-//                 $set: { "foundationVariants.$.images": uploadedImages } // replace existing images
-//             },
-//             { new: true }
-//         );
-
-//         if (!product) {
-//             return res.status(404).json({ message: "❌ Product or variant not found" });
-//         }
-
-//         res.status(200).json({
-//             message: "✅ Variant images updated successfully",
-//             product
-//         });
-//     } catch (err) {
-//         console.error("updateVariantImages error:", err);
-//         res.status(500).json({ message: "Failed to update variant images", error: err.message });
-//     }
-// };
-
-
-
-// controllers/productController.js
-// controllers/productController.js
 const updateVariantImages = async (req, res) => {
     try {
         const { id, sku } = req.params;
@@ -585,7 +574,5 @@ const updateVariantImages = async (req, res) => {
         res.status(500).json({ message: "Failed to update variant images", error: err.message });
     }
 };
-
-
 
 export { addProductController, getSingleProductById, getAllProducts, updateProductStock, updateProductById, deleteProduct, updateVariantImages };

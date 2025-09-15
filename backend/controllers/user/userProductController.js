@@ -11,7 +11,6 @@ import { getRecommendations } from '../../middlewares/utils/recommendationServic
 import { formatProductCard } from '../../middlewares/utils/recommendationService.js';
 import { applyFlatDiscount, asMoney, productMatchesPromo } from '../../controllers/user/userPromotionController.js'; // reuse helpers
 import { fetchProducts } from "../../middlewares/services/productQueryBuilder.js";
-
 import mongoose from 'mongoose';
 
 // 🔧 Centralized helper for shades/colors
@@ -94,7 +93,7 @@ export const getAllFilteredProducts = async (req, res) => {
             conscious, shade, page = 1, limit = 12
         } = req.query;
 
-        const filter = {};
+        const filter = { isPublished: true };
         let trackedCategoryId = null;
 
         if (brand) filter.brand = brand;
@@ -214,133 +213,6 @@ export const getAllFilteredProducts = async (req, res) => {
         res.status(500).json({ message: 'Server error', error: err.message });
     }
 };
-// ✅ Single product with recommendations, messages & parent category fallback
-
-// export const getSingleProduct = async (req, res) => {
-//     try {
-//         const productId = req.params.id;
-
-//         // 🔹 Fetch product and increment views
-//         const product = await Product.findByIdAndUpdate(
-//             productId,
-//             { $inc: { views: 1 } },
-//             { new: true, lean: true }
-//         );
-//         if (!product) return res.status(404).json({ message: 'Product not found' });
-
-//         // 🔹 Track recent products & categories
-//         if (req.user?.id) {
-//             const categoryValue = mongoose.Types.ObjectId.isValid(product.category)
-//                 ? product.category
-//                 : product.category?.slug || product.category?.toString();
-
-//             await User.findByIdAndUpdate(req.user.id, {
-//                 $pull: { recentProducts: product._id, recentCategories: categoryValue }
-//             });
-
-//             await User.findByIdAndUpdate(req.user.id, {
-//                 $push: {
-//                     recentProducts: { $each: [product._id], $position: 0, $slice: 20 },
-//                     recentCategories: { $each: [categoryValue], $position: 0, $slice: 20 }
-//                 }
-//             });
-//         }
-
-//         // 🔹 Fetch category details
-//         let categoryObj = null;
-//         if (mongoose.Types.ObjectId.isValid(product.category)) {
-//             categoryObj = await Category.findById(product.category)
-//                 .select("name slug parent")
-//                 .lean();
-//         }
-
-//         // 🔹 Calculate average rating
-//         const reviews = await Review.find({ productId: product._id, status: "Active" }).select("rating");
-//         const totalRating = reviews.reduce((sum, r) => sum + r.rating, 0);
-//         const avgRating = reviews.length ? parseFloat((totalRating / reviews.length).toFixed(1)) : 0;
-
-//         // 🔹 Fetch all promotions
-//         const promotions = await Promotion.find({}).lean();
-
-//         // 🔹 Find best applicable promotion for this product
-//         let bestPromo = null;
-//         let discountedPrice = product.price ?? product.mrp ?? 0;
-//         let discountPercent = 0;
-//         let discountAmount = 0;
-//         let badge = null;
-//         let promoMessage = null;
-
-//         promotions.forEach((promo) => {
-//             if (productMatchesPromo(product, promo)) {
-//                 const { price, discountAmount: da, discountPercent: dp } = applyFlatDiscount(product.mrp ?? product.price, promo);
-//                 if (!bestPromo || dp > discountPercent) {
-//                     bestPromo = promo;
-//                     discountedPrice = price;
-//                     discountPercent = dp;
-//                     discountAmount = da;
-//                 }
-//             }
-//         });
-
-//         // 🔹 Set badge & promoMessage
-//         if (bestPromo) {
-//             const promoType = bestPromo.promotionType;
-//             if (promoType === "discount") {
-//                 badge = bestPromo.discountUnit === "percent"
-//                     ? `${bestPromo.discountValue}% Off`
-//                     : `₹${asMoney(bestPromo.discountValue)} Off`;
-//                 promoMessage = `Save ${badge} on this product`;
-//             } else if (promoType === "tieredDiscount") {
-//                 const tiers = Array.isArray(bestPromo.promotionConfig?.tiers) ? bestPromo.promotionConfig.tiers : [];
-//                 const bestTierPercent = tiers.length ? Math.max(...tiers.map(t => t.discountPercent || 0)) : 0;
-//                 badge = `Buy More Save More (Up to ${bestTierPercent}%)`;
-//                 promoMessage = `Add more to save up to ${bestTierPercent}%`;
-//             } else if (promoType === "bogo" || promoType === "buy1get1") {
-//                 const bq = bestPromo.promotionConfig?.buyQty ?? 1;
-//                 const gq = bestPromo.promotionConfig?.getQty ?? 1;
-//                 badge = `BOGO ${bq}+${gq}`;
-//                 promoMessage = `Buy ${bq}, Get ${gq} Free`;
-//             } else if (promoType === "bundle") {
-//                 badge = "Bundle Deal";
-//                 promoMessage = "Special price when bought together";
-//             } else if (promoType === "gift") {
-//                 badge = "Free Gift";
-//                 promoMessage = "Get a free gift on qualifying order";
-//             }
-//         }
-
-//         // 🔹 Return product
-//         res.status(200).json({
-//             _id: product._id,
-//             name: product.name,
-//             brand: product.brand,
-//             variant: product.variant,
-//             description: product.description || "",
-//             summary: product.summary || "",
-//             features: product.features || [],
-//             howToUse: product.howToUse || "",
-//             ingredients: product.ingredients || [],
-//             price: Math.round(discountedPrice),
-//             mrp: Math.round(product.mrp ?? product.price),
-//             discountPercent: Math.max(0, Math.round(discountPercent)),
-//             discountAmount: Math.max(0, Math.round(discountAmount)),
-//             badge,
-//             promoMessage,
-//             images: normalizeImages(product.images || []),
-//             category: categoryObj,
-//             shadeOptions: buildOptions(product).shadeOptions,
-//             colorOptions: buildOptions(product).colorOptions,
-//             foundationVariants: product.foundationVariants || [],
-//             avgRating,
-//             totalRatings: reviews.length,
-//         });
-
-//     } catch (err) {
-//         console.error("❌ getSingleProduct error:", err);
-//         res.status(500).json({ message: "Server error", error: err.message });
-//     }
-// };
-
 
 export const getSingleProduct = async (req, res) => {
     try {
@@ -350,11 +222,12 @@ export const getSingleProduct = async (req, res) => {
         }
 
         // 1) Load product + increment views
-        const product = await Product.findByIdAndUpdate(
-            productId,
+        const product = await Product.findOneAndUpdate(
+            { _id: productId, isPublished: true },
             { $inc: { views: 1 } },
             { new: true, lean: true }
         );
+
         if (!product) return res.status(404).json({ message: "Product not found" });
 
         // 2) Save to user's recent history
@@ -543,108 +416,6 @@ export const getSingleProduct = async (req, res) => {
     }
 };
 
-
-// ✅ Products by category with full recommendations
-// export const getProductsByCategory = async (req, res) => {
-//     try {
-//         const slug = req.params.slug.toLowerCase();
-//         let { page = 1, limit = 12, sort = "recent" } = req.query;
-//         page = Number(page) || 1;
-//         limit = Number(limit) || 12;
-
-//         // 🔹 Fetch category by slug or ObjectId
-//         let category = null;
-//         if (mongoose.Types.ObjectId.isValid(slug)) {
-//             category = await Category.findById(slug)
-//                 .select("name slug bannerImage thumbnailImage ancestors")
-//                 .lean();
-//         } else {
-//             category = await Category.findOne({ slug })
-//                 .select("name slug bannerImage thumbnailImage ancestors")
-//                 .lean();
-//         }
-//         if (!category) return res.status(404).json({ message: "Category not found" });
-
-//         // 🔹 Track user's recent categories
-//         if (req.user && req.user.id) {
-//             await User.findByIdAndUpdate(req.user.id, { $pull: { recentCategories: category._id } });
-//             await User.findByIdAndUpdate(req.user.id, {
-//                 $push: { recentCategories: { $each: [category._id], $position: 0, $slice: 20 } }
-//             });
-//         }
-
-//         // 🔹 Fetch descendant categories
-//         const ids = (await getDescendantCategoryIds(category._id))
-//             .filter(id => mongoose.Types.ObjectId.isValid(id))
-//             .map(id => new mongoose.Types.ObjectId(id));
-//         ids.push(category._id);
-
-//         const filter = { $or: [{ categories: { $in: ids } }, { category: { $in: ids } }] };
-
-//         const sortOptions = {
-//             recent: { createdAt: -1 },
-//             priceLowToHigh: { price: 1 },
-//             priceHighToLow: { price: -1 },
-//             rating: { avgRating: -1 }
-//         };
-
-//         const total = await Product.countDocuments(filter);
-//         const products = await Product.find(filter)
-//             .sort(sortOptions[sort] || { createdAt: -1 })
-//             .skip((page - 1) * limit)
-//             .limit(limit)
-//             .lean();
-
-//         const cards = await Promise.all(products.map(p => formatProductCard(p)));
-
-//         // 🔹 Breadcrumb from ancestors
-//         let ancestors = [];
-//         if (Array.isArray(category.ancestors) && category.ancestors.length) {
-//             const ancestorDocs = await Category.find({ _id: { $in: category.ancestors } })
-//                 .select("name slug").lean();
-//             ancestors = category.ancestors.map(id => ancestorDocs.find(a => String(a._id) === String(id))).filter(Boolean);
-//         }
-
-//         // 🔹 Fetch recommendations in parallel
-//         const firstProduct = products[0] || await Product.findOne({ category: category._id }).lean();
-
-//         let [topSelling, moreLikeThis, trending] = await Promise.all([
-//             getRecommendations({ mode: "topSelling", categorySlug: category.slug, limit: 6 }),
-//             firstProduct ? getRecommendations({ mode: "moreLikeThis", productId: firstProduct._id, limit: 6 }) : Promise.resolve({ products: [] }),
-//             getRecommendations({ mode: "trending", limit: 6 })
-//         ]);
-
-//         // 🔹 Filter out duplicates
-//         const usedIds = new Set();
-//         const filterUnique = (rec) => {
-//             if (!rec?.products?.length) return [];
-//             return rec.products.filter(p => {
-//                 const id = p._id.toString();
-//                 if (usedIds.has(id)) return false;
-//                 usedIds.add(id);
-//                 return true;
-//             });
-//         };
-
-//         return res.status(200).json({
-//             category,
-//             breadcrumb: ancestors,
-//             products: cards,
-//             pagination: {
-//                 total,
-//                 page,
-//                 limit,
-//                 totalPages: Math.ceil(total / limit),
-//                 hasMore: page < Math.ceil(total / limit)
-//             }
-//         });
-
-//     } catch (err) {
-//         console.error("❌ getProductsByCategory error:", err);
-//         return res.status(500).json({ message: "Server error", error: err.message });
-//     }
-// };
-
 export const getProductsByCategory = async (req, res) => {
     try {
         const slug = req.params.slug.toLowerCase();
@@ -690,6 +461,8 @@ export const getProductsByCategory = async (req, res) => {
         // 🔹 Apply dynamic filters from query
         const filters = normalizeFilters(queryFilters);
         const finalFilter = applyDynamicFilters(baseCategoryFilter, filters);
+        finalFilter.isPublished = true;   // 👈 add here
+
 
         // 🔹 Sorting options
         const sortOptions = {
@@ -782,7 +555,7 @@ export const getProductsByCategory = async (req, res) => {
 // 🔥 Top Selling Products
 export const getTopSellingProducts = async (req, res) => {
     try {
-        const topProducts = await Product.find()
+        const topProducts = await Product.find({ isPublished: true })  // 👈 filter
             .sort({ sales: -1 })
             .limit(10)
             .select("name images foundationVariants shadeOptions colorOptions")
@@ -844,7 +617,7 @@ export const getTopSellingProductsByCategory = async (req, res) => {
 
 export const getProductWithRelated = async (req, res) => {
     try {
-        const product = await Product.findById(req.params.id)
+        const product = await Product.findOne({ _id: req.params.id, isPublished: true })
             .populate("category")
             .lean();
 
@@ -1026,85 +799,6 @@ export const getAllSkinTypes = async (req, res) => {
     }
 };
 
-
-// // ✅ Products by Skin Type with Recommendations
-// export const getProductsBySkinType = async (req, res) => {
-//     try {
-//         const slug = req.params.slug.toLowerCase();
-//         let { page = 1, limit = 12, sort = "recent" } = req.query;
-//         page = Number(page) || 1;
-//         limit = Number(limit) || 12;
-
-//         // 🔹 Fetch skin type
-//         const skinType = await SkinType.findOne({ slug, isDeleted: false }).lean();
-//         if (!skinType) return res.status(404).json({ message: "Skin type not found" });
-
-//         // 🔹 Find related categories (Makeup + Skincare)
-//         const categories = await Category.find({ slug: { $in: ["makeup", "skincare"] } }).select("_id slug").lean();
-//         const categoryIds = categories.map(c => c._id);
-
-//         const sortOptions = {
-//             recent: { createdAt: -1 },
-//             priceLow: { price: 1 },
-//             priceHigh: { price: -1 },
-//             popular: { totalSales: -1 },
-//         };
-
-//         // 🔹 Fetch main products for this skin type
-//         const products = await Product.find({
-//             skinTypes: skinType._id,
-//             isDeleted: { $ne: true }
-//         })
-//             .sort(sortOptions[sort] || { createdAt: -1 })
-//             .skip((page - 1) * limit)
-//             .limit(limit)
-//             .lean();
-
-//         const total = await Product.countDocuments({
-//             skinTypes: skinType._id,
-//             isDeleted: { $ne: true }
-//         });
-
-//         const mainProductIds = products.map(p => p._id);
-
-//         // 🔹 Fetch top-selling recommendations (Makeup + Skincare, excluding main products)
-//         const topSelling = await Product.find({
-//             category: { $in: categoryIds },
-//             isDeleted: { $ne: true },
-//             _id: { $nin: mainProductIds }
-//         }).sort({ totalSales: -1 }).limit(5).lean();
-
-//         const excludeIds = [...mainProductIds, ...topSelling.map(p => p._id)];
-
-//         // 🔹 Random recommendations
-//         const randomProducts = await Product.aggregate([
-//             { $match: { category: { $in: categoryIds }, isDeleted: { $ne: true }, _id: { $nin: excludeIds } } },
-//             { $sample: { size: 5 } }
-//         ]);
-
-//         // 🔹 Format all products consistently
-//         const formattedProducts = await Promise.all(products.map(p => formatProductCard(p)));
-//         const formattedTopSelling = await Promise.all(topSelling.map(p => formatProductCard(p)));
-//         const formattedRandom = await Promise.all(randomProducts.map(p => formatProductCard(p)));
-
-//         res.json({
-//             success: true,
-//             skinType: skinType.name,
-//             products: formattedProducts,
-//             pagination: { page, limit, total, totalPages: Math.ceil(total / limit), hasMore: page < Math.ceil(total / limit) },
-//             recommendations: {
-//                 topSelling: formattedTopSelling,
-//                 random: formattedRandom
-//             }
-//         });
-
-//     } catch (err) {
-//         console.error("❌ getProductsBySkinType error:", err);
-//         res.status(500).json({ success: false, message: err.message });
-//     }
-// };
-
-
 export const getProductsBySkinType = async (req, res) => {
     try {
         const slug = req.params.slug.toLowerCase();
@@ -1126,7 +820,8 @@ export const getProductsBySkinType = async (req, res) => {
         const baseFilter = {
             skinTypes: skinType._id,
             isDeleted: { $ne: true },
-            category: { $in: categoryIds }
+            category: { $in: categoryIds },
+            isPublished: true   // 👈 add here
         };
 
         // 🔹 Apply dynamic filters from query
@@ -1154,6 +849,7 @@ export const getProductsBySkinType = async (req, res) => {
         const topSelling = await Product.find({
             category: { $in: categoryIds },
             isDeleted: { $ne: true },
+            isPublished: true,   // 👈 add this
             _id: { $nin: mainProductIds }
         })
             .sort({ totalSales: -1 })
@@ -1168,6 +864,7 @@ export const getProductsBySkinType = async (req, res) => {
                 $match: {
                     category: { $in: categoryIds },
                     isDeleted: { $ne: true },
+                    isPublished: true,   // 👈 add this
                     _id: { $nin: excludeIds }
                 }
             },
@@ -1215,14 +912,12 @@ export const getProductsBySkinType = async (req, res) => {
     }
 };
 
-
-
 export const getProductDetail = async (req, res) => {
     try {
         const { id } = req.params;
 
         // 🔹 Fetch product
-        const product = await Product.findById(id).lean();
+        const product = await Product.findOne({ _id: id, isPublished: true }).lean();
         if (!product) return res.status(404).json({ success: false, message: "Product not found" });
 
         // 🔹 Track user product view
