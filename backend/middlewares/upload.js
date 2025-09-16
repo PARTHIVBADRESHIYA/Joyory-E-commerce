@@ -38,14 +38,35 @@ const makeCloudinaryUploader = (folder, maxFiles) =>
   });
 
 
+// export const uploadPdfBuffer = (buffer, filename) => {
+//   return new Promise((resolve, reject) => {
+//     const uploadStream = cloudinary.uploader.upload_stream(
+//       {
+//         folder: "ecards",
+//         resource_type: "raw",
+//         public_id: filename.replace(".pdf", ""), // clean name
+//         format: "pdf",
+//       },
+//       (err, result) => {
+//         if (err) return reject(err);
+//         resolve(result);
+//       }
+//     );
+//     streamifier.createReadStream(buffer).pipe(uploadStream);
+//   });
+// };
+
+
 export const uploadPdfBuffer = (buffer, filename) => {
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         folder: "ecards",
-        resource_type: "raw",
-        public_id: filename.replace(".pdf", ""), // clean name
+        resource_type: "auto",   // ✅ allow browser to embed
+        public_id: filename.replace(".pdf", ""),
         format: "pdf",
+        type: "upload",
+        access_mode: "public"   // ✅ ensure public URL
       },
       (err, result) => {
         if (err) return reject(err);
@@ -56,35 +77,68 @@ export const uploadPdfBuffer = (buffer, filename) => {
   });
 };
 
-// ✅ For PDF eCards
+
+// // ✅ For PDF eCards
+// const makeCloudinaryPdfUploader = (folder, maxFiles) =>
+//   multer({
+//     storage: new CloudinaryStorage({
+//       cloudinary,
+//       params: {
+//         folder,
+//         allowed_formats: ['pdf'], // only PDF
+//         resource_type: 'raw',     // raw = for PDFs, zips, etc.,
+//         access_mode: 'public'  // ✅ make PDF publicly downloadable
+
+//       }
+//     }),
+//     fileFilter: (req, file, cb) => {
+//       if (file.mimetype !== 'application/pdf') {
+//         return cb(
+//           new multer.MulterError(
+//             'LIMIT_UNEXPECTED_FILE',
+//             'Invalid file type. Only PDF allowed.'
+//           )
+//         );
+//       }
+//       cb(null, true);
+//     },
+//     limits: {
+//       fileSize: 2 * 1024 * 1024, // 2MB limit for PDF
+//       files: maxFiles
+//     }
+//   });
+
+
 const makeCloudinaryPdfUploader = (folder, maxFiles) =>
   multer({
     storage: new CloudinaryStorage({
       cloudinary,
       params: {
         folder,
-        allowed_formats: ['pdf'], // only PDF
-        resource_type: 'raw',     // raw = for PDFs, zips, etc.,
-        access_mode: 'public'  // ✅ make PDF publicly downloadable
-
+        allowed_formats: ["pdf"],
+        resource_type: "auto",   // ✅ use auto, not raw
+        access_mode: "public"
       }
     }),
     fileFilter: (req, file, cb) => {
-      if (file.mimetype !== 'application/pdf') {
+      if (file.mimetype !== "application/pdf") {
         return cb(
           new multer.MulterError(
-            'LIMIT_UNEXPECTED_FILE',
-            'Invalid file type. Only PDF allowed.'
+            "LIMIT_UNEXPECTED_FILE",
+            "Invalid file type. Only PDF allowed."
           )
         );
       }
       cb(null, true);
     },
     limits: {
-      fileSize: 2 * 1024 * 1024, // 2MB limit for PDF
-      files: maxFiles
-    }
+      fileSize: 2 * 1024 * 1024,
+      files: maxFiles,
+    },
   });
+
+
+
 
 export const uploadEcard = makeCloudinaryPdfUploader("ecards", 1);
 export const uploadProduct = makeCloudinaryUploader('products', 5);
@@ -101,4 +155,4 @@ export const uploadFamilies = makeCloudinaryUploader("families", 2);
 export const uploadFormulations = makeCloudinaryUploader("formulations", 2);
 export const uploadSkinType = makeCloudinaryUploader("skin-types", 2);
 export const uploadGiftCard = makeCloudinaryUploader("gift-cards", 1);
-export const uploadSeller = makeCloudinaryUploader("sellers", 1);
+export const uploadSeller = makeCloudinaryUploader("sellers", 10);

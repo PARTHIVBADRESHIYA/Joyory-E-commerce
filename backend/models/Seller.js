@@ -12,6 +12,7 @@ const SellerSchema = new mongoose.Schema({
     addresses: [
         { line1: String, city: String, state: String, pincode: String, country: String }
     ],
+    fundAccountId: { type: String }, // RazorpayX fund account ID,
     bankDetails: {
         accountHolderName: String,
         accountNumberEncrypted: String,

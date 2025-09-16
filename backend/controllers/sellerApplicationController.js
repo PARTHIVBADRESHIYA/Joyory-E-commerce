@@ -1,98 +1,15 @@
-// // import SellerApplication from "../models/SellerApplication.js";
-// // import Seller from "../models/Seller.js";
-// // import User from "../models/User.js";
-// // import bcrypt from "bcryptjs";
-// // import { sendEmail } from "../middlewares/utils/emailService.js"; // implement nodemailer
+// controllers/sellerApplicationController.js
+import SellerApplication from "../models/SellerApplication.js";
+import Seller from "../models/Seller.js";
+import { BUSINESS_REQUIREMENTS } from "../businessRequirements.js";
+import { sendEmail } from "../middlewares/utils/emailService.js";
+import { createFundAccountForSeller } from "../middlewares/services/razorpayX.js";
+import { buildSellerAppPdf } from "../middlewares/services/ecardPdf.js";
+import { uploadPdfBuffer } from "../middlewares/upload.js";
 
-// // // ========== Apply as Seller ==========
-// // export const applySeller = async (req, res) => {
-// //     try {
-// //         const { email, phone, businessName, gstNumber, panNumber, addresses, bankDetails } = req.body;
-
-// //         const exists = await SellerApplication.findOne({ email });
-// //         if (exists) return res.status(400).json({ message: "Already applied with this email" });
-
-// //         const app = new SellerApplication({
-// //             email,
-// //             phone,
-// //             businessName,
-// //             gstNumber,
-// //             panNumber,
-// //             addresses,
-// //             bankDetails
-// //         });
-// //         await app.save();
-
-// //         // notify admin
-// //         await sendEmail("admin@yourapp.com", "New Seller Application", JSON.stringify(app, null, 2));
-
-// //         res.status(201).json({ message: "Application submitted", application: app });
-// //     } catch (err) {
-// //         res.status(500).json({ message: "Server error", error: err.message });
-// //     }
-// // };
-
-// // // ========== Admin Approve ==========
-// // export const approveSeller = async (req, res) => {
-// //     try {
-// //         const app = await SellerApplication.findById(req.params.id);
-// //         if (!app) return res.status(404).json({ message: "Application not found" });
-
-// //         // temp password
-// //         const tempPassword = Math.random().toString(36).slice(-8);
-// //         const hashed = await bcrypt.hash(tempPassword, 10);
-
-// //         // create seller account
-// //         const seller = new Seller({
-// //             email: app.email,
-// //             phone: app.phone,
-// //             password: hashed,
-// //             businessName: app.businessName,
-// //             gstNumber: app.gstNumber,
-// //             panNumber: app.panNumber,
-// //             addresses: app.addresses,
-// //             bankDetails: app.bankDetails,
-// //             kycDocs: app.kycDocs,
-// //             status: "active"
-// //         });
-// //         await seller.save();
-
-// //         // update application
-// //         app.status = "approved";
-// //         await app.save();
-
-// //         // send email with credentials
-// //         await sendEmail(app.email, "Seller Account Approved",
-// //             `Welcome ${app.businessName}!\n\nYou can login with:\nEmail: ${app.email}\nPassword: ${tempPassword}`
-// //         );
-
-// //         res.json({ message: "Seller approved", seller });
-// //     } catch (err) {
-// //         res.status(500).json({ message: "Error approving seller", error: err.message });
-// //     }
-// // };
-
-
-
-
-
-
-
-
-
-
-
-// import SellerApplication from "../models/SellerApplication.js";
-// import Seller from "../models/Seller.js";
-// import bcrypt from "bcryptjs";
-// import { sendEmail } from "../middlewares/utils/emailService.js";
-
-// /**
-//  * Submit seller application
-//  */
 // export const applySeller = async (req, res) => {
 //     try {
-//         const {
+//         let {
 //             email,
 //             phone,
 //             businessName,
@@ -101,33 +18,46 @@
 //             addresses,
 //             bankDetails,
 //             marketingBudget,
-//             licenceCategory
+//             licencesMeta,
 //         } = req.body;
 
+//         // ✅ Check if already applied
 //         const exists = await SellerApplication.findOne({ email });
-//         if (exists) return res.status(400).json({ message: "Already applied with this email" });
+//         if (exists) {
+//             return res.status(400).json({ message: "Already applied with this email" });
+//         }
 
-//         // Handle uploaded files (KYC & licences)
-//         let kycDocs = [];
-//         if (req.files?.kycDocs) {
-//             kycDocs = req.files.kycDocs.map(file => ({
+//         // ✅ Parse JSON fields if sent as string
+//         try {
+//             if (typeof addresses === "string") addresses = JSON.parse(addresses);
+//             if (typeof bankDetails === "string") bankDetails = JSON.parse(bankDetails);
+//             if (typeof licencesMeta === "string") licencesMeta = JSON.parse(licencesMeta);
+//         } catch (parseErr) {
+//             return res.status(400).json({
+//                 message: "Invalid JSON in addresses/bankDetails/licencesMeta",
+//                 error: parseErr.message,
+//             });
+//         }
+
+//         // ✅ Process uploaded KYC documents
+//         const kycDocs =
+//             req.files?.kycDocs?.map((file) => ({
 //                 url: file.path,
 //                 filename: file.originalname,
 //                 public_id: file.filename,
-//                 uploadedAt: new Date()
-//             }));
-//         }
+//                 uploadedAt: new Date(),
+//             })) || [];
 
-//         let licences = [];
-//         if (req.files?.licences) {
-//             licences = req.files.licences.map(file => ({
-//                 category: licenceCategory || "general",
-//                 docUrl: file.path,
-//                 approved: false
-//             }));
-//         }
+//         // ✅ Process licences with metadata
+//         const licenceFiles = req.files?.licences || [];
+//         const licences = (licencesMeta || []).map((lic, idx) => ({
+//             category: lic.category,
+//             docUrl: licenceFiles[idx]?.path,
+//             approved: false,
+//         }));
 
-//         const app = new SellerApplication({
+//         // ✅ Create seller application
+//         const application = new SellerApplication({
 //             email,
 //             phone,
 //             businessName,
@@ -138,87 +68,53 @@
 //             kycDocs,
 //             licences,
 //             marketingBudget: marketingBudget || 0,
-//             status: "pending"
+//             status: "pending",
 //         });
 
-//         await app.save();
+//         await application.save();
 
-//         // Notify admin
-//         await sendEmail("admin@yourapp.com", "New Seller Application", JSON.stringify(app, null, 2));
+//         // ✅ Build PDF
+//         const pdfBuffer = await buildSellerAppPdf(application);
 
-//         res.status(201).json({ message: "Application submitted", application: app });
+//         // ✅ Upload PDF to Cloudinary (for record keeping)
+//         const pdfUpload = await uploadPdfBuffer(pdfBuffer, `seller_${application._id}.pdf`);
+
+//         // ✅ Notify admin with both summary text + PDF attachment
+//         await sendEmail(
+//             "joyory2025@gmail.com",
+//             "New Seller Application",
+//             `
+//             <h2>New Seller Application Received</h2>
+//             <p><b>Business:</b> ${application.businessName}</p>
+//             <p><b>Email:</b> ${application.email}</p>
+//             <p><b>Phone:</b> ${application.phone}</p>
+//             <p><b>GST:</b> ${application.gstNumber || "-"}</p>
+//             <p><b>PAN:</b> ${application.panNumber || "-"}</p>
+//             <p>You can also view the PDF here: <a href="${pdfUpload.secure_url}" target="_blank">Download</a></p>
+//             `,
+//             [
+//                 {
+//                     filename: `seller_${application._id}.pdf`,
+//                     content: pdfBuffer,
+//                     contentType: "application/pdf",
+//                 },
+//             ]
+//         );
+
+//         res.status(201).json({
+//             message: "Application submitted successfully",
+//             application,
+//             pdfUrl: pdfUpload.secure_url,
+//         });
 //     } catch (err) {
 //         res.status(500).json({ message: "Server error", error: err.message });
 //     }
 // };
 
-// /**
-//  * Admin approves seller application
-//  */
-// export const approveSeller = async (req, res) => {
-//     try {
-//         const app = await SellerApplication.findById(req.params.id);
-//         if (!app) return res.status(404).json({ message: "Application not found" });
 
-//         // temp password
-//         const tempPassword = Math.random().toString(36).slice(-8);
-
-//         // create seller account
-//         const seller = new Seller({
-//             email: app.email,
-//             phone: app.phone,
-//             password: tempPassword,
-//             businessName: app.businessName,
-//             gstNumber: app.gstNumber,
-//             panNumber: app.panNumber,
-//             addresses: app.addresses,
-//             bankDetails: app.bankDetails,
-//             kycDocs: app.kycDocs,
-//             licences: app.licences,
-//             marketingBudget: app.marketingBudget,
-//             status: "active"
-//         });
-//         await seller.save();
-
-//         // update application
-//         app.status = "approved";
-//         await app.save();
-
-//         // send credentials to seller
-//         await sendEmail(app.email, "Seller Account Approved",
-//             `Welcome ${app.businessName}!\n\nYou can login with:\nEmail: ${app.email}\nPassword: ${tempPassword}`
-//         );
-
-//         res.json({ message: "Seller approved", seller });
-//     } catch (err) {
-//         res.status(500).json({ message: "Error approving seller", error: err.message });
-//     }
-// };
-
-
-
-
-
-
-
-
-
-
-
-
-// controllers/sellerApplicationController.js
-import SellerApplication from "../models/SellerApplication.js";
-import Seller from "../models/Seller.js";
-import { sendEmail } from "../middlewares/utils/emailService.js";
-
-/**
- * Submit seller application
- * - Handles KYC docs & licences
- * - Sends notification to admin
- */
 export const applySeller = async (req, res) => {
     try {
-        const {
+        let {
             email,
             phone,
             businessName,
@@ -227,30 +123,74 @@ export const applySeller = async (req, res) => {
             addresses,
             bankDetails,
             marketingBudget,
-            licenceCategory
+            licencesMeta,
+            businessType,
+            cin,
         } = req.body;
 
-        // Check if already applied
+        // ✅ Prevent duplicate application
         const exists = await SellerApplication.findOne({ email });
-        if (exists)
-            return res.status(400).json({ message: "Already applied with this email" });
+        if (exists) {
+            return res.status(400).json({ message: "Application already exists for this email" });
+        }
 
-        // Process uploaded KYC documents
-        const kycDocs = req.files?.kycDocs?.map(file => ({
-            url: file.path,
-            filename: file.originalname,
-            public_id: file.filename,
-            uploadedAt: new Date()
-        })) || [];
+        // ✅ Parse JSON fields if sent as strings
+        try {
+            if (typeof addresses === "string") addresses = JSON.parse(addresses);
+            if (typeof bankDetails === "string") bankDetails = JSON.parse(bankDetails);
+            if (typeof licencesMeta === "string") licencesMeta = JSON.parse(licencesMeta);
+        } catch (parseErr) {
+            return res.status(400).json({
+                message: "Invalid JSON format in addresses/bankDetails/licencesMeta",
+                error: parseErr.message,
+            });
+        }
 
-        // Process uploaded licences
-        const licences = req.files?.licences?.map(file => ({
-            category: licenceCategory || "general",
-            docUrl: file.path,
-            approved: false
-        })) || [];
+        // ✅ Validate business type
+        const requirements = BUSINESS_REQUIREMENTS[businessType];
+        if (!requirements) {
+            return res.status(400).json({ message: "Invalid or missing business type" });
+        }
 
-        // Create seller application
+        // ✅ Validate required fields (panNumber, gstNumber, cin, bankDetails etc.)
+        for (const field of requirements.requiredFields) {
+            if (!req.body[field]) {
+                return res
+                    .status(400)
+                    .json({ message: `Field "${field}" is required for ${businessType}` });
+            }
+        }
+
+        // ✅ Validate required documents
+        // Each uploaded file should have `fieldname` = docType (panCard, gstCertificate, etc.)
+        const uploadedDocs = (req.files?.kycDocs || []).map((f) => f.fieldname);
+        for (const doc of requirements.requiredDocs) {
+            if (!uploadedDocs.includes(doc)) {
+                return res
+                    .status(400)
+                    .json({ message: `Document "${doc}" is required for ${businessType}` });
+            }
+        }
+
+        // ✅ Process uploaded KYC documents (with docType)
+        const kycDocs =
+            req.files?.kycDocs?.map((file) => ({
+                docType: file.fieldname, // 👈 important
+                url: file.path,
+                filename: file.originalname,
+                public_id: file.filename,
+                uploadedAt: new Date(),
+            })) || [];
+
+        // ✅ Process licences
+        const licenceFiles = req.files?.licences || [];
+        const licences = (licencesMeta || []).map((lic, idx) => ({
+            category: lic.category,
+            docUrl: licenceFiles[idx]?.path,
+            approved: false,
+        }));
+
+        // ✅ Create seller application
         const application = new SellerApplication({
             email,
             phone,
@@ -259,44 +199,63 @@ export const applySeller = async (req, res) => {
             panNumber,
             addresses,
             bankDetails,
+            businessType,
+            cin,
             kycDocs,
             licences,
             marketingBudget: marketingBudget || 0,
-            status: "pending"
+            status: "pending",
         });
+
         await application.save();
 
-        // Notify admin via email
+        // ✅ Build PDF summary
+        const pdfBuffer = await buildSellerAppPdf(application);
+
+        // ✅ Upload PDF to Cloudinary
+        const pdfUpload = await uploadPdfBuffer(pdfBuffer, `seller_${application._id}.pdf`);
+
+        // ✅ Notify admin with both summary + PDF
         await sendEmail(
             "joyory2025@gmail.com",
             "New Seller Application",
-            `A new seller has applied.\n\nDetails:\n${JSON.stringify(application, null, 2)}`
+            `
+            <h2>New Seller Application Received</h2>
+            <p><b>Business:</b> ${application.businessName}</p>
+            <p><b>Email:</b> ${application.email}</p>
+            <p><b>Phone:</b> ${application.phone}</p>
+            <p><b>GST:</b> ${application.gstNumber || "-"}</p>
+            <p><b>PAN:</b> ${application.panNumber || "-"}</p>
+            <p><b>CIN:</b> ${application.cin || "-"}</p>
+            <p>You can view the application PDF here: <a href="${pdfUpload.secure_url}" target="_blank">Download</a></p>
+            `,
+            [
+                {
+                    filename: `seller_${application._id}.pdf`,
+                    content: pdfBuffer,
+                    contentType: "application/pdf",
+                },
+            ]
         );
 
-        res.status(201).json({
+        return res.status(201).json({
             message: "Application submitted successfully",
-            application
+            application,
+            pdfUrl: pdfUpload.secure_url,
         });
     } catch (err) {
-        res.status(500).json({ message: "Server error", error: err.message });
+        console.error("❌ Error in applySeller:", err);
+        return res.status(500).json({ message: "Server error", error: err.message });
     }
 };
 
-/**
- * Admin approves seller application
- * - Creates Seller account with temp password
- * - Updates application status
- * - Sends credentials to seller
- */
 export const approveSeller = async (req, res) => {
     try {
         const app = await SellerApplication.findById(req.params.id);
         if (!app) return res.status(404).json({ message: "Application not found" });
 
-        // Generate temporary password
         const tempPassword = Math.random().toString(36).slice(-8);
 
-        // Create seller account (password hashed via pre-save hook)
         const seller = new Seller({
             email: app.email,
             phone: app.phone,
@@ -311,13 +270,16 @@ export const approveSeller = async (req, res) => {
             marketingBudget: app.marketingBudget,
             status: "active"
         });
+
+        // ✅ Create RazorpayX Fund Account for this seller
+        const fundId = await createFundAccountForSeller(seller);
+        seller.fundAccountId = fundId;
+
         await seller.save();
 
-        // Update application status
         app.status = "approved";
         await app.save();
 
-        // Notify seller via email
         await sendEmail(
             app.email,
             "Seller Account Approved",
@@ -330,9 +292,6 @@ export const approveSeller = async (req, res) => {
     }
 };
 
-/**
- * Admin can reject seller application (optional)
- */
 export const rejectSellerApplication = async (req, res) => {
     try {
         const app = await SellerApplication.findById(req.params.id);

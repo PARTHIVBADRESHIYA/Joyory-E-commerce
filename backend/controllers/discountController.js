@@ -217,7 +217,7 @@ export const getDiscountDashboardAnalytics = async (req, res) => {
             totalUses,
             revenueImpact: revenueImpact[0]?.total || 0,
             avgDiscount: Math.round(avgDiscountPercentage[0]?.avg || 0),
-            avgDiscountAmount: Math.round(avgDiscountAmount[0]?.avg || 0)
+            avgDiscountAmount: Math.round(avgDiscountAmount[0]?.avg || 0) 
         });
     } catch (err) {
         res.status(500).json({ error: err.message });

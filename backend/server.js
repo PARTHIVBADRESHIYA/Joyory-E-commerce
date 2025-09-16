@@ -922,8 +922,8 @@ export { io };
 
 // ================= ROUTES =================
 app.use("/api/user", userRoutes);
-app.use("/api/admin", authRoutes);
 app.use("/api/admin/categories", adminCategoryRoutes);
+app.use("/api/admin", authRoutes);
 app.use("/api", productRoutes);
 app.use("/api/attributes", attributeRoutes);
 app.use("/api/inventory", inventoryRoutes);
@@ -982,8 +982,10 @@ app.use("/api/user/wallet", userWalletRoutes);
 
 
 app.get("/health", (req, res) => {
+    console.log("💓 Health check ping at:", new Date().toISOString());
     res.status(200).send("OK");
 });
+
 
 // ================= TEST ROUTE =================
 app.get("/", (req, res) => res.send("✅ API is running..."));

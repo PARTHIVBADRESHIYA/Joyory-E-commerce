@@ -93,16 +93,94 @@ export const optionalAuth = async (req, res, next) => {
     next();
 };
 
+// export const verifyAdminOrTeamMember = async (req, res, next) => {
+//     const token = req.headers.authorization?.split(' ')[1];
+//     if (!token) return res.status(401).json({ message: 'Unauthorized: No token provided' });
+
+//     try {
+//         const decoded = jwt.verify(token, JWT_SECRET);
+
+//         // ✅ SUPER ADMIN
+//         const mainAdmin = await Admin.findById(decoded.id);
+//         if (mainAdmin) {
+//             req.admin = mainAdmin;
+//             req.isSuperAdmin = true;
+//             req.adminId = decoded.id;
+
+//             // ✅ REQUIRED for Notification system
+//             req.user = {
+//                 id: mainAdmin._id,
+//                 email: mainAdmin.email,
+//                 type: 'Admin',
+//             };
+
+//             return next();
+//         }
+
+//         // ✅ ADMIN ROLE ADMIN
+//         const roleAdmin = await AdminRoleAdmin.findById(decoded.id).populate('role');
+//         if (roleAdmin) {
+//             if (!roleAdmin.role || !roleAdmin.role._id) {
+//                 return res.status(500).json({ message: 'Assigned role not found or not populated' });
+//             }
+
+//             req.roleAdmin = roleAdmin;
+//             req.rolePermissions = roleAdmin.role.permissions;
+//             req.isRoleAdmin = true;
+
+//             // ✅ REQUIRED for Notification system
+//             req.user = {
+//                 id: roleAdmin._id,
+//                 email: roleAdmin.email,
+//                 type: 'AdminRoleAdmin',
+//             };
+
+//             return next();
+//         }
+
+//         // ✅ TEAM MEMBER
+//         const teamMember = await TeamMember.findById(decoded.id).populate('role');
+//         if (teamMember) {
+//             req.teamMember = teamMember;
+//             req.rolePermissions = teamMember.role.permissions;
+
+//             // ✅ REQUIRED for Notification system
+//             req.user = {
+//                 id: teamMember._id,
+//                 email: teamMember.email,
+//                 type: 'TeamMember',
+//             };
+
+//             return next();
+//         }
+
+//         return res.status(403).json({ message: 'Invalid token or user not found' });
+//     } catch (err) {
+//         return res.status(401).json({ message: 'Invalid token', error: err.message });
+//     }
+// };
+
+
 export const verifyAdminOrTeamMember = async (req, res, next) => {
     const token = req.headers.authorization?.split(' ')[1];
-    if (!token) return res.status(401).json({ message: 'Unauthorized: No token provided' });
+    if (!token) {
+        console.warn("❌ No token provided");
+        return res.status(401).json({ message: 'Unauthorized: No token provided' });
+    }
 
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
 
+        console.log("🔑 verifyAdminOrTeamMember");
+        console.log("  ➡️ Path:", req.originalUrl);
+        console.log("  ➡️ Params:", req.params);
+        console.log("  ➡️ Decoded ID:", decoded.id);
+
         // ✅ SUPER ADMIN
         const mainAdmin = await Admin.findById(decoded.id);
         if (mainAdmin) {
+            console.log("✅ Authenticated as SUPER ADMIN:", mainAdmin.email);
+
             req.admin = mainAdmin;
             req.isSuperAdmin = true;
             req.adminId = decoded.id;
@@ -121,14 +199,16 @@ export const verifyAdminOrTeamMember = async (req, res, next) => {
         const roleAdmin = await AdminRoleAdmin.findById(decoded.id).populate('role');
         if (roleAdmin) {
             if (!roleAdmin.role || !roleAdmin.role._id) {
+                console.error("❌ RoleAdmin has no valid role populated");
                 return res.status(500).json({ message: 'Assigned role not found or not populated' });
             }
+
+            console.log("✅ Authenticated as ROLE ADMIN:", roleAdmin.email);
 
             req.roleAdmin = roleAdmin;
             req.rolePermissions = roleAdmin.role.permissions;
             req.isRoleAdmin = true;
 
-            // ✅ REQUIRED for Notification system
             req.user = {
                 id: roleAdmin._id,
                 email: roleAdmin.email,
@@ -141,10 +221,11 @@ export const verifyAdminOrTeamMember = async (req, res, next) => {
         // ✅ TEAM MEMBER
         const teamMember = await TeamMember.findById(decoded.id).populate('role');
         if (teamMember) {
+            console.log("✅ Authenticated as TEAM MEMBER:", teamMember.email);
+
             req.teamMember = teamMember;
             req.rolePermissions = teamMember.role.permissions;
 
-            // ✅ REQUIRED for Notification system
             req.user = {
                 id: teamMember._id,
                 email: teamMember.email,
@@ -154,12 +235,13 @@ export const verifyAdminOrTeamMember = async (req, res, next) => {
             return next();
         }
 
+        console.warn("❌ Invalid token or user not found");
         return res.status(403).json({ message: 'Invalid token or user not found' });
     } catch (err) {
+        console.error("❌ JWT verification error:", err.message);
         return res.status(401).json({ message: 'Invalid token', error: err.message });
     }
 };
-
 
 export const verifyRoleAdmin = async (req, res, next) => {
     try {

@@ -46,48 +46,6 @@ export const uploadKyc = async (req, res) => {
     }
 };
 
-// ================= UPLOAD LICENCES =================
-
-// controller
-
-// export const uploadLicences = async (req, res) => {
-//     try {
-//         const seller = req.seller;
-//         if (!seller) return res.status(404).json({ message: "Seller not found" });
-
-//         const { category } = req.body; // this should be ObjectId
-//         const file = req.file;
-
-//         if (!category || !file) {
-//             return res.status(400).json({ message: "Category (ObjectId) and licence document required" });
-//         }
-
-//         // validate category exists
-//         const categoryDoc = await Category.findById(category);
-//         if (!categoryDoc) {
-//             return res.status(400).json({ message: "Invalid category ID" });
-//         }
-
-//         const docUrl = file.path; // multer-storage-cloudinary gives Cloudinary URL
-
-//         seller.licences.push({
-//             category, // store ObjectId
-//             docUrl,
-//             approved: false,
-//         });
-
-//         await seller.save();
-
-//         return res.json({
-//             message: "Licence uploaded. Pending admin approval.",
-//             licence: { category: categoryDoc.name, docUrl }
-//         });
-//     } catch (err) {
-//         return res.status(500).json({ message: "Upload licence failed", error: err.message });
-//     }
-// };
-
-
 export const uploadLicences = async (req, res) => {
     try {
         const seller = req.seller; // comes from authenticateSeller middleware
