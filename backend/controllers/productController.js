@@ -264,7 +264,7 @@ const addProductController = async (req, res) => {
             message: '❌ Product placement failed',
             error: error.message || 'Unknown error',
             stack: error.stack
-        });
+        });0.
     }
 };
 

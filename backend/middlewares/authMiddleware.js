@@ -170,12 +170,6 @@ export const verifyAdminOrTeamMember = async (req, res, next) => {
 
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
-
-        console.log("🔑 verifyAdminOrTeamMember");
-        console.log("  ➡️ Path:", req.originalUrl);
-        console.log("  ➡️ Params:", req.params);
-        console.log("  ➡️ Decoded ID:", decoded.id);
-
         // ✅ SUPER ADMIN
         const mainAdmin = await Admin.findById(decoded.id);
         if (mainAdmin) {
