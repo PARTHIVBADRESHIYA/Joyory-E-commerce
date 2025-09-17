@@ -1,22 +1,36 @@
 // models/Product.js
 import mongoose from 'mongoose';
 
-const foundationVariantSchema = new mongoose.Schema({
-    // Note: unique on sub-docs is not enforced by MongoDB; enforce uniqueness at app level if needed
-    sku: { type: String, required: true },             // brand SKU for that shade
-    shadeName: { type: String, required: true },       // "102 Warm Ivory"
-    familyKey: { type: String, required: false },      // maps to ShadeFamily.key (e.g. "ivory-pink")
-    toneKeys: [{ type: String }],                      // ["fair","light"]
-    undertoneKeys: [{ type: String }],                 // ["warm","neutral"]
-    hex: { type: String },                             // swatch hex for UI
-    lab: { L: Number, a: Number, b: Number },          // optional color space
+// const foundationVariantSchema = new mongoose.Schema({
+//     // Note: unique on sub-docs is not enforced by MongoDB; enforce uniqueness at app level if needed
+//     sku: { type: String, required: true },             // brand SKU for that shade
+//     shadeName: { type: String, required: true },       // "102 Warm Ivory"
+//     familyKey: { type: String, required: false },      // maps to ShadeFamily.key (e.g. "ivory-pink")
+//     toneKeys: [{ type: String }],                      // ["fair","light"]
+//     undertoneKeys: [{ type: String }],                 // ["warm","neutral"]
+//     hex: { type: String },                             // swatch hex for UI
+//     lab: { L: Number, a: Number, b: Number },          // optional color space
+//     images: [{ type: String }],
+//     stock: { type: Number, default: 0 },
+//     isActive: { type: Boolean, default: true },
+//     createdAt: { type: Date, default: Date.now }
+// }, { _id: false }); // if you prefer each variant to have its own _id, remove _id:false
+
+const variantSchema = new mongoose.Schema({
+    sku: { type: String, required: true },
+    shadeName: { type: String, required: true },
+    hex: { type: String },
     images: [{ type: String }],
     stock: { type: Number, default: 0 },
     isActive: { type: Boolean, default: true },
-    createdAt: { type: Date, default: Date.now }
-}, { _id: false }); // if you prefer each variant to have its own _id, remove _id:false
+    createdAt: { type: Date, default: Date.now },
 
-
+    // foundation-specific (optional)
+    familyKey: { type: String },
+    toneKeys: [{ type: String }],
+    undertoneKeys: [{ type: String }],
+    lab: { L: Number, a: Number, b: Number }
+}, { _id: false });
 
 const productSchema = new mongoose.Schema({
     name: { type: String, required: true, unique: true },
@@ -48,6 +62,9 @@ const productSchema = new mongoose.Schema({
     howToUse: String, // optional
     image: String, // keep for primary
     images: [{ type: String }],// 🔁 Add this for multi-images
+
+    variants: [variantSchema],   // ✅ new generic field
+
     productTags: [String], // for product tag select
     shadeOptions: [{ type: String }],
     colorOptions: [{ type: String }],
@@ -62,7 +79,7 @@ const productSchema = new mongoose.Schema({
         required: false,
         index: true
     },
-    foundationVariants: [foundationVariantSchema], // only used for foundation category products
+    // foundationVariants: [foundationVariantSchema], // only used for foundation category products
 
 
     status: { type: String, enum: ['In-stock', 'Low stock', 'Out of stock'], default: 'In-stock' },

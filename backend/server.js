@@ -862,9 +862,12 @@ import giftCardRoutes from "./routes/giftCardTemplateRoutes.js";
 import referralRoutes from "./routes/referralRoutes.js";
 import adminReferralConfigRoutes from "./routes/adminReferralConfigRoutes.js";
 import adminWalletRoutes from "./routes/adminWalletRoutes.js";
-import sellerRoutes from "./routes/sellerRoutes.js";
-import sellerApplicationRoutes from "./routes/sellerApplicationRoutes.js";
-import sellerAuthRoutes from "./routes/sellerAuthRoutes.js";
+import sellerRoutes from "./routes/sellers/sellerRoutes.js";
+import sellerApplicationRoutes from "./routes/sellers/sellerApplicationRoutes.js";
+import sellerAuthRoutes from "./routes/sellers/sellerAuthRoutes.js";
+import sellerProductRoutes from "./routes/sellers/sellerProductRoutes.js";
+import sellerOrderRoutes from "./routes/sellers/sellerOrderRoutes.js";
+import sellerPayoutRoutes from "./routes/sellers/sellerPayoutRoutes.js";
 
 // User side
 import userProductRoutes from "./routes/user/userProductRoutes.js";
@@ -959,6 +962,9 @@ app.use("/api/wallet", adminWalletRoutes);
 app.use("/api/sellers", sellerRoutes);
 app.use("/api/seller-applications", sellerApplicationRoutes);
 app.use("/api/seller-auth", sellerAuthRoutes);
+app.use("/api/seller-payout", sellerPayoutRoutes);
+app.use("/api/seller-products", sellerProductRoutes);
+app.use("/api/seller-orders", sellerOrderRoutes);
 
 if ((process.env.SHIPPING_PROVIDER || "mock").toLowerCase() === "mock") {
     app.use("/api/shipping", mockShippingRoutes);

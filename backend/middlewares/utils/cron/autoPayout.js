@@ -4,7 +4,7 @@ dotenv.config();
 import mongoose from "mongoose";
 import axios from "axios";
 import cron from "node-cron";
-import Seller from "../../../models/Seller.js";
+import Seller from "../../../models/sellers/Seller.js";
 import Order from "../../../models/Order.js";
 import PayoutLedger from "../../../models/PayoutLedger.js";
 

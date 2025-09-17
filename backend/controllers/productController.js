@@ -179,28 +179,35 @@ const addProductController = async (req, res) => {
 
         // ✅ FoundationVariants logic (unchanged)
         let foundationVariants = [];
+        // inside addProductController
+        let variants = [];
         let shadeOptions = [];
         let colorOptions = [];
-        if (req.body.foundationVariants) {
-            let variants = req.body.foundationVariants;
-            if (typeof variants === "string") {
+
+        if (req.body.variants || req.body.foundationVariants) {
+            let rawVariants = req.body.variants || req.body.foundationVariants;
+
+            if (typeof rawVariants === "string") {
                 try {
-                    variants = JSON.parse(variants);
+                    rawVariants = JSON.parse(rawVariants);
                 } catch (err) {
-                    console.warn("⚠️ Could not parse foundationVariants JSON:", err.message);
-                    variants = [];
+                    console.warn("⚠️ Could not parse variants JSON:", err.message);
+                    rawVariants = [];
                 }
             }
-            if (Array.isArray(variants)) {
-                foundationVariants = variants.map(v => ({
+
+            if (Array.isArray(rawVariants)) {
+                variants = rawVariants.map(v => ({
                     ...v,
                     isActive: v.isActive !== false,
                     createdAt: new Date()
                 }));
-                shadeOptions = foundationVariants.map(v => v.shadeName).filter(Boolean);
-                colorOptions = foundationVariants.map(v => v.hex).filter(Boolean);
+
+                shadeOptions = variants.map(v => v.shadeName).filter(Boolean);
+                colorOptions = variants.map(v => v.hex).filter(Boolean);
             }
         }
+
 
         // ✅ Stock status
         const status =
@@ -243,7 +250,8 @@ const addProductController = async (req, res) => {
             productTags,
             shadeOptions,
             colorOptions,
-            foundationVariants,
+            variants,
+            foundationVariants: [], // empty going forward,
             isPublished,
             scheduledAt: scheduleDate,
             sales: 0,
@@ -264,7 +272,7 @@ const addProductController = async (req, res) => {
             message: '❌ Product placement failed',
             error: error.message || 'Unknown error',
             stack: error.stack
-        });0.
+        });
     }
 };
 
@@ -434,23 +442,19 @@ const updateProductById = async (req, res) => {
             }
         }
 
-        // ✅ FoundationVariants logic (unchanged)
-        if (req.body.foundationVariants) {
-            let variants = req.body.foundationVariants;
-            if (typeof variants === "string") {
-                try {
-                    variants = JSON.parse(variants);
-                } catch (err) {
-                    console.warn("⚠️ Could not parse foundationVariants JSON:", err.message);
-                    variants = [];
-                }
+        if (req.body.variants || req.body.foundationVariants) {
+            let rawVariants = req.body.variants || req.body.foundationVariants;
+            if (typeof rawVariants === "string") {
+                try { rawVariants = JSON.parse(rawVariants); } catch { rawVariants = []; }
             }
-            if (Array.isArray(variants)) {
-                updateData.foundationVariants = variants;
-                updateData.shadeOptions = variants.map(v => v.shadeName).filter(Boolean);
-                updateData.colorOptions = variants.map(v => v.hex).filter(Boolean);
+
+            if (Array.isArray(rawVariants)) {
+                updateData.variants = rawVariants;
+                updateData.shadeOptions = rawVariants.map(v => v.shadeName).filter(Boolean);
+                updateData.colorOptions = rawVariants.map(v => v.hex).filter(Boolean);
             }
         }
+
 
         // ✅ Sync skinTypes (unchanged)
         if (req.body.skinTypes) {
@@ -549,12 +553,12 @@ const updateVariantImages = async (req, res) => {
         }
 
         const product = await Product.findOneAndUpdate(
-            { _id: id, "foundationVariants.sku": sku },
+            { _id: id, "variants.sku": sku },
             {
                 $push: {
-                    "foundationVariants.$.images": {
+                    "variants.$.images": {
                         $each: uploadedImages,
-                        $slice: -5   // ✅ keep only the last 5 images
+                        $slice: -5
                     }
                 }
             },

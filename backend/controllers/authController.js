@@ -95,7 +95,7 @@ import Admin from '../models/Admin.js';
 import PendingAdmin from '../models/PendingAdmin.js';
 import Product from '../models/Product.js';
 import Order from '../models/Order.js';
-import Seller from '../models/Seller.js';
+import Seller from '../models/sellers/Seller.js';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { notifyMainAdmins } from '../middlewares/utils/notifyMainAdmins.js';

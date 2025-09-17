@@ -6,7 +6,7 @@ import Admin from '../models/Admin.js';
 import TeamMember from '../models/settings/admin/TeamMember.js';
 import AdminRoleAdmin from '../models/settings/admin/AdminRoleAdmin.js';
 import Order from '../models/Order.js';
-import Seller from "../models/Seller.js";
+import Seller from "../models/sellers/Seller.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key';
 if (!JWT_SECRET) throw new Error("JWT_SECRET is not defined in env");
@@ -173,7 +173,6 @@ export const verifyAdminOrTeamMember = async (req, res, next) => {
         // ✅ SUPER ADMIN
         const mainAdmin = await Admin.findById(decoded.id);
         if (mainAdmin) {
-            console.log("✅ Authenticated as SUPER ADMIN:", mainAdmin.email);
 
             req.admin = mainAdmin;
             req.isSuperAdmin = true;

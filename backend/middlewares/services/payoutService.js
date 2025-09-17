@@ -1,7 +1,7 @@
 import Order from '../../models/Order.js';
 import Product from '../../models/Product.js';
 import PayoutLedger from '../../models/PayoutLedger.js';
-import Seller from '../../models/Seller.js';
+import Seller from '../../models/sellers/Seller.js';
 
 export async function generatePayoutForSeller(sellerId, periodStart = null, periodEnd = null) {
     const start = periodStart || new Date(Date.now() - 30 * 24 * 3600 * 1000);

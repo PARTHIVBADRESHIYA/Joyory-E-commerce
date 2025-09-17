@@ -12,6 +12,9 @@ export const createAttribute = async (req, res) => {
         name, type, options, categories
     });
 
+    // ✅ Populate category names in response
+    await attribute.populate("categories", "name");
+
     res.status(201).json({ message: 'Attribute created', attribute });
 };
 
@@ -19,13 +22,13 @@ export const getAllAttributes = async (req, res) => {
     const { category } = req.query;
 
     let query = { status: 'Active' };
-
-    // 🆕 Filter by category if provided
     if (category) {
-        query.categories = category;
+        query.categories = category; // category id
     }
 
-    const attributes = await ProductAttribute.find(query);
+    const attributes = await ProductAttribute.find(query)
+        .populate("categories", "name"); // ✅ only show category name
+
     res.json(attributes);
 };
 
@@ -44,4 +47,19 @@ export const deleteAttribute = async (req, res) => {
     const { id } = req.params;
     const deleted = await ProductAttribute.findByIdAndDelete(id);
     res.json({ message: 'Deleted', deleted });
+};
+
+
+export const getAttributesByCategory = async (req, res) => {
+    const { category } = req.params;
+    if (!category) {
+        return res.status(400).json({ message: "Category is required" });
+    }
+
+    const attributes = await ProductAttribute.find({
+        categories: category,
+        status: "Active"
+    }).populate("categories", "name");
+
+    res.json(attributes);
 };

@@ -1,9 +1,9 @@
 // controllers/sellerAuthController.js
-import Seller from "../models/Seller.js";
+import Seller from "../../models/sellers/Seller.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { sendEmail } from "../middlewares/utils/emailService.js";
-import { generateOTP } from "../middlewares/utils/generateOTP.js";
+import { sendEmail } from "../../middlewares/utils/emailService.js";
+import { generateOTP } from "../../middlewares/utils/generateOTP.js";
 
 const JWT_SECRET = process.env.JWT_SECRET;
 

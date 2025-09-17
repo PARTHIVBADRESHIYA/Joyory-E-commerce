@@ -4,7 +4,7 @@ import {
     sellerLogin,
     sellerSendOtp,
     sellerResetPasswordWithOtp
-} from "../controllers/sellerAuthController.js";
+} from "../../controllers/sellers/sellerAuthController.js";
 
 const router = express.Router();
 
