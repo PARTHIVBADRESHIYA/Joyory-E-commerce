@@ -1,7 +1,7 @@
 // models/Product.js
 import mongoose from 'mongoose';
 
-// const foundationVariantSchema = new mongoose.Schema({
+// const variantschema = new mongoose.Schema({
 //     // Note: unique on sub-docs is not enforced by MongoDB; enforce uniqueness at app level if needed
 //     sku: { type: String, required: true },             // brand SKU for that shade
 //     shadeName: { type: String, required: true },       // "102 Warm Ivory"
@@ -79,7 +79,7 @@ const productSchema = new mongoose.Schema({
         required: false,
         index: true
     },
-    // foundationVariants: [foundationVariantSchema], // only used for foundation category products
+    // variants: [variantschema], // only used for foundation category products
 
 
     status: { type: String, enum: ['In-stock', 'Low stock', 'Out of stock'], default: 'In-stock' },
@@ -122,9 +122,9 @@ productSchema.index({ seller: 1, category: 1 });
 
 // shade finder indexes (helpful for queries)
 productSchema.index({ category: 1, formulation: 1 });
-productSchema.index({ "foundationVariants.familyKey": 1 });
-productSchema.index({ "foundationVariants.toneKeys": 1 });
-productSchema.index({ "foundationVariants.undertoneKeys": 1 });
+productSchema.index({ "variants.familyKey": 1 });
+productSchema.index({ "variants.toneKeys": 1 });
+productSchema.index({ "variants.undertoneKeys": 1 });
 
 
 export default mongoose.model('Product', productSchema);

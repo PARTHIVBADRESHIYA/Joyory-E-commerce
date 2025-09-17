@@ -1,4 +1,4 @@
-// migrateFoundationVariants.js
+// migratevariants.js
 import mongoose from "mongoose";
 import dotenv from "dotenv";
 import Product from "../models/Product.js"; // adjust relative path if needed
@@ -13,16 +13,16 @@ const migrate = async () => {
         });
         console.log("✅ Connected to MongoDB");
 
-        // Find products that still have foundationVariants
+        // Find products that still have variants
         const products = await Product.find({
-            foundationVariants: { $exists: true, $ne: [] },
+            variants: { $exists: true, $ne: [] },
         });
 
-        console.log(`🔍 Found ${products.length} products with foundationVariants`);
+        console.log(`🔍 Found ${products.length} products with variants`);
 
         for (const product of products) {
-            // Merge old foundationVariants into new variants
-            const migratedVariants = product.foundationVariants.map((fv) => ({
+            // Merge old variants into new variants
+            const migratedVariants = product.variants.map((fv) => ({
                 sku: fv.sku,
                 shadeName: fv.shadeName,
                 familyKey: fv.familyKey,
@@ -40,7 +40,7 @@ const migrate = async () => {
             product.variants = [...(product.variants || []), ...migratedVariants];
 
             // Clear old field
-            product.foundationVariants = [];
+            product.variants = [];
 
             // Recalculate shadeOptions + colorOptions
             product.shadeOptions = product.variants.map((v) => v.shadeName).filter(Boolean);

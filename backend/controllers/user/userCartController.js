@@ -32,7 +32,7 @@ export const addToCart = async (req, res) => {
 
   let selectedVariant = null;
   if (variantSku) {
-    const variant = product.foundationVariants.find(v => v.sku === variantSku);
+    const variant = product.variants.find(v => v.sku === variantSku);
     if (variant) {
       selectedVariant = {
         sku: variant.sku,

@@ -100,10 +100,10 @@ export const getFormulations = async (req, res) => {
         const products = await Product.find({
             status: "In-stock", // ✅ product-level availability
             formulation: { $exists: true },
-            "foundationVariants.familyKey": familyKey,
-            "foundationVariants.toneKeys": toneKey,
-            "foundationVariants.undertoneKeys": undertoneKey,
-            "foundationVariants.isActive": true, // ✅ active shades only
+            "variants.familyKey": familyKey,
+            "variants.toneKeys": toneKey,
+            "variants.undertoneKeys": undertoneKey,
+            "variants.isActive": true, // ✅ active shades only
         }).select("formulation");
 
         const formulations = [...new Set(products.map((p) => p.formulation))];
@@ -147,7 +147,7 @@ export const getFormulations = async (req, res) => {
 
 //         const makeQuery = (extra = {}) => ({
 //             status: { $ne: "Out of stock" },
-//             "foundationVariants.isActive": true,
+//             "variants.isActive": true,
 //             ...extra,
 //         });
 
@@ -182,7 +182,7 @@ export const getFormulations = async (req, res) => {
 //                 .populate("category", "name slug")
 //                 .populate("brand", "name")
 //                 .select(
-//                     "_id name price images summary status category brand variant foundationVariants"
+//                     "_id name price images summary status category brand variant variants"
 //                 );
 
 //             if (found.length > 0) {
@@ -203,16 +203,16 @@ export const getFormulations = async (req, res) => {
 //         // Step 1 → exact match (family + tone + undertone + formulation)
 //         // ---------------------------
 //         let query = makeQuery({
-//             "foundationVariants.familyKey": familyKey,
-//             "foundationVariants.toneKeys": toneKey,
-//             "foundationVariants.undertoneKeys": undertoneKey,
+//             "variants.familyKey": familyKey,
+//             "variants.toneKeys": toneKey,
+//             "variants.undertoneKeys": undertoneKey,
 //             ...(formulation && { formulation }),
 //         });
 
 //         products = await Product.find(query)
 //             .populate("category", "name slug")
 //             .populate("brand", "name")
-//             .select("_id name price images summary status category brand variant foundationVariants");
+//             .select("_id name price images summary status category brand variant variants");
 
 //         products = products.map(mapProduct);
 
@@ -226,9 +226,9 @@ export const getFormulations = async (req, res) => {
 //         if (products.length === 0 && formulation) {
 //             await runStep(
 //                 {
-//                     "foundationVariants.familyKey": familyKey,
-//                     "foundationVariants.toneKeys": toneKey,
-//                     "foundationVariants.undertoneKeys": undertoneKey,
+//                     "variants.familyKey": familyKey,
+//                     "variants.toneKeys": toneKey,
+//                     "variants.undertoneKeys": undertoneKey,
 //                 },
 //                 `❌ No exact match in formulation "${formulation}", showing other formulations.`,
 //                 "formulation"
@@ -241,8 +241,8 @@ export const getFormulations = async (req, res) => {
 //         if (products.length === 0 && suggestions.length === 0 && formulation) {
 //             await runStep(
 //                 {
-//                     "foundationVariants.toneKeys": toneKey,
-//                     "foundationVariants.undertoneKeys": undertoneKey,
+//                     "variants.toneKeys": toneKey,
+//                     "variants.undertoneKeys": undertoneKey,
 //                     formulation,
 //                 },
 //                 `❌ No products in family "${familyKey}" with formulation "${formulation}", showing other families.`,
@@ -256,8 +256,8 @@ export const getFormulations = async (req, res) => {
 //         if (products.length === 0 && suggestions.length === 0) {
 //             await runStep(
 //                 {
-//                     "foundationVariants.toneKeys": toneKey,
-//                     "foundationVariants.undertoneKeys": undertoneKey,
+//                     "variants.toneKeys": toneKey,
+//                     "variants.undertoneKeys": undertoneKey,
 //                 },
 //                 `❌ No products in family "${familyKey}", showing other families.`,
 //                 "family"
@@ -270,7 +270,7 @@ export const getFormulations = async (req, res) => {
 //         if (products.length === 0 && suggestions.length === 0 && formulation) {
 //             await runStep(
 //                 {
-//                     "foundationVariants.toneKeys": toneKey,
+//                     "variants.toneKeys": toneKey,
 //                     formulation,
 //                 },
 //                 `❌ No undertone match in formulation "${formulation}", showing tone-only matches.`,
@@ -284,7 +284,7 @@ export const getFormulations = async (req, res) => {
 //         if (products.length === 0 && suggestions.length === 0) {
 //             await runStep(
 //                 {
-//                     "foundationVariants.toneKeys": toneKey,
+//                     "variants.toneKeys": toneKey,
 //                 },
 //                 `❌ No undertone match, showing tone-only alternatives.`,
 //                 "tone"
@@ -297,7 +297,7 @@ export const getFormulations = async (req, res) => {
 //         if (products.length === 0 && suggestions.length === 0 && formulation) {
 //             await runStep(
 //                 {
-//                     "foundationVariants.undertoneKeys": undertoneKey,
+//                     "variants.undertoneKeys": undertoneKey,
 //                     formulation,
 //                 },
 //                 `❌ No tone match in formulation "${formulation}", showing undertone-only matches.`,
@@ -311,7 +311,7 @@ export const getFormulations = async (req, res) => {
 //         if (products.length === 0 && suggestions.length === 0) {
 //             await runStep(
 //                 {
-//                     "foundationVariants.undertoneKeys": undertoneKey,
+//                     "variants.undertoneKeys": undertoneKey,
 //                 },
 //                 `❌ No tone match, showing undertone-only alternatives.`,
 //                 "undertone"
@@ -379,7 +379,7 @@ export const getRecommendations = async (req, res) => {
 
         const makeQuery = (extra = {}) => ({
             status: { $ne: "Out of stock" },
-            "foundationVariants.isActive": true,
+            "variants.isActive": true,
             ...extra,
         });
 
@@ -413,7 +413,7 @@ export const getRecommendations = async (req, res) => {
             const found = await Product.find(makeQuery(filter))
                 .populate("category", "name slug")
                 .populate("brand", "name")
-                .select("_id name price images summary status category brand variant foundationVariants");
+                .select("_id name price images summary status category brand variant variants");
 
             if (found.length > 0) {
                 if (!products.length) {
@@ -442,16 +442,16 @@ export const getRecommendations = async (req, res) => {
         // Step 1 → exact match
         // ---------------------------
         let query = makeQuery({
-            "foundationVariants.familyKey": familyKey,
-            "foundationVariants.toneKeys": toneKey,
-            "foundationVariants.undertoneKeys": undertoneKey,
+            "variants.familyKey": familyKey,
+            "variants.toneKeys": toneKey,
+            "variants.undertoneKeys": undertoneKey,
             ...(formulation && { formulation }),
         });
 
         products = await Product.find(query)
             .populate("category", "name slug")
             .populate("brand", "name")
-            .select("_id name price images summary status category brand variant foundationVariants");
+            .select("_id name price images summary status category brand variant variants");
 
         products = products.map(mapProduct);
 
@@ -471,9 +471,9 @@ export const getRecommendations = async (req, res) => {
         if (products.length === 0 && formulation) {
             await runStep(
                 {
-                    "foundationVariants.familyKey": familyKey,
-                    "foundationVariants.toneKeys": toneKey,
-                    "foundationVariants.undertoneKeys": undertoneKey,
+                    "variants.familyKey": familyKey,
+                    "variants.toneKeys": toneKey,
+                    "variants.undertoneKeys": undertoneKey,
                 },
                 "formulation"
             );
@@ -485,8 +485,8 @@ export const getRecommendations = async (req, res) => {
         if (products.length === 0 && suggestions.length === 0 && formulation) {
             await runStep(
                 {
-                    "foundationVariants.toneKeys": toneKey,
-                    "foundationVariants.undertoneKeys": undertoneKey,
+                    "variants.toneKeys": toneKey,
+                    "variants.undertoneKeys": undertoneKey,
                     formulation,
                 },
                 "family-formulation"
@@ -499,8 +499,8 @@ export const getRecommendations = async (req, res) => {
         if (products.length === 0 && suggestions.length === 0) {
             await runStep(
                 {
-                    "foundationVariants.toneKeys": toneKey,
-                    "foundationVariants.undertoneKeys": undertoneKey,
+                    "variants.toneKeys": toneKey,
+                    "variants.undertoneKeys": undertoneKey,
                 },
                 "family"
             );
@@ -512,7 +512,7 @@ export const getRecommendations = async (req, res) => {
         if (products.length === 0 && suggestions.length === 0 && formulation) {
             await runStep(
                 {
-                    "foundationVariants.toneKeys": toneKey,
+                    "variants.toneKeys": toneKey,
                     formulation,
                 },
                 "tone-formulation"
@@ -525,7 +525,7 @@ export const getRecommendations = async (req, res) => {
         if (products.length === 0 && suggestions.length === 0) {
             await runStep(
                 {
-                    "foundationVariants.toneKeys": toneKey,
+                    "variants.toneKeys": toneKey,
                 },
                 "tone"
             );
@@ -537,7 +537,7 @@ export const getRecommendations = async (req, res) => {
         if (products.length === 0 && suggestions.length === 0 && formulation) {
             await runStep(
                 {
-                    "foundationVariants.undertoneKeys": undertoneKey,
+                    "variants.undertoneKeys": undertoneKey,
                     formulation,
                 },
                 "undertone-formulation"
@@ -550,7 +550,7 @@ export const getRecommendations = async (req, res) => {
         if (products.length === 0 && suggestions.length === 0) {
             await runStep(
                 {
-                    "foundationVariants.undertoneKeys": undertoneKey,
+                    "variants.undertoneKeys": undertoneKey,
                 },
                 "undertone"
             );

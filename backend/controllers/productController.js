@@ -177,15 +177,14 @@ const addProductController = async (req, res) => {
             }
         }
 
-        // ✅ FoundationVariants logic (unchanged)
-        let foundationVariants = [];
+        // ✅ variants logic (unchanged)
         // inside addProductController
         let variants = [];
         let shadeOptions = [];
         let colorOptions = [];
 
-        if (req.body.variants || req.body.foundationVariants) {
-            let rawVariants = req.body.variants || req.body.foundationVariants;
+        if (req.body.variants || req.body.variants) {
+            let rawVariants = req.body.variants || req.body.variants;
 
             if (typeof rawVariants === "string") {
                 try {
@@ -251,7 +250,7 @@ const addProductController = async (req, res) => {
             shadeOptions,
             colorOptions,
             variants,
-            foundationVariants: [], // empty going forward,
+            variants: [], // empty going forward,
             isPublished,
             scheduledAt: scheduleDate,
             sales: 0,
@@ -442,8 +441,8 @@ const updateProductById = async (req, res) => {
             }
         }
 
-        if (req.body.variants || req.body.foundationVariants) {
-            let rawVariants = req.body.variants || req.body.foundationVariants;
+        if (req.body.variants || req.body.variants) {
+            let rawVariants = req.body.variants || req.body.variants;
             if (typeof rawVariants === "string") {
                 try { rawVariants = JSON.parse(rawVariants); } catch { rawVariants = []; }
             }

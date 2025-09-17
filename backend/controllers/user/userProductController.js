@@ -17,9 +17,9 @@ import mongoose from 'mongoose';
 export const buildOptions = (product) => {
     if (!product) return { shadeOptions: [], colorOptions: [] };
 
-    if (product.foundationVariants && product.foundationVariants.length > 0) {
-        const shadeOptions = product.foundationVariants.map(v => v.shadeName).filter(Boolean);
-        const colorOptions = product.foundationVariants.map(v => v.hex).filter(Boolean);
+    if (product.variants && product.variants.length > 0) {
+        const shadeOptions = product.variants.map(v => v.shadeName).filter(Boolean);
+        const colorOptions = product.variants.map(v => v.hex).filter(Boolean);
         return { shadeOptions, colorOptions };
     }
 
@@ -123,14 +123,14 @@ export const getAllFilteredProducts = async (req, res) => {
             filter.$or = [
                 ...(filter.$or || []),
                 { colorOptions: { $in: [color] } },
-                { "foundationVariants.hex": { $in: [color] } }
+                { "variants.hex": { $in: [color] } }
             ];
         }
         if (shade) {
             filter.$or = [
                 ...(filter.$or || []),
                 { shadeOptions: { $in: [shade] } },
-                { "foundationVariants.shadeName": { $in: [shade] } }
+                { "variants.shadeName": { $in: [shade] } }
             ];
         }
 
@@ -156,7 +156,7 @@ export const getAllFilteredProducts = async (req, res) => {
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(perPage)
-            .select("name variant price brand category summary description status images commentsCount avgRating foundationVariants shadeOptions colorOptions")
+            .select("name variant price brand category summary description status images commentsCount avgRating variants shadeOptions colorOptions")
             .lean();
 
         if (req.user && req.user.id && trackedCategoryId) {
@@ -398,7 +398,7 @@ export const getSingleProduct = async (req, res) => {
             category: categoryObj,
             shadeOptions: buildOptions(product).shadeOptions,
             colorOptions: buildOptions(product).colorOptions,
-            foundationVariants: product.foundationVariants || [],
+            variants: product.variants || [],
             avgRating,
             totalRatings: count || 0,
             // ✅ Add this
@@ -558,17 +558,17 @@ export const getTopSellingProducts = async (req, res) => {
         const topProducts = await Product.find({ isPublished: true })  // 👈 filter
             .sort({ sales: -1 })
             .limit(10)
-            .select("name images foundationVariants shadeOptions colorOptions")
+            .select("name images variants shadeOptions colorOptions")
             .lean();
 
         res.status(200).json({
             success: true,
             products: topProducts.map(p => {
-                const shadeOptions = (p.foundationVariants?.length > 0)
-                    ? p.foundationVariants.map(v => v.shadeName).filter(Boolean)
+                const shadeOptions = (p.variants?.length > 0)
+                    ? p.variants.map(v => v.shadeName).filter(Boolean)
                     : (p.shadeOptions || []);
-                const colorOptions = (p.foundationVariants?.length > 0)
-                    ? p.foundationVariants.map(v => v.hex).filter(Boolean)
+                const colorOptions = (p.variants?.length > 0)
+                    ? p.variants.map(v => v.hex).filter(Boolean)
                     : (p.colorOptions || []);
 
                 return {
@@ -625,12 +625,12 @@ export const getProductWithRelated = async (req, res) => {
             return res.status(404).json({ success: false, message: "Product not found" });
         }
 
-        // Normalize shades + colors from foundationVariants
+        // Normalize shades + colors from variants
         let shadeOptions = [];
         let colorOptions = [];
-        if (Array.isArray(product.foundationVariants) && product.foundationVariants.length > 0) {
-            shadeOptions = product.foundationVariants.map(v => v.shadeName).filter(Boolean);
-            colorOptions = product.foundationVariants.map(v => v.hex).filter(Boolean);
+        if (Array.isArray(product.variants) && product.variants.length > 0) {
+            shadeOptions = product.variants.map(v => v.shadeName).filter(Boolean);
+            colorOptions = product.variants.map(v => v.hex).filter(Boolean);
         } else {
             shadeOptions = product.shadeOptions || [];
             colorOptions = product.colorOptions || [];
