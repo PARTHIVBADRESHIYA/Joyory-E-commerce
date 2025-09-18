@@ -6,7 +6,8 @@ const orderSchema = new mongoose.Schema({
         {
             productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
             quantity: { type: Number, required: true },
-            price: { type: Number, required: true }
+            price: { type: Number, required: true },
+            seller: { type: mongoose.Schema.Types.ObjectId, ref: "Seller" } // 👈 we are trying to backfill this
         }
     ],
     // 🔹 Gift card purchase (optional if order is for a gift card)

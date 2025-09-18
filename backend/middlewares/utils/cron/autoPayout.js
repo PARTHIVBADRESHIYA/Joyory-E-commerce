@@ -138,6 +138,7 @@ async function processPayouts() {
 
                 ledger.status = "paid";
                 ledger.gatewayTransactionId = payoutRes.data.id;
+                ledger.processedAt = new Date(); // ✅ add this
                 await ledger.save();
                 console.log(`💰 Payout SUCCESS, txn: ${payoutRes.data.id}`);
             } catch (err) {

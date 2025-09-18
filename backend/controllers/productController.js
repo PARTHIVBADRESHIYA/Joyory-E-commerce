@@ -59,11 +59,9 @@ const addProductController = async (req, res) => {
             const now = new Date();
 
             if (parsedDate > now) {
-                // Future: schedule publishing
                 isPublished = false;
-                scheduleDate = parsedDate.toISOString(); // ⬅️ no extra offset
+                scheduleDate = parsedDate.toISOString();
             } else {
-                // Past or immediate: publish now
                 isPublished = true;
                 scheduleDate = null;
             }
@@ -177,14 +175,13 @@ const addProductController = async (req, res) => {
             }
         }
 
-        // ✅ variants logic (unchanged)
-        // inside addProductController
+        // ✅ variants logic
         let variants = [];
         let shadeOptions = [];
         let colorOptions = [];
 
-        if (req.body.variants || req.body.variants) {
-            let rawVariants = req.body.variants || req.body.variants;
+        if (req.body.variants) {
+            let rawVariants = req.body.variants;
 
             if (typeof rawVariants === "string") {
                 try {
@@ -196,17 +193,26 @@ const addProductController = async (req, res) => {
             }
 
             if (Array.isArray(rawVariants)) {
-                variants = rawVariants.map(v => ({
-                    ...v,
-                    isActive: v.isActive !== false,
-                    createdAt: new Date()
-                }));
+                variants = rawVariants.map(v => {
+                    // ✅ Merge uploaded variant images if provided
+                    let variantImages = [];
+                    if (v.images && Array.isArray(v.images)) {
+                        variantImages = v.images; // image URLs from body
+                    }
+                    // also check if frontend uploaded files grouped for variants (optional future handling)
+
+                    return {
+                        ...v,
+                        images: variantImages.slice(-5), // ⬅️ same rule as updateVariantImages
+                        isActive: v.isActive !== false,
+                        createdAt: new Date()
+                    };
+                });
 
                 shadeOptions = variants.map(v => v.shadeName).filter(Boolean);
                 colorOptions = variants.map(v => v.hex).filter(Boolean);
             }
         }
-
 
         // ✅ Stock status
         const status =
@@ -250,7 +256,6 @@ const addProductController = async (req, res) => {
             shadeOptions,
             colorOptions,
             variants,
-            variants: [], // empty going forward,
             isPublished,
             scheduledAt: scheduleDate,
             sales: 0,
@@ -258,7 +263,7 @@ const addProductController = async (req, res) => {
             commentsCount: 0,
             affiliateEarnings: 0,
             affiliateClicks: 0,
-            attributes, // 👈 dynamic attributes,
+            attributes,
             seller: req.body.seller || null,
         });
 
