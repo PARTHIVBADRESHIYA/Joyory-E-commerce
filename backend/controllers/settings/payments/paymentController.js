@@ -484,7 +484,8 @@ export const verifyRazorpayPayment = async (req, res) => {
         // STEP 10: Mark order as paid
         order.paid = true;
         order.paymentStatus = "success";
-        order.paymentMethod === "COD" ? "COD" : "Prepaid"
+        // order.paymentMethod === "COD" ? "COD" : "Prepaid"
+        order.paymentMethod = rpPayment.method || "Prepaid";
         order.transactionId = razorpay_payment_id;
         order.razorpayOrderId = razorpay_order_id;
         order.orderStatus = "Processing";

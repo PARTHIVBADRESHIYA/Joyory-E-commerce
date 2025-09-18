@@ -15,6 +15,7 @@ const variantSchema = new mongoose.Schema({
     toneKeys: [{ type: String }],
     undertoneKeys: [{ type: String }],
     lab: { L: Number, a: Number, b: Number }
+    
 }, { _id: false });
 
 const productSchema = new mongoose.Schema({

@@ -32,6 +32,7 @@
     "joi": "^18.0.0",
     "jsonwebtoken": "^9.0.2",
     "moment": "^2.30.1",
+    "moment-timezone": "^0.6.0",
     "mongo-sanitize": "^1.1.0",
     "mongoose": "^8.18.1",
     "morgan": "^1.10.0",

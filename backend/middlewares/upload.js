@@ -171,4 +171,4 @@ export const uploadFamilies = makeCloudinaryUploader("families", 2);
 export const uploadFormulations = makeCloudinaryUploader("formulations", 2);
 export const uploadSkinType = makeCloudinaryUploader("skin-types", 2);
 export const uploadGiftCard = makeCloudinaryUploader("gift-cards", 1);
-export const uploadSeller = makeCloudinaryUploader("sellers", 10);
+export const uploadSeller = makeCloudinaryUploader("sellers", 100);

@@ -4,6 +4,7 @@ import cloudinary from '../middlewares/utils/cloudinary.js';
 import Category from '../models/Category.js';
 import Formulation from '../models/shade/Formulation.js';
 import mongoose from 'mongoose';
+import moment from 'moment-timezone';
 
 export const resolveFormulationId = async (input) => {
     if (!input) return null;
@@ -49,17 +50,19 @@ const addProductController = async (req, res) => {
         let scheduleDate = null;
 
         if (req.body.scheduledAt) {
-            const parsedDate = new Date(req.body.scheduledAt);
+            // Parse user input in IST
+            const parsedDateIST = moment.tz(req.body.scheduledAt, "YYYY-MM-DD HH:mm", "Asia/Kolkata");
 
-            if (isNaN(parsedDate.getTime())) {
-                return res.status(400).json({ message: "❌ Invalid scheduledAt date" });
+            if (!parsedDateIST.isValid()) {
+                return res.status(400).json({ message: "❌ Invalid scheduledAt date format. Use YYYY-MM-DD HH:mm (IST)" });
             }
 
+            const parsedDateUTC = parsedDateIST.toDate(); // convert to UTC JS Date
             const now = new Date();
 
-            if (parsedDate > now) {
+            if (parsedDateUTC > now) {
                 isPublished = false;
-                scheduleDate = parsedDate.toISOString();
+                scheduleDate = parsedDateUTC; // stored in UTC
             } else {
                 isPublished = true;
                 scheduleDate = null;
