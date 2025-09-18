@@ -137,6 +137,22 @@ const makeCloudinaryPdfUploader = (folder, maxFiles) =>
     },
   });
 
+export const uploadProductWithVariants = multer({
+  storage: new CloudinaryStorage({
+    cloudinary,
+    params: {
+      folder: "products",
+      allowed_formats: ["jpg", "jpeg", "png", "webp"],
+      transformation: [{ width: 800, height: 800, crop: "limit", quality: "auto:good" }],
+      resource_type: "image",
+    },
+  }),
+  fileFilter,
+  limits: {
+    fileSize: 500 * 1024, // 500KB each
+    files: 50,            // allow up to 50 total (5 per 10 variants, for example)
+  },
+}).any(); // 👈 accepts any fields like "images", "variantImages_0", "variantImages_12"
 
 
 

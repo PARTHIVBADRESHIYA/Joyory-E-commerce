@@ -1,12 +1,13 @@
 import express from 'express';
-import { addProductController, getAllProducts, getSingleProductById, updateProductStock, updateProductById, deleteProduct ,updateVariantImages} from '../controllers/productController.js';
+import { addProductController, getAllProducts, getSingleProductById, updateProductStock, updateProductById, deleteProduct, updateVariantImages } from '../controllers/productController.js';
 import { verifyAdminOrTeamMember } from '../middlewares/authMiddleware.js';
-import { uploadProduct } from '../middlewares/upload.js';
+import { uploadProduct, uploadProductWithVariants } from '../middlewares/upload.js';
 
 const router = express.Router();
 
 // Admin-only routes
-router.post('/products/add-product', verifyAdminOrTeamMember, uploadProduct.array('images', 5),  // 👈 Accept up to 5 images
+router.post('/products/add-product', verifyAdminOrTeamMember,
+    uploadProductWithVariants,
     addProductController);
 router.get('/products', verifyAdminOrTeamMember, getAllProducts);
 router.get('/products/:id', verifyAdminOrTeamMember, getSingleProductById);

@@ -23,7 +23,6 @@ export const resolveFormulationId = async (input) => {
 
     return formulationDoc._id;
 };
-
 const addProductController = async (req, res) => {
     try {
         const {
@@ -145,7 +144,8 @@ const addProductController = async (req, res) => {
 
         let images = [];
         if (req.files?.length > 0) {
-            images.push(...req.files.map(file => file.secure_url || file.path || file.url));
+            const mainImages = req.files.filter(f => f.fieldname === "images");
+            images.push(...mainImages.map(file => file.secure_url || file.path || file.url));
         }
         if (req.body.images || req.body.imageUrls) {
             let raw = req.body.images || req.body.imageUrls;
@@ -161,7 +161,7 @@ const addProductController = async (req, res) => {
                     }
                 }
             } catch (err) {
-                console.warn("⚠️ Could not upload image URLs:", err.message);
+                console.warn("⚠️ Could not parse image URLs:", err.message);
             }
         }
 
@@ -193,17 +193,23 @@ const addProductController = async (req, res) => {
             }
 
             if (Array.isArray(rawVariants)) {
-                variants = rawVariants.map(v => {
-                    // ✅ Merge uploaded variant images if provided
+                variants = rawVariants.map((v, i) => {
                     let variantImages = [];
-                    if (v.images && Array.isArray(v.images)) {
-                        variantImages = v.images; // image URLs from body
+
+                    // 1️⃣ Uploaded files for this variant (e.g. variantImages_0, variantImages_1…)
+                    if (req.files && req.files.length > 0) {
+                        const filesForVariant = req.files.filter(f => f.fieldname === `variantImages_${i}`);
+                        variantImages.push(...filesForVariant.map(f => f.secure_url || f.path || f.url));
                     }
-                    // also check if frontend uploaded files grouped for variants (optional future handling)
+
+                    // 2️⃣ URLs passed inside body
+                    if (v.images && Array.isArray(v.images)) {
+                        variantImages.push(...v.images);
+                    }
 
                     return {
                         ...v,
-                        images: variantImages.slice(-5), // ⬅️ same rule as updateVariantImages
+                        images: variantImages.slice(-5), // max 5 per variant
                         isActive: v.isActive !== false,
                         createdAt: new Date()
                     };
@@ -279,6 +285,262 @@ const addProductController = async (req, res) => {
         });
     }
 };
+
+// const addProductController = async (req, res) => {
+//     try {
+//         const {
+//             name, variant, summary, description, ingredients, features, howToUse,
+//             price, buyingPrice, brand, category, categories,
+//             quantity, expiryDate, scheduledAt
+//         } = req.body;
+
+//         // ✅ Prevent duplicate product names
+//         const existingProduct = await Product.findOne({ name: name.trim() });
+//         if (existingProduct) {
+//             return res.status(400).json({
+//                 message: `Product with name "${name}" already exists`
+//             });
+//         }
+
+//         // ✅ Ensure at least one category provided
+//         if (!category && (!categories || categories.length === 0)) {
+//             return res.status(400).json({ message: 'Category is required' });
+//         }
+
+//         // ✅ Handle scheduling
+//         let isPublished = true;
+//         let scheduleDate = null;
+
+//         if (req.body.scheduledAt) {
+//             const parsedDate = new Date(req.body.scheduledAt);
+
+//             if (isNaN(parsedDate.getTime())) {
+//                 return res.status(400).json({ message: "❌ Invalid scheduledAt date" });
+//             }
+
+//             const now = new Date();
+
+//             if (parsedDate > now) {
+//                 isPublished = false;
+//                 scheduleDate = parsedDate.toISOString();
+//             } else {
+//                 isPublished = true;
+//                 scheduleDate = null;
+//             }
+//         }
+
+//         // ✅ Normalize categories
+//         let finalCategories = [];
+//         if (categories && categories.length > 0) {
+//             finalCategories = Array.isArray(categories) ? categories : [categories];
+//         } else if (category) {
+//             finalCategories = [category];
+//         }
+
+//         // ✅ Resolve categories to ObjectIds
+//         const resolvedCategories = [];
+//         for (let cat of finalCategories) {
+//             if (!cat) continue;
+//             const trimmedCat = String(cat).trim();
+//             if (mongoose.Types.ObjectId.isValid(trimmedCat)) {
+//                 resolvedCategories.push(trimmedCat);
+//             } else {
+//                 const foundCat = await Category.findOne({
+//                     name: { $regex: `^${trimmedCat}$`, $options: 'i' }
+//                 });
+//                 if (!foundCat) {
+//                     return res.status(400).json({ message: `Category "${trimmedCat}" not found` });
+//                 }
+//                 resolvedCategories.push(foundCat._id);
+//             }
+//         }
+
+//         const foundCategories = await Category.find({ _id: { $in: resolvedCategories } });
+//         if (foundCategories.length !== resolvedCategories.length) {
+//             return res.status(400).json({ message: 'One or more category IDs are invalid' });
+//         }
+
+//         // ✅ Build hierarchy
+//         const buildCategoryHierarchy = async (leafCategoryId) => {
+//             let hierarchy = [];
+//             let current = await Category.findById(leafCategoryId);
+//             while (current) {
+//                 hierarchy.unshift(current._id);
+//                 if (!current.parent) break;
+//                 current = await Category.findById(current.parent);
+//             }
+//             return hierarchy;
+//         };
+//         const categoryHierarchy = await buildCategoryHierarchy(resolvedCategories[0]);
+
+//         // ✅ Helper parseArray
+//         const parseArray = (input) => {
+//             try {
+//                 if (typeof input === 'string') return JSON.parse(input);
+//                 return Array.isArray(input) ? input : [input];
+//             } catch {
+//                 return [input];
+//             }
+//         };
+
+//         const productTags = parseArray(req.body.productTags);
+
+//         // ✅ Numeric checks
+//         const thresholdValue = Number(req.body.thresholdValue);
+//         const parsedPrice = Number(price);
+//         const parsedBuyingPrice = Number(buyingPrice);
+//         const parsedQuantity = Number(quantity);
+
+//         if (isNaN(thresholdValue)) return res.status(400).json({ message: "❌ Invalid thresholdValue" });
+//         if (isNaN(parsedPrice) || isNaN(parsedBuyingPrice) || isNaN(parsedQuantity)) {
+//             return res.status(400).json({ message: "❌ Invalid numeric values" });
+//         }
+
+//         // ✅ Image handling
+//         const uploadImageFromUrl = async (url) => {
+//             const result = await cloudinary.uploader.upload(url, {
+//                 folder: 'products',
+//                 resource_type: 'image',
+//             });
+//             return result.secure_url;
+//         };
+
+//         let images = [];
+//         if (req.files?.length > 0) {
+//             images.push(...req.files.map(file => file.secure_url || file.path || file.url));
+//         }
+//         if (req.body.images || req.body.imageUrls) {
+//             let raw = req.body.images || req.body.imageUrls;
+//             try {
+//                 if (typeof raw === 'string') raw = JSON.parse(raw);
+//                 const urls = Array.isArray(raw) ? raw : [raw];
+//                 for (const url of urls) {
+//                     try {
+//                         const uploaded = await uploadImageFromUrl(url);
+//                         images.push(uploaded);
+//                     } catch (err) {
+//                         console.warn(`❌ Failed to upload image from URL: ${url}`, err.message);
+//                     }
+//                 }
+//             } catch (err) {
+//                 console.warn("⚠️ Could not upload image URLs:", err.message);
+//             }
+//         }
+
+//         // ✅ Resolve formulation
+//         let formulationId = null;
+//         if (req.body.formulation) {
+//             try {
+//                 formulationId = await resolveFormulationId(req.body.formulation);
+//             } catch (err) {
+//                 return res.status(400).json({ message: err.message });
+//             }
+//         }
+
+//         // ✅ variants logic
+//         let variants = [];
+//         let shadeOptions = [];
+//         let colorOptions = [];
+
+//         if (req.body.variants) {
+//             let rawVariants = req.body.variants;
+
+//             if (typeof rawVariants === "string") {
+//                 try {
+//                     rawVariants = JSON.parse(rawVariants);
+//                 } catch (err) {
+//                     console.warn("⚠️ Could not parse variants JSON:", err.message);
+//                     rawVariants = [];
+//                 }
+//             }
+
+//             if (Array.isArray(rawVariants)) {
+//                 variants = rawVariants.map(v => {
+//                     // ✅ Merge uploaded variant images if provided
+//                     let variantImages = [];
+//                     if (v.images && Array.isArray(v.images)) {
+//                         variantImages = v.images; // image URLs from body
+//                     }
+//                     // also check if frontend uploaded files grouped for variants (optional future handling)
+
+//                     return {
+//                         ...v,
+//                         images: variantImages.slice(-5), // ⬅️ same rule as updateVariantImages
+//                         isActive: v.isActive !== false,
+//                         createdAt: new Date()
+//                     };
+//                 });
+
+//                 shadeOptions = variants.map(v => v.shadeName).filter(Boolean);
+//                 colorOptions = variants.map(v => v.hex).filter(Boolean);
+//             }
+//         }
+
+//         // ✅ Stock status
+//         const status =
+//             parsedQuantity === 0 ? 'Out of stock' :
+//                 parsedQuantity < thresholdValue ? 'Low stock' :
+//                     'In-stock';
+
+//         // ✅ Extract dynamic category attributes
+//         let attributes = {};
+//         const mainCategory = foundCategories[0];
+//         if (mainCategory?.attributes?.length > 0) {
+//             for (const attr of mainCategory.attributes) {
+//                 if (req.body[attr.key] !== undefined) {
+//                     attributes[attr.key] = req.body[attr.key];
+//                 }
+//             }
+//         }
+
+//         // ✅ Create product
+//         const product = new Product({
+//             name,
+//             variant,
+//             summary,
+//             description,
+//             ingredients,
+//             features,
+//             howToUse,
+//             formulation: formulationId,
+//             price: parsedPrice,
+//             buyingPrice: parsedBuyingPrice,
+//             quantity: parsedQuantity,
+//             thresholdValue,
+//             expiryDate,
+//             images,
+//             brand,
+//             category: resolvedCategories[0],
+//             categories: resolvedCategories,
+//             categoryHierarchy,
+//             status,
+//             productTags,
+//             shadeOptions,
+//             colorOptions,
+//             variants,
+//             isPublished,
+//             scheduledAt: scheduleDate,
+//             sales: 0,
+//             views: 0,
+//             commentsCount: 0,
+//             affiliateEarnings: 0,
+//             affiliateClicks: 0,
+//             attributes,
+//             seller: req.body.seller || null,
+//         });
+
+//         await product.save();
+//         res.status(201).json({ message: '✅ Product created successfully', product });
+
+//     } catch (error) {
+//         console.error("❌ Product placement error:", util.inspect(error, { showHidden: false, depth: null }));
+//         res.status(500).json({
+//             message: '❌ Product placement failed',
+//             error: error.message || 'Unknown error',
+//             stack: error.stack
+//         });
+//     }
+// };
 
 // GET ALL PRODUCTS (supports nested category filtering)
 const getAllProducts = async (req, res) => {
