@@ -228,7 +228,6 @@ export const getDiscountDashboardAnalytics = async (req, res) => {
         ]);
 
         res.status(200).json({
-            discountIds: allDiscounts.map(d => d._id), // 👈 added
             activeDiscounts: activeDiscounts.length,
             totalUses,
             revenueImpact: revenueImpact[0]?.total || 0,
