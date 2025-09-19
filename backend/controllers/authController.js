@@ -94,6 +94,7 @@ import User from '../models/User.js';
 import Admin from '../models/Admin.js';
 import PendingAdmin from '../models/PendingAdmin.js';
 import Product from '../models/Product.js';
+import ProductViewLog from '../models/ProductViewLog.js';
 import Order from '../models/Order.js';
 import Seller from '../models/sellers/Seller.js';
 import jwt from 'jsonwebtoken';
@@ -267,15 +268,93 @@ const manuallyAddCustomer = async (req, res) => {
     }
 };
 
+
+
 // @desc    Get all users (for admin)
+
+
 const getAllUsers = async (req, res) => {
     try {
-        const users = await User.find({ role: 'user' }).sort({ createdAt: -1 });
-        res.status(200).json(users);
+        // ----------- Filters from query ----------
+        const {
+            search,       // search by name or email
+            minSpent,
+            maxSpent,
+            minOrders,
+            maxOrders,
+            startDate,    // registration start
+            endDate,      // registration end
+            sortBy = 'createdAt', // default sort
+            sortOrder = 'desc',   // asc or desc
+            page = 1,
+            limit = 20
+        } = req.query;
+
+        // Build user query
+        const query = { role: 'user' };
+        if (search) {
+            query.$or = [
+                { name: { $regex: search, $options: 'i' } },
+                { email: { $regex: search, $options: 'i' } }
+            ];
+        }
+        if (startDate || endDate) {
+            query.createdAt = {};
+            if (startDate) query.createdAt.$gte = new Date(startDate);
+            if (endDate) query.createdAt.$lte = new Date(endDate);
+        }
+
+        const users = await User.find(query)
+            .sort({ [sortBy]: sortOrder === 'asc' ? 1 : -1 })
+            .skip((page - 1) * limit)
+            .limit(Number(limit))
+            .select('name email profileImage addresses createdAt');
+
+        // Compute ordersCount and totalSpent per user
+        const userData = await Promise.all(
+            users.map(async (user) => {
+                const orders = await Order.find({
+                    user: user._id,
+                    paymentStatus: 'success',
+                    orderStatus: { $nin: ['Cancelled'] }
+                }).select('amount');
+
+                const totalSpent = orders.reduce((sum, o) => sum + (o.amount || 0), 0);
+
+                return {
+                    id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    profileImage: user.profileImage,
+                    addresses: user.addresses || [],
+                    ordersCount: orders.length,
+                    spent: totalSpent,
+                    createdAt: user.createdAt
+                };
+            })
+        );
+
+        // Apply min/max filters after calculation
+        const filteredData = userData.filter(u => {
+            if (minSpent && u.spent < Number(minSpent)) return false;
+            if (maxSpent && u.spent > Number(maxSpent)) return false;
+            if (minOrders && u.ordersCount < Number(minOrders)) return false;
+            if (maxOrders && u.ordersCount > Number(maxOrders)) return false;
+            return true;
+        });
+
+        return res.status(200).json({
+            page: Number(page),
+            limit: Number(limit),
+            total: filteredData.length,
+            users: filteredData
+        });
+
     } catch (err) {
-        res.status(500).json({ message: 'Failed to fetch users', error: err.message });
+        return res.status(500).json({ message: 'Failed to fetch users', error: err.message });
     }
 };
+
 
 // @desc    Get user by ID (for admin)
 const getUserById = async (req, res) => {
@@ -376,38 +455,106 @@ const getUserAnalytics = async (req, res) => {
 };
 
 // ✅ Full customer analytics (for admin dashboard)
+// const getFullCustomerAnalytics = async (req, res) => {
+//     try {
+//         const [totalCustomers, incomeAgg, monthlySpend, refundOrders] = await Promise.all([
+
+//             // Total customers
+//             User.countDocuments({ role: "user" }),
+
+//             // Total income (Delivered + Completed orders)
+//             Order.aggregate([
+//                 { $match: { status: { $in: ["Delivered", "Completed"] } } },
+//                 { $group: { _id: null, total: { $sum: "$amount" } } }
+//             ]),
+
+//             // Monthly spend
+//             Order.aggregate([
+//                 { $match: { status: { $in: ["Delivered", "Completed"] } } },
+//                 {
+//                     $group: {
+//                         _id: {
+//                             year: { $year: "$createdAt" },
+//                             month: { $month: "$createdAt" }
+//                         },
+//                         totalSpend: { $sum: "$amount" },
+//                         orders: { $sum: 1 }
+//                     }
+//                 },
+//                 { $sort: { "_id.year": 1, "_id.month": 1 } }
+//             ]),
+
+//             // Refunds
+//             Order.find({ "refund.isRefunded": true }, { refund: 1 })
+//         ]);
+
+//         // Refund calculations
+//         const refundCount = refundOrders.length;
+//         const totalRefundAmount = refundOrders.reduce(
+//             (sum, order) => sum + (order.refund?.refundAmount || 0),
+//             0
+//         );
+
+//         res.status(200).json({
+//             totalCustomers,
+//             totalIncome: incomeAgg.length ? incomeAgg[0].total : 0,
+//             monthlySpend,
+//             refundCount,
+//             totalRefundAmount
+//         });
+
+//     } catch (err) {
+//         console.error("🔥 Error in getFullCustomerAnalytics:", err);
+//         res.status(500).json({ error: err.message });
+//     }
+// };
+
+
 const getFullCustomerAnalytics = async (req, res) => {
     try {
-        const [totalCustomers, incomeAgg, monthlySpend, refundOrders] = await Promise.all([
+        // Parallel fetching
+        const [totalCustomers, incomeAgg, monthlySpend, refundOrders, productViews] =
+            await Promise.all([
+                // Total customers
+                User.countDocuments({ role: 'user' }),
 
-            // Total customers
-            User.countDocuments({ role: "user" }),
+                // Total income from delivered/completed orders
+                Order.aggregate([
+                    { $match: { orderStatus: { $in: ['Delivered', 'Completed'] } } },
+                    { $group: { _id: null, total: { $sum: '$amount' } } }
+                ]),
 
-            // Total income (Delivered + Completed orders)
-            Order.aggregate([
-                { $match: { status: { $in: ["Delivered", "Completed"] } } },
-                { $group: { _id: null, total: { $sum: "$amount" } } }
-            ]),
+                // Monthly spend aggregation
+                Order.aggregate([
+                    { $match: { orderStatus: { $in: ['Delivered', 'Completed'] } } },
+                    {
+                        $group: {
+                            _id: {
+                                year: { $year: '$createdAt' },
+                                month: { $month: '$createdAt' }
+                            },
+                            totalSpend: { $sum: '$amount' },
+                            ordersCount: { $sum: 1 }
+                        }
+                    },
+                    { $sort: { '_id.year': 1, '_id.month': 1 } }
+                ]),
 
-            // Monthly spend
-            Order.aggregate([
-                { $match: { status: { $in: ["Delivered", "Completed"] } } },
-                {
-                    $group: {
-                        _id: {
-                            year: { $year: "$createdAt" },
-                            month: { $month: "$createdAt" }
-                        },
-                        totalSpend: { $sum: "$amount" },
-                        orders: { $sum: 1 }
-                    }
-                },
-                { $sort: { "_id.year": 1, "_id.month": 1 } }
-            ]),
+                // Refunds
+                Order.find({ 'refund.isRefunded': true }, { refund: 1 }),
 
-            // Refunds
-            Order.find({ "refund.isRefunded": true }, { refund: 1 })
-        ]);
+                // Product views
+                ProductViewLog.aggregate([
+                    {
+                        $group: {
+                            _id: '$product',
+                            views: { $sum: 1 }
+                        }
+                    },
+                    { $sort: { views: -1 } },
+                    { $limit: 10 } // top 10 products
+                ])
+            ]);
 
         // Refund calculations
         const refundCount = refundOrders.length;
@@ -416,20 +563,36 @@ const getFullCustomerAnalytics = async (req, res) => {
             0
         );
 
+        // Income
+        const totalIncome = incomeAgg.length ? incomeAgg[0].total : 0;
+
+        // Monthly spend mapping for chart
+        const monthlyData = monthlySpend.map(m => ({
+            month: `${m._id.year}-${m._id.month}`,
+            totalSpend: m.totalSpend,
+            ordersCount: m.ordersCount
+        }));
+
+        // Top product views
+        const topProducts = productViews.map(v => ({
+            productId: v._id,
+            views: v.views
+        }));
+
         res.status(200).json({
             totalCustomers,
-            totalIncome: incomeAgg.length ? incomeAgg[0].total : 0,
-            monthlySpend,
+            totalIncome,
+            monthlyData,
             refundCount,
-            totalRefundAmount
+            totalRefundAmount,
+            topProducts
         });
 
     } catch (err) {
-        console.error("🔥 Error in getFullCustomerAnalytics:", err);
+        console.error('🔥 Error in getFullCustomerAnalytics:', err);
         res.status(500).json({ error: err.message });
     }
 };
-
 
 export const listSellers = async (req, res) => {
     const q = {};

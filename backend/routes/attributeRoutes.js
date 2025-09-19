@@ -11,3 +11,4 @@ router.put('/:id', isAdmin, updateAttribute);
 router.get("/category/:category", getAttributesByCategory);
 
 export default router;
+    

@@ -2,7 +2,7 @@ import util from 'util';
 import Product from '../models/Product.js';
 import cloudinary from '../middlewares/utils/cloudinary.js';
 import Category from '../models/Category.js';
-import Formulation from '../models/shade/Formulation.js';
+import Formulation from '../models/shade/Formulation.js'; 
 import mongoose from 'mongoose';
 import moment from 'moment-timezone';
 

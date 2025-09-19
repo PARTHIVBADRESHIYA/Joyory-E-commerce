@@ -397,9 +397,6 @@ const updatePromotion = async (req, res) => {
   }
 };
 
-
-
-
 // ✅ Delete Promotion
 const deletePromotion = async (req, res) => {
   try {

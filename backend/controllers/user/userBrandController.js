@@ -1,12 +1,9 @@
-
 // // controllers/user/userBrandController.js
 // import Product from "../../models/Product.js";
 // import Category from "../../models/Category.js";
 // import Brand from "../../models/Brand.js";
 // import Promotion from "../../models/Promotion.js";
 // import mongoose from "mongoose";
-// // Assuming slugToRegex is a valid utility, keeping it for robustness,
-// // but the main logic is now simplified.
 // import { slugToRegex } from "../../middlewares/utils/slug.js";
 
 
@@ -47,6 +44,7 @@
 //     }).lean();
 // }
 
+
 // /**
 //  * GET /api/brands
 //  * Returns all active brands with product counts
@@ -58,8 +56,6 @@
 //             .sort({ name: 1 })
 //             .lean();
 
-//         // Simplified aggregation to count products for each brand
-//         // It now relies on the brand's ObjectId, as your migration ensures consistency.
 //         const counts = await Product.aggregate([
 //             {
 //                 $match: {
@@ -86,61 +82,66 @@
 //     }
 // };
 
+
+// /**
+//  * GET /api/brands/:brandSlug/:categorySlug
+//  * Brand + Category specific products (with promo pricing + pagination)
+//  */
 // export const getBrandCategoryProducts = async (req, res) => {
 //     try {
 //         const { brandSlug, categorySlug } = req.params;
 //         const page = parseInt(req.query.page) || 1;
 //         const perPage = parseInt(req.query.limit) || 12;
 
-//         // 1. Find brand
 //         const brand = await Brand.findOne({ slug: brandSlug, isActive: true }).lean();
 //         if (!brand) return res.status(404).json({ message: "Brand not found" });
 
-//         // 2. Find category
 //         const category = await Category.findOne({ slug: categorySlug, isActive: true }).lean();
 //         if (!category) return res.status(404).json({ message: "Category not found" });
 
-//         // 3. Count total products
 //         const total = await Product.countDocuments({ brand: brand._id, category: category._id });
 
-//         // 4. Fetch paginated products
 //         const products = await Product.find({ brand: brand._id, category: category._id })
-//             .select("_id name slug price mrp images summary description avgRating totalRatings status colorOptions shadeOptions commentsCount category brand")
+//             .select("_id name slug price mrp images summary description avgRating totalRatings status colorOptions shadeOptions commentsCount category brand variant")
 //             .populate("category", "name slug")
 //             .populate("brand", "name logo")
 //             .skip((page - 1) * perPage)
 //             .limit(perPage)
 //             .lean();
 
-//         // 5. Build categoryMap for safety
 //         const categoryMap = new Map();
 //         categoryMap.set(String(category._id), { _id: category._id, name: category.name, slug: category.slug });
 
-//         // 6. Map into cards format
-//         const cards = products.map(p => ({
-//             _id: p._id,
-//             name: p.name,
-//             variant: p.variant,
-//             price: p.price,
-//             brand: p.brand ? { name: p.brand.name, logo: p.brand.logo } : null,
-//             category: mongoose.Types.ObjectId.isValid(p.category?._id)
-//                 ? categoryMap.get(String(p.category._id)) || null
-//                 : null,
-//             summary: p.summary || p.description?.slice(0, 100) || '',
-//             status: p.status,
-//             image: p.images?.length > 0
-//                 ? (p.images[0].startsWith('http') ? p.images[0] : `${process.env.BASE_URL}/${p.images[0]}`)
-//                 : null,
-//             colorOptions: p.colorOptions || [],
-//             shadeOptions: p.shadeOptions || [],
-//             commentsCount: p.commentsCount || 0,
-//             avgRating: p.avgRating || 0
+//         const cards = await Promise.all(products.map(async (p) => {
+//             const promo = await getActivePromoForProduct(p);
+//             const pricing = applyPromoPrice(promo, p);
+
+//             return {
+//                 _id: p._id,
+//                 name: p.name,
+//                 variant: p.variant,
+//                 price: pricing.price,
+//                 mrp: pricing.mrp,
+//                 discount: pricing.discount,
+//                 discountPercent: pricing.discountPercent,
+//                 brand: p.brand ? { name: p.brand.name, logo: p.brand.logo } : null,
+//                 category: mongoose.Types.ObjectId.isValid(p.category?._id)
+//                     ? categoryMap.get(String(p.category._id)) || null
+//                     : null,
+//                 summary: p.summary || p.description?.slice(0, 100) || '',
+//                 status: p.status,
+//                 image: p.images?.length > 0
+//                     ? (p.images[0].startsWith('http') ? p.images[0] : `${process.env.BASE_URL}/${p.images[0]}`)
+//                     : null,
+//                 colorOptions: p.colorOptions || [],
+//                 shadeOptions: p.shadeOptions || [],
+//                 commentsCount: p.commentsCount || 0,
+//                 avgRating: p.avgRating || 0
+//             };
 //         }));
 
-//         // 7. Pagination meta
 //         const totalPages = Math.ceil(total / perPage);
 
-//         // 8. Final response
 //         res.status(200).json({
 //             brand: { name: brand.name, logo: brand.logo },
 //             category: { _id: category._id, name: category.name, slug: category.slug },
@@ -163,26 +164,26 @@
 // };
 
 
-
+// /**
+//  * GET /api/brands/:brandSlug
+//  * Brand Landing Page (with promo pricing + pagination)
+//  */
 // export const getBrandLanding = async (req, res) => {
 //     try {
 //         const { brandSlug } = req.params;
 //         const page = parseInt(req.query.page) || 1;
 //         const perPage = parseInt(req.query.limit) || 10;
 
-//         // 1. Find brand by slug
 //         const brand = await Brand.findOne({ slug: brandSlug, isActive: true })
-//             .select("banner")
+//             .select("banner name logo")
 //             .lean();
 
 //         if (!brand) {
 //             return res.status(404).json({ message: "Brand not found" });
 //         }
 
-//         // 2. Count products for pagination
 //         const total = await Product.countDocuments({ brand: brand._id });
 
-//         // 3. Fetch paginated products
 //         const rawProducts = await Product.find({ brand: brand._id })
 //             .select("_id name slug price mrp images summary description avgRating totalRatings category brand variant status colorOptions shadeOptions commentsCount")
 //             .populate("category", "name slug")
@@ -191,7 +192,6 @@
 //             .limit(perPage)
 //             .lean();
 
-//         // 4. Build category map for safe lookup
 //         const categoryMap = new Map();
 //         rawProducts.forEach(p => {
 //             if (p.category && mongoose.Types.ObjectId.isValid(p.category._id)) {
@@ -203,34 +203,39 @@
 //             }
 //         });
 
-//         // 5. Transform products into cards
-//         const cards = rawProducts.map(p => ({
-//             _id: p._id,
-//             name: p.name,
-//             variant: p.variant,
-//             price: p.price,
-//             brand: p.brand ? { _id: p.brand._id, name: p.brand.name, logo: p.brand.logo } : null,
-//             category: mongoose.Types.ObjectId.isValid(p.category?._id)
-//                 ? categoryMap.get(String(p.category._id)) || null
-//                 : null,
-//             summary: p.summary || p.description?.slice(0, 100) || '',
-//             status: p.status,
-//             image: p.images?.length > 0
-//                 ? (p.images[0].startsWith('http') ? p.images[0] : `${process.env.BASE_URL}/${p.images[0]}`)
-//                 : null,
-//             colorOptions: p.colorOptions || [],
-//             shadeOptions: p.shadeOptions || [],
-//             commentsCount: p.commentsCount || 0,
-//             avgRating: p.avgRating || 0
+//         const cards = await Promise.all(rawProducts.map(async (p) => {
+//             const promo = await getActivePromoForProduct(p);
+//             const pricing = applyPromoPrice(promo, p);
+
+//             return {
+//                 _id: p._id,
+//                 name: p.name,
+//                 variant: p.variant,
+//                 price: pricing.price,
+//                 mrp: pricing.mrp,
+//                 discount: pricing.discount,
+//                 discountPercent: pricing.discountPercent,
+//                 brand: p.brand ? { _id: p.brand._id, name: p.brand.name, logo: p.brand.logo } : null,
+//                 category: mongoose.Types.ObjectId.isValid(p.category?._id)
+//                     ? categoryMap.get(String(p.category._id)) || null
+//                     : null,
+//                 summary: p.summary || p.description?.slice(0, 100) || '',
+//                 status: p.status,
+//                 image: p.images?.length > 0
+//                     ? (p.images[0].startsWith('http') ? p.images[0] : `${process.env.BASE_URL}/${p.images[0]}`)
+//                     : null,
+//                 colorOptions: p.colorOptions || [],
+//                 shadeOptions: p.shadeOptions || [],
+//                 commentsCount: p.commentsCount || 0,
+//                 avgRating: p.avgRating || 0
+//             };
 //         }));
 
-//         // 6. Fetch unique categories
 //         const uniqueCategoryIds = await Product.distinct("category", { brand: brand._id });
 //         const categories = await Category.find({ _id: { $in: uniqueCategoryIds }, isActive: true })
 //             .select("name slug")
 //             .lean();
 
-//         // 7. Related products if less than 5
 //         let relatedProducts = [];
 //         if (cards.length < 5 && uniqueCategoryIds.length > 0) {
 //             const rawRelated = await Product.find({
@@ -243,28 +248,35 @@
 //                 .limit(10)
 //                 .lean();
 
-//             relatedProducts = rawRelated.map(p => ({
-//                 _id: p._id,
-//                 name: p.name,
-//                 variant: p.variant,
-//                 price: p.price,
-//                 brand: p.brand ? { _id: p.brand._id, name: p.brand.name, logo: p.brand.logo } : null,
-//                 category: mongoose.Types.ObjectId.isValid(p.category?._id)
-//                     ? { _id: p.category._id, name: p.category.name, slug: p.category.slug }
-//                     : null,
-//                 summary: p.summary || p.description?.slice(0, 100) || '',
-//                 status: p.status,
-//                 image: p.images?.length > 0
-//                     ? (p.images[0].startsWith('http') ? p.images[0] : `${process.env.BASE_URL}/${p.images[0]}`)
-//                     : null,
-//                 colorOptions: p.colorOptions || [],
-//                 shadeOptions: p.shadeOptions || [],
-//                 commentsCount: p.commentsCount || 0,
-//                 avgRating: p.avgRating || 0
+//             relatedProducts = await Promise.all(rawRelated.map(async (p) => {
+//                 const promo = await getActivePromoForProduct(p);
+//                 const pricing = applyPromoPrice(promo, p);
+
+//                 return {
+//                     _id: p._id,
+//                     name: p.name,
+//                     variant: p.variant,
+//                     price: pricing.price,
+//                     mrp: pricing.mrp,
+//                     discount: pricing.discount,
+//                     discountPercent: pricing.discountPercent,
+//                     brand: p.brand ? { _id: p.brand._id, name: p.brand.name, logo: p.brand.logo } : null,
+//                     category: mongoose.Types.ObjectId.isValid(p.category?._id)
+//                         ? { _id: p.category._id, name: p.category.name, slug: p.category.slug }
+//                         : null,
+//                     summary: p.summary || p.description?.slice(0, 100) || '',
+//                     status: p.status,
+//                     image: p.images?.length > 0
+//                         ? (p.images[0].startsWith('http') ? p.images[0] : `${process.env.BASE_URL}/${p.images[0]}`)
+//                         : null,
+//                     colorOptions: p.colorOptions || [],
+//                     shadeOptions: p.shadeOptions || [],
+//                     commentsCount: p.commentsCount || 0,
+//                     avgRating: p.avgRating || 0
+//                 };
 //             }));
 //         }
 
-//         // 8. Pagination metadata
 //         const totalPages = Math.ceil(total / perPage);
 
 //         res.status(200).json({
@@ -287,12 +299,6 @@
 //         });
 //     }
 // };
-
-
-
-
-
-
 
 
 
@@ -374,7 +380,8 @@ export const getAllBrands = async (req, res) => {
         const counts = await Product.aggregate([
             {
                 $match: {
-                    brand: { $in: brands.map(b => b._id) }
+                    brand: { $in: brands.map(b => b._id) },
+                    isPublished: true
                 }
             },
             { $group: { _id: "$brand", count: { $sum: 1 } } }
@@ -414,9 +421,17 @@ export const getBrandCategoryProducts = async (req, res) => {
         const category = await Category.findOne({ slug: categorySlug, isActive: true }).lean();
         if (!category) return res.status(404).json({ message: "Category not found" });
 
-        const total = await Product.countDocuments({ brand: brand._id, category: category._id });
+        const total = await Product.countDocuments({
+            brand: brand._id,
+            category: category._id,
+            isPublished: true
+        });
 
-        const products = await Product.find({ brand: brand._id, category: category._id })
+        const products = await Product.find({
+            brand: brand._id,
+            category: category._id,
+            isPublished: true
+        })
             .select("_id name slug price mrp images summary description avgRating totalRatings status colorOptions shadeOptions commentsCount category brand variant")
             .populate("category", "name slug")
             .populate("brand", "name logo")
@@ -497,9 +512,9 @@ export const getBrandLanding = async (req, res) => {
             return res.status(404).json({ message: "Brand not found" });
         }
 
-        const total = await Product.countDocuments({ brand: brand._id });
+        const total = await Product.countDocuments({ brand: brand._id, isPublished: true });
 
-        const rawProducts = await Product.find({ brand: brand._id })
+        const rawProducts = await Product.find({ brand: brand._id, isPublished: true })
             .select("_id name slug price mrp images summary description avgRating totalRatings category brand variant status colorOptions shadeOptions commentsCount")
             .populate("category", "name slug")
             .populate("brand", "name logo")
@@ -546,7 +561,7 @@ export const getBrandLanding = async (req, res) => {
             };
         }));
 
-        const uniqueCategoryIds = await Product.distinct("category", { brand: brand._id });
+        const uniqueCategoryIds = await Product.distinct("category", { brand: brand._id, isPublished: true });
         const categories = await Category.find({ _id: { $in: uniqueCategoryIds }, isActive: true })
             .select("name slug")
             .lean();
@@ -555,7 +570,8 @@ export const getBrandLanding = async (req, res) => {
         if (cards.length < 5 && uniqueCategoryIds.length > 0) {
             const rawRelated = await Product.find({
                 category: { $in: uniqueCategoryIds },
-                brand: { $ne: brand._id }
+                brand: { $ne: brand._id },
+                isPublished: true
             })
                 .select("_id name slug price mrp images summary description avgRating totalRatings category brand variant status colorOptions shadeOptions commentsCount")
                 .populate("category", "name slug")

@@ -16,20 +16,20 @@ cron.schedule("* * * * *", async () => {
         // });
 
         if (products.length > 0) {
-            console.log("⏰ Found products to publish:", products.map(p => ({
-                name: p.name,
-                scheduledAt: p.scheduledAt,
-                now
-            })));
+            // console.log("⏰ Found products to publish:", products.map(p => ({
+            //     name: p.name,
+            //     scheduledAt: p.scheduledAt,
+            //     now
+            // })));
 
             const result = await Product.updateMany(
                 { isPublished: false, scheduledAt: { $lte: now } },
                 { $set: { isPublished: true, scheduledAt: null } }
             );
 
-            console.log(`✅ Published ${result.modifiedCount} scheduled products`);
+            // console.log(`✅ Published ${result.modifiedCount} scheduled products`);
         } else {
-            console.log("⚠️ No products to publish this minute.");
+            // console.log("⚠️ No products to publish this minute.");
         }
     } catch (err) {
         console.error("❌ Error in scheduler:", err);

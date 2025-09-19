@@ -161,6 +161,9 @@ export const getActivePromotionsForUsers = async (req, res) => {
                 discountLabel = `Free Shipping over ₹${p.promotionConfig?.minOrderValue || 0}`;
             }
 
+            // ✅ Add isScheduled flag
+            const isScheduled = p.startDate > now;
+
             return {
                 _id: p._id,
                 title: p.campaignName,
@@ -172,6 +175,7 @@ export const getActivePromotionsForUsers = async (req, res) => {
                 discountPercent,
                 discountAmount,
                 discountLabel,
+                isScheduled, // 👈 added here
                 countdown: getCountdown(p.endDate),
                 promoMeta: {
                     categories: (p.categories || []).map((c) => ({
