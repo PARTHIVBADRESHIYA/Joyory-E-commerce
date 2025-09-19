@@ -22,7 +22,6 @@ import {
     changeSellerStatus
 } from './../controllers/authController.js';
 
-import { addProductController } from './../controllers/productController.js';
 
 const router = express.Router();
 
@@ -40,9 +39,8 @@ router.get('/users/:id', verifyAdminOrTeamMember, getUserById);
 router.put('/users/:id', verifyAdminOrTeamMember, updateUserByAdmin);
 router.delete('/users/:id', verifyAdminOrTeamMember, deleteUser);
 
-// ✅ Customers & Products
+// ✅ Customers
 router.post('/add-customer', verifyAdminOrTeamMember, manuallyAddCustomer);
-router.post('/add-product', verifyAdminOrTeamMember, addProductController);
 
 // ✅ Sellers
 router.get('/sellers', verifyAdminOrTeamMember, listSellers);

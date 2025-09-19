@@ -280,9 +280,11 @@ const getPromotionById = async (req, res) => {
     }
 
     res.status(200).json({
+      id: promotion._id, // ✅ MongoDB ObjectId as `id`
       _id: promotion._id,
-      name: promotion.campaignName,
-      type: promotion.promotionType,
+      campaignName: promotion.campaignName,
+      description: promotion.description,
+      promotionType: promotion.promotionType,
       status: promotion.status,
       startDate: promotion.startDate,
       endDate: promotion.endDate,
@@ -299,9 +301,19 @@ const getPromotionById = async (req, res) => {
         name: c.category?.name,
       })),
       promotionConfig: promotion.promotionConfig,
-      countdown: promotion.countdown,
       isScheduled: promotion.isScheduled,
+      discountUnit: promotion.discountUnit,
+      discountValue: promotion.discountValue,
+      tags: promotion.tags || [],
+      scope: promotion.scope,
+      products: promotion.products || [],
+      promoCodes: promotion.promoCodes || [],
+      conversions: promotion.conversions,
+      countdown: promotion.countdown,
+      createdAt: promotion.createdAt,
+      updatedAt: promotion.updatedAt,
     });
+
   } catch (err) {
     res.status(500).json({
       message: "Failed to fetch promotion",

@@ -821,7 +821,6 @@ import connectDB from "./config/db.js";
 import cron from "node-cron";
 import "./middlewares/utils/cron/scheduler.js";
 import "./middlewares/utils/cron/promotionScheduler.js";
-import { autoSendScheduledCampaigns } from "./middlewares/utils/cron/autoSendCampaigns.js";
 import { startTrackingJob } from "./middlewares/utils/cron/shiprocketTrackingJob.js";
 import "./middlewares/utils/cron/autoPayout.js";
 
@@ -906,13 +905,6 @@ app.use(
 
 // 🔹 Body Parser AFTER webhook
 app.use(express.json({ limit: "1mb" }));
-
-// ================= CRON JOBS =================
-function initializeCronJobs() {
-    startTrackingJob();
-    cron.schedule("*/10 * * * *", autoSendScheduledCampaigns);
-}
-initializeCronJobs();
 
 // ================= SOCKET.IO =================
 const server = http.createServer(app);

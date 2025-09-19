@@ -3,17 +3,17 @@ import Product from "../../../models/Product.js";
 
 cron.schedule("* * * * *", async () => {
     const now = new Date();
-    console.log("⏰ Cron job triggered at:", now.toISOString(), "| Local:", now.toLocaleString());
+    // console.log("⏰ Cron job triggered at:", now.toISOString(), "| Local:", now.toLocaleString());
     try {
         const products = await Product.find({
             isPublished: false,
             scheduledAt: { $lte: now }
         });
 
-        console.log("🔍 Scheduler check:", {
-            now,
-            totalChecked: products.length
-        });
+        // console.log("🔍 Scheduler check:", {
+        //     now,
+        //     totalChecked: products.length
+        // });
 
         if (products.length > 0) {
             console.log("⏰ Found products to publish:", products.map(p => ({

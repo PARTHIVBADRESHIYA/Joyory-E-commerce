@@ -4,7 +4,7 @@ import Promotion from "../../../models/Promotion.js";
 
 cron.schedule("* * * * *", async () => {
     const now = new Date();
-    console.log("⏰ Promotion scheduler running:", now.toISOString());
+    // console.log("⏰ Promotion scheduler running:", now.toISOString());
 
     try {
         const promotions = await Promotion.find({ isScheduled: true });
