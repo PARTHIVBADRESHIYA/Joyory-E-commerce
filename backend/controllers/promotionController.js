@@ -252,7 +252,12 @@ const createPromotion = async (req, res) => {
       isScheduled,
     });
 
-    res.status(201).json({ message: "✅ Promotion created", promotion });
+    res.status(201).json({
+      message: "✅ Promotion created",
+      id: promotion._id,  // ✅ added
+      promotion
+    });
+
   } catch (err) {
     res.status(400).json({
       message: "❌ Failed to create promotion",
@@ -262,6 +267,49 @@ const createPromotion = async (req, res) => {
 };
 // ✅ Simplified Update Promotion
 // controllers/admin/promotionController.js
+// ✅ Get Promotion by ID
+const getPromotionById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const promotion = await Promotion.findById(id)
+      .populate("categories.category brands.brand", "name slug");
+
+    if (!promotion) {
+      return res.status(404).json({ message: "Promotion not found" });
+    }
+
+    res.status(200).json({
+      _id: promotion._id,
+      name: promotion.campaignName,
+      type: promotion.promotionType,
+      status: promotion.status,
+      startDate: promotion.startDate,
+      endDate: promotion.endDate,
+      targetAudience: promotion.targetAudience,
+      images: promotion.images || [],
+      brands: promotion.brands.map((b) => ({
+        id: b.brand?._id,
+        slug: b.slug || b.brand?.slug,
+        name: b.brand?.name,
+      })),
+      categories: promotion.categories.map((c) => ({
+        id: c.category?._id,
+        slug: c.slug || c.category?.slug,
+        name: c.category?.name,
+      })),
+      promotionConfig: promotion.promotionConfig,
+      countdown: promotion.countdown,
+      isScheduled: promotion.isScheduled,
+    });
+  } catch (err) {
+    res.status(500).json({
+      message: "Failed to fetch promotion",
+      error: err.message,
+    });
+  }
+};
+
 
 const updatePromotion = async (req, res) => {
   try {
@@ -325,7 +373,11 @@ const updatePromotion = async (req, res) => {
       runValidators: true,
     });
 
-    res.status(200).json({ message: "Promotion updated", promotion });
+    res.status(200).json({
+      message: "Promotion updated",
+      id: promotion._id,  // ✅ added
+      promotion
+    });
   } catch (err) {
     res
       .status(400)
@@ -343,7 +395,10 @@ const deletePromotion = async (req, res) => {
     const promotion = await Promotion.findByIdAndDelete(id);
     if (!promotion)
       return res.status(404).json({ message: "Promotion not found" });
-    res.status(200).json({ message: "Promotion deleted successfully" });
+    res.status(200).json({
+      message: "Promotion deleted successfully",
+      id: promotion._id  // ✅ added
+    });
   } catch (err) {
     res
       .status(500)
@@ -364,13 +419,12 @@ const getPromotionSummary = async (req, res) => {
       .populate("categories.category brands.brand", "name slug");
 
     const summary = promotions.map((p) => ({
+      id: p._id,  // ✅ added
       name: p.campaignName,
       audience: p.targetAudience,
       status: p.status,
       type: p.promotionType,
-      duration: `${p.startDate.toISOString().split("T")[0]} to ${p.endDate
-        .toISOString()
-        .split("T")[0]}`,
+      duration: `${p.startDate.toISOString().split("T")[0]} to ${p.endDate.toISOString().split("T")[0]}`,
       images: p.images || [],
       brands: p.brands.map((b) => ({
         id: b.brand?._id,
@@ -384,7 +438,6 @@ const getPromotionSummary = async (req, res) => {
       })),
       countdown: p.countdown,
     }));
-
     res.status(200).json(summary);
   } catch (err) {
     res
@@ -403,7 +456,7 @@ const getPromotionList = async (req, res) => {
       .populate("categories.category brands.brand", "name slug");
 
     const list = promotions.map((p) => ({
-      id: p._id,
+      id: p._id,  // ✅ added
       name: p.campaignName,
       type: p.promotionType,
       startDate: p.startDate.toISOString().split("T")[0],
@@ -423,6 +476,8 @@ const getPromotionList = async (req, res) => {
       })),
       countdown: p.countdown,
     }));
+    res.status(200).json(list);
+
 
     res.status(200).json(list);
   } catch (err) {
@@ -434,8 +489,10 @@ const getPromotionList = async (req, res) => {
 
 export {
   createPromotion,
+  getPromotionById,
   updatePromotion,
   deletePromotion,
   getPromotionSummary,
   getPromotionList,
+
 };
