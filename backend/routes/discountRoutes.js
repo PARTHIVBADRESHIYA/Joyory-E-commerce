@@ -4,7 +4,8 @@ import {
     getAllDiscounts,
     updateDiscount,
     deleteDiscount,
-    getDiscountDashboardAnalytics
+    getDiscountDashboardAnalytics,
+    getDiscountById
 } from '../controllers/discountController.js';
 
 import { verifyAdminOrTeamMember } from '../middlewares/authMiddleware.js';
@@ -14,6 +15,7 @@ const router = express.Router();
 
 // 🔐 Admins Only (Create, Update, Delete)
 router.post('/', verifyAdminOrTeamMember, createDiscount);
+router.get('/:id', verifyAdminOrTeamMember, getDiscountById);
 router.put('/:id', verifyAdminOrTeamMember, updateDiscount);
 router.delete('/:id', verifyAdminOrTeamMember, deleteDiscount);
 

@@ -240,3 +240,45 @@ export const getDiscountDashboardAnalytics = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
+
+
+
+// Get discount by ID (full details)
+export const getDiscountById = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const discount = await Discount.findById(id);
+        if (!discount) {
+            return res.status(404).json({ message: "Discount not found" });
+        }
+
+        // build response with clean structure
+        res.status(200).json({
+            _id: discount._id,
+            name: discount.name,
+            code: discount.code,
+            status: discount.status,
+            type: discount.type,
+            value: discount.value,
+            eligibility: discount.eligibility,
+            startDate: discount.startDate,
+            endDate: discount.endDate,
+            totalLimit: discount.totalLimit,
+            perCustomerLimit: discount.perCustomerLimit,
+            usageCount: discount.usageCount || 0,
+            appliesTo: discount.appliesTo,
+            productIds: discount.productIds,
+            collectionIds: discount.collectionIds,
+            minimumOrderAmount: discount.minimumOrderAmount,
+            createdBy: discount.createdBy,
+            createdAt: discount.createdAt,
+            updatedAt: discount.updatedAt
+        });
+    } catch (err) {
+        res.status(500).json({
+            message: "Error fetching discount details",
+            error: err.message
+        });
+    }
+};
