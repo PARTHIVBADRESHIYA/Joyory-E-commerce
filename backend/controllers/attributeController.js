@@ -1,6 +1,7 @@
 // // controllers/attributeController.js
 // import ProductAttribute from '../models/ProductAttribute.js';
 
+// /* ---------- CREATE ---------- */
 // export const createAttribute = async (req, res) => {
 //     const { name, type, options, categories } = req.body;
 
@@ -9,47 +10,66 @@
 //     }
 
 //     const attribute = await ProductAttribute.create({
-//         name, type, options, categories
+//         name,
+//         type,
+//         options,
+//         categories,
+//         status: "Active", // ✅ default status
 //     });
 
-//     // ✅ Populate category names in response
 //     await attribute.populate("categories", "name");
 
-//     res.status(201).json({ message: 'Attribute created', attribute });
+//     res.status(201).json({ message: "Attribute created", attribute });
 // };
 
+// /* ---------- GET ALL (Active + Inactive) ---------- */
 // export const getAllAttributes = async (req, res) => {
 //     const { category } = req.query;
 
-//     let query = { status: 'Active' };
+//     const query = {}; // ✅ no status filter, fetch everything
 //     if (category) {
-//         query.categories = category; // category id
+//         query.categories = category;
 //     }
 
 //     const attributes = await ProductAttribute.find(query)
-//         .populate("categories", "name"); // ✅ only show category name
+//         .populate("categories", "name")
+//         .sort({ createdAt: -1 });
 
 //     res.json(attributes);
 // };
 
+// /* ---------- UPDATE ---------- */
 // export const updateAttribute = async (req, res) => {
 //     const { id } = req.params;
 //     const { name, type, options, status, categories } = req.body;
 
-//     const updated = await ProductAttribute.findByIdAndUpdate(id, {
-//         name, type, options, status, categories
-//     }, { new: true });
+//     const updated = await ProductAttribute.findByIdAndUpdate(
+//         id,
+//         { name, type, options, status, categories },
+//         { new: true }
+//     ).populate("categories", "name");
 
-//     res.json({ message: 'Updated', updated });
+//     if (!updated) {
+//         return res.status(404).json({ message: "Attribute not found" });
+//     }
+
+//     res.json({ message: "Updated", updated });
 // };
 
+// /* ---------- HARD DELETE (Permanent) ---------- */
 // export const deleteAttribute = async (req, res) => {
 //     const { id } = req.params;
+
 //     const deleted = await ProductAttribute.findByIdAndDelete(id);
-//     res.json({ message: 'Deleted', deleted });
+
+//     if (!deleted) {
+//         return res.status(404).json({ message: "Attribute not found" });
+//     }
+
+//     res.json({ message: "Deleted permanently", deleted });
 // };
 
-
+// /* ---------- GET BY CATEGORY (Active only) ---------- */
 // export const getAttributesByCategory = async (req, res) => {
 //     const { category } = req.params;
 //     if (!category) {
@@ -58,7 +78,7 @@
 
 //     const attributes = await ProductAttribute.find({
 //         categories: category,
-//         status: "Active"
+//         status: "Active",
 //     }).populate("categories", "name");
 
 //     res.json(attributes);
@@ -82,41 +102,36 @@
 
 
 
-// controllers/attributeController.js
+
+
+
+
 import ProductAttribute from '../models/ProductAttribute.js';
 
 /* ---------- CREATE ---------- */
 export const createAttribute = async (req, res) => {
-    const { name, type, options, categories } = req.body;
+    const { name, type, categoryOptions } = req.body;
 
-    if (!name || !type || !options?.length || !categories?.length) {
+    if (!name || !type || !categoryOptions?.length) {
         return res.status(400).json({ message: "Missing required fields" });
     }
 
     const attribute = await ProductAttribute.create({
         name,
         type,
-        options,
-        categories,
-        status: "Active", // ✅ default status
+        categoryOptions,
+        status: "Active"
     });
 
-    await attribute.populate("categories", "name");
+    await attribute.populate("categoryOptions.category", "name");
 
     res.status(201).json({ message: "Attribute created", attribute });
 };
 
 /* ---------- GET ALL (Active + Inactive) ---------- */
 export const getAllAttributes = async (req, res) => {
-    const { category } = req.query;
-
-    const query = {}; // ✅ no status filter, fetch everything
-    if (category) {
-        query.categories = category;
-    }
-
-    const attributes = await ProductAttribute.find(query)
-        .populate("categories", "name")
+    const attributes = await ProductAttribute.find()
+        .populate("categoryOptions.category", "name")
         .sort({ createdAt: -1 });
 
     res.json(attributes);
@@ -125,13 +140,13 @@ export const getAllAttributes = async (req, res) => {
 /* ---------- UPDATE ---------- */
 export const updateAttribute = async (req, res) => {
     const { id } = req.params;
-    const { name, type, options, status, categories } = req.body;
+    const { name, type, status, categoryOptions } = req.body;
 
     const updated = await ProductAttribute.findByIdAndUpdate(
         id,
-        { name, type, options, status, categories },
+        { name, type, status, categoryOptions },
         { new: true }
-    ).populate("categories", "name");
+    ).populate("categoryOptions.category", "name");
 
     if (!updated) {
         return res.status(404).json({ message: "Attribute not found" });
@@ -143,7 +158,6 @@ export const updateAttribute = async (req, res) => {
 /* ---------- HARD DELETE (Permanent) ---------- */
 export const deleteAttribute = async (req, res) => {
     const { id } = req.params;
-
     const deleted = await ProductAttribute.findByIdAndDelete(id);
 
     if (!deleted) {
@@ -161,9 +175,21 @@ export const getAttributesByCategory = async (req, res) => {
     }
 
     const attributes = await ProductAttribute.find({
-        categories: category,
         status: "Active",
-    }).populate("categories", "name");
+        "categoryOptions.category": category
+    }).populate("categoryOptions.category", "name");
 
-    res.json(attributes);
+    // ✅ filter only the options for this category
+    const filtered = attributes.map(attr => {
+        const catData = attr.categoryOptions.find(co => co.category.toString() === category);
+        return {
+            id: attr._id,
+            name: attr.name,
+            type: attr.type,
+            options: catData?.options || [],
+            category: catData?.category
+        };
+    });
+
+    res.json(filtered);
 };
