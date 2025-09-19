@@ -5,6 +5,8 @@ import Category from "../models/Category.js";
 import Product from "../models/Product.js";
 import Brand from "../models/Brand.js";
 import mongoose from "mongoose";
+import moment from "moment-timezone";
+
 
 /* ---------- helpers ---------- */
 const isObjectId = (s) => typeof s === "string" && /^[0-9a-fA-F]{24}$/.test(s);
@@ -14,6 +16,14 @@ const calculateStatus = (start, end) => {
   if (now < new Date(start)) return "upcoming";
   if (now > new Date(end)) return "expired";
   return "active";
+};
+
+const parseISTtoUTC = (dateStr, label) => {
+  const parsedIST = moment.tz(dateStr, "YYYY-MM-DD HH:mm", "Asia/Kolkata");
+  if (!parsedIST.isValid()) {
+    throw new Error(`❌ Invalid ${label} format. Use YYYY-MM-DD HH:mm (IST)`);
+  }
+  return parsedIST.toDate(); // UTC Date
 };
 
 const resolveBrands = async (brands) => {
@@ -157,36 +167,99 @@ const normalizeByType = async (body) => {
 /* ---------- controllers ---------- */
 
 // ✅ Create
+// const createPromotion = async (req, res) => {
+//   try {
+//     const status = calculateStatus(req.body.startDate, req.body.endDate);
+//     const categories = await resolveCategories(req.body.categories);
+//     const brands = await resolveBrands(req.body.brands);
+
+//     // Images
+//     const images = [
+//       ...(req.files?.map((f) => f.path) || []),
+//       ...(Array.isArray(req.body.images) ? req.body.images.filter(Boolean) : []),
+//       ...(req.body.image ? [req.body.image] : []),
+//     ];
+
+//     const { promotionConfig } = await normalizeByType(req.body);
+
+//     const promotion = await Promotion.create({
+//       ...req.body,
+//       categories,
+//       isScheduled: true,
+//       brands,
+//       status,
+//       images,
+//       promotionConfig,
+//     });
+
+//     res.status(201).json({ message: "Promotion created", promotion });
+//   } catch (err) {
+//     res.status(400).json({ message: "Failed to create promotion", error: err.message });
+//   }
+// };
+
+// ✅ Create
 const createPromotion = async (req, res) => {
   try {
-    const status = calculateStatus(req.body.startDate, req.body.endDate);
+    if (!req.body.startDate || !req.body.endDate) {
+      return res
+        .status(400)
+        .json({ message: "❌ startDate and endDate are required" });
+    }
+
+    // ✅ Parse IST → UTC
+    let startDateUTC, endDateUTC;
+    try {
+      startDateUTC = parseISTtoUTC(req.body.startDate, "startDate");
+      endDateUTC = parseISTtoUTC(req.body.endDate, "endDate");
+    } catch (err) {
+      return res.status(400).json({ message: err.message });
+    }
+
+    if (endDateUTC <= startDateUTC) {
+      return res
+        .status(400)
+        .json({ message: "❌ endDate must be after startDate" });
+    }
+
     const categories = await resolveCategories(req.body.categories);
     const brands = await resolveBrands(req.body.brands);
 
     // Images
     const images = [
       ...(req.files?.map((f) => f.path) || []),
-      ...(Array.isArray(req.body.images) ? req.body.images.filter(Boolean) : []),
+      ...(Array.isArray(req.body.images)
+        ? req.body.images.filter(Boolean)
+        : []),
       ...(req.body.image ? [req.body.image] : []),
     ];
 
     const { promotionConfig } = await normalizeByType(req.body);
 
+    // ✅ Status calculation based on UTC
+    const status = calculateStatus(startDateUTC, endDateUTC);
+    const isScheduled = status === "upcoming"; // 👈 fix
+
     const promotion = await Promotion.create({
       ...req.body,
       categories,
       brands,
-      status,
       images,
       promotionConfig,
+      startDate: startDateUTC,
+      endDate: endDateUTC,
+      status,
+      isScheduled,
     });
 
-    res.status(201).json({ message: "Promotion created", promotion });
+    res.status(201).json({ message: "✅ Promotion created", promotion });
   } catch (err) {
-    res.status(400).json({ message: "Failed to create promotion", error: err.message });
+    res.status(400).json({
+      message: "❌ Failed to create promotion",
+      error: err.message,
+    });
   }
 };
-
 // ✅ Simplified Update Promotion
 // controllers/admin/promotionController.js
 

@@ -71,7 +71,7 @@ const PromotionSchema = new mongoose.Schema(
         // Duration
         startDate: { type: Date, required: true },
         endDate: { type: Date, required: true },
-
+        isScheduled: { type: Boolean, default: false }, // 👈 NEW
         // Tracking
         promoCodes: [String],
         conversions: { type: Number, default: 0 },

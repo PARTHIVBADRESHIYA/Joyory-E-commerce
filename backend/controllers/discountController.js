@@ -34,7 +34,12 @@ export const createDiscount = async (req, res) => {
         });
 
         await discount.save();
-        res.status(201).json({ message: 'Discount created', discount });
+        res.status(201).json({
+            message: 'Discount created', discount: {
+                _id: discount._id,
+                ...discount.toObject()
+            }
+        });
     } catch (err) {
         res.status(500).json({ message: 'Error creating discount', error: err.message });
     }
@@ -45,7 +50,13 @@ export const updateDiscount = async (req, res) => {
     try {
         const discount = await Discount.findByIdAndUpdate(req.params.id, req.body, { new: true });
         if (!discount) return res.status(404).json({ message: 'Discount not found' });
-        res.json({ message: 'Discount updated', discount });
+        res.json({
+            message: 'Discount updated',
+            discount: {
+                _id: discount._id,
+                ...discount.toObject()
+            }
+        });
     } catch (err) {
         res.status(500).json({ message: 'Error updating discount', error: err.message });
     }
@@ -56,7 +67,10 @@ export const deleteDiscount = async (req, res) => {
     try {
         const discount = await Discount.findByIdAndDelete(req.params.id);
         if (!discount) return res.status(404).json({ message: 'Discount not found' });
-        res.json({ message: 'Discount deleted' });
+        res.json({
+            message: 'Discount deleted',
+            _id: discount._id
+        });
     } catch (err) {
         res.status(500).json({ message: 'Error deleting discount', error: err.message });
     }
@@ -149,6 +163,7 @@ export const getAllDiscounts = async (req, res) => {
                 : "No Expiry";
 
             return {
+                _id: d._id, // 👈 added
                 code: d.code,
                 type: d.type,
                 discount: d.type === "Percentage" ? `${d.value}%` : `₹${d.value}`,
@@ -213,12 +228,14 @@ export const getDiscountDashboardAnalytics = async (req, res) => {
         ]);
 
         res.status(200).json({
+            discountIds: allDiscounts.map(d => d._id), // 👈 added
             activeDiscounts: activeDiscounts.length,
             totalUses,
             revenueImpact: revenueImpact[0]?.total || 0,
             avgDiscount: Math.round(avgDiscountPercentage[0]?.avg || 0),
-            avgDiscountAmount: Math.round(avgDiscountAmount[0]?.avg || 0) 
+            avgDiscountAmount: Math.round(avgDiscountAmount[0]?.avg || 0)
         });
+
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
