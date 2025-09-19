@@ -486,9 +486,6 @@ const getPromotionList = async (req, res) => {
       countdown: p.countdown,
     }));
     res.status(200).json(list);
-
-
-    res.status(200).json(list);
   } catch (err) {
     res
       .status(500)
