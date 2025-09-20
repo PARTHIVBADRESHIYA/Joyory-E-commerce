@@ -25,7 +25,6 @@ export const resolveFormulationId = async (input) => {
     return formulationDoc._id;
 };
 
-
 const addProductController = async (req, res) => {
     try {
         const {
@@ -323,7 +322,6 @@ const addProductController = async (req, res) => {
         });
     }
 };
-
 
 // const addProductController = async (req, res) => {
 //     try {
@@ -713,7 +711,6 @@ const updateProductStock = async (req, res) => {
     }
 };
 
-
 // const updateProductStock = async (req, res) => {
 //     try {
 //         const { quantity } = req.body;
@@ -936,7 +933,6 @@ const updateProductById = async (req, res) => {
     }
 };
 
-
 const deleteProduct = async (req, res) => {
     try {
         const { id } = req.params;
@@ -980,63 +976,104 @@ const deleteProduct = async (req, res) => {
 //         });
 //     }
 // };
+// const getSingleProductById = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+
+//         // ✅ Validate ObjectId format
+//         if (!mongoose.Types.ObjectId.isValid(id)) {
+//             return res.status(400).json({ message: 'Invalid product ID format' });
+//         }
+
+//         // ✅ Find product and populate category names
+//         const product = await Product.findById(id)
+//             .populate('category', 'name slug')
+//             .populate('categoryHierarchy', 'name slug')
+//             .lean();
+
+//         if (!product) {
+//             return res.status(404).json({ message: '❌ Product not found' });
+//         }
+
+//         if (product.variants && product.variants.length > 0) {
+//             // 🔹 Each variant gets its own status
+//             product.variants = product.variants.map(v => {
+//                 let status;
+//                 if (v.stock === 0) status = "Out of stock";
+//                 else if (v.stock < (v.thresholdValue || 0)) status = "Low stock";
+//                 else status = "In-stock";
+
+//                 return {
+//                     ...v,
+//                     status
+//                 };
+//             });
+
+//             // 🔹 Total stock (analytics) but no blocking
+//             product.totalVariantStock = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
+//         } else {
+//             // 🔹 No variants → use global product stock/status
+//             let status;
+//             if (product.quantity === 0) status = "Out of stock";
+//             else if (product.quantity < (product.thresholdValue || 0)) status = "Low stock";
+//             else status = "In-stock";
+
+//             product.status = status;
+//         }
+
+//         res.status(200).json({
+//             message: '✅ Product fetched successfully',
+//             product
+//         });
+
+//     } catch (error) {
+//         console.error("❌ Error fetching single product:", error);
+//         res.status(500).json({
+//             message: 'Failed to fetch product',
+//             error: error.message
+//         });
+//     }
+// };
+
+// -------------------- GET SINGLE PRODUCT --------------------
 const getSingleProductById = async (req, res) => {
     try {
         const { id } = req.params;
 
-        // ✅ Validate ObjectId format
-        if (!mongoose.Types.ObjectId.isValid(id)) {
+        if (!mongoose.Types.ObjectId.isValid(id))
             return res.status(400).json({ message: 'Invalid product ID format' });
-        }
 
-        // ✅ Find product and populate category names
         const product = await Product.findById(id)
             .populate('category', 'name slug')
             .populate('categoryHierarchy', 'name slug')
             .lean();
 
-        if (!product) {
-            return res.status(404).json({ message: '❌ Product not found' });
-        }
+        if (!product) return res.status(404).json({ message: '❌ Product not found' });
 
-        // 🔹 Add variant-level status
-        if (product.variants && product.variants.length > 0) {
+        if (product.variants?.length) {
+            // Variant-level stock/status only
             product.variants = product.variants.map(v => {
-                let status;
-                if (v.stock === 0) status = "Out of stock";
-                else if (v.stock < (v.thresholdValue || 0)) status = "Low stock";
-                else status = "In-stock";
-
-                return {
-                    ...v,
-                    status
-                };
+                let statusMessage;
+                if (v.stock === 0) statusMessage = "No stock available now, please try again later";
+                else if (v.stock < (v.thresholdValue || 5)) statusMessage = `Few left (${v.stock})`;
+                else statusMessage = "In-stock";
+                return { ...v, status: statusMessage };
             });
+            delete product.quantity;
+            delete product.status;
+        } else {
+            // Non-variant product
+            let statusMessage;
+            if (product.quantity === 0) statusMessage = "No stock available now, please try again later";
+            else if (product.quantity < (product.thresholdValue || 5)) statusMessage = `Few left (${product.quantity})`;
+            else statusMessage = "In-stock";
+            product.status = statusMessage;
         }
 
-        // 🔹 Optional: total variant stock & status
-        if (product.variants && product.variants.length > 0) {
-            const totalVariantStock = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
-            let totalVariantStatus;
-            if (product.variants.every(v => v.stock === 0)) totalVariantStatus = "Out of stock";
-            else if (product.variants.some(v => v.stock < (v.thresholdValue || 0))) totalVariantStatus = "Low stock";
-            else totalVariantStatus = "In-stock";
-
-            product.totalVariantStock = totalVariantStock;
-            product.totalVariantStatus = totalVariantStatus;
-        }
-
-        res.status(200).json({
-            message: '✅ Product fetched successfully',
-            product
-        });
-
+        res.status(200).json({ message: '✅ Product fetched successfully', product });
     } catch (error) {
         console.error("❌ Error fetching single product:", error);
-        res.status(500).json({
-            message: 'Failed to fetch product',
-            error: error.message
-        });
+        res.status(500).json({ message: 'Failed to fetch product', error: error.message });
     }
 };
 
