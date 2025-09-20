@@ -1,49 +1,57 @@
-// repairAttributes.js
-import dotenv from "dotenv";
+// migrateVariants.js
 import mongoose from "mongoose";
-import ProductAttribute from "../models/ProductAttribute.js";
+import dotenv from "dotenv";
+import Product from "../models/Product.js"; // adjust path if needed
 
 dotenv.config();
+
 const MONGO_URI = process.env.MONGO_URI;
 
-if (!MONGO_URI) {
-    console.error("❌ Missing MONGO_URI in .env");
-    process.exit(1);
-}
-
-const repair = async () => {
+const migrateProducts = async () => {
     try {
-        await mongoose.connect(MONGO_URI);
+        await mongoose.connect(MONGO_URI, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+        });
         console.log("✅ Connected to MongoDB");
 
-        const attributes = await ProductAttribute.find();
+        const products = await Product.find({});
+        console.log(`Found ${products.length} products`);
 
-        for (let attr of attributes) {
-            if ((!attr.categoryOptions || attr.categoryOptions.length === 0) &&
-                attr.categories?.length && attr.options?.length) {
+        for (const product of products) {
+            let updatedVariants = [];
 
-                console.log(`⚡ Repairing: ${attr.name}`);
+            if (product.variants && product.variants.length > 0) {
+                const activeVariants = product.variants.filter(v => v.isActive !== false);
+                const splitSales = activeVariants.length > 0
+                    ? Math.floor(product.sales / activeVariants.length)
+                    : 0;
 
-                attr.categoryOptions = attr.categories.map(cat => ({
-                    category: cat,
-                    options: attr.options
+                updatedVariants = product.variants.map(v => ({
+                    ...v.toObject ? v.toObject() : v,
+                    thresholdValue: v.thresholdValue || product.thresholdValue || 10,
+                    sales: v.sales || splitSales,
                 }));
 
-                // remove old fields
-                attr.set("options", undefined, { strict: false });
-                attr.set("categories", undefined, { strict: false });
-
-                await attr.save();
-                console.log(`✅ Fixed: ${attr.name}`);
+                product.sales = updatedVariants.reduce((sum, v) => sum + (v.sales || 0), 0);
+            } else {
+                // Non-variant product: thresholdValue stays on parent
+                product.thresholdValue = product.thresholdValue || 10;
             }
+
+            product.variants = updatedVariants;
+
+            await product.save();
+            console.log(`✅ Product "${product.name}" migrated`);
         }
 
-        console.log("🎉 Repair completed!");
+        console.log("🎉 Migration complete");
         process.exit(0);
+
     } catch (err) {
-        console.error("❌ Repair failed", err);
+        console.error("❌ Migration failed", err);
         process.exit(1);
     }
 };
 
-repair();
+migrateProducts();

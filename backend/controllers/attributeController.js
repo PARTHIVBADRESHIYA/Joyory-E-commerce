@@ -1,111 +1,3 @@
-// // controllers/attributeController.js
-// import ProductAttribute from '../models/ProductAttribute.js';
-
-// /* ---------- CREATE ---------- */
-// export const createAttribute = async (req, res) => {
-//     const { name, type, options, categories } = req.body;
-
-//     if (!name || !type || !options?.length || !categories?.length) {
-//         return res.status(400).json({ message: "Missing required fields" });
-//     }
-
-//     const attribute = await ProductAttribute.create({
-//         name,
-//         type,
-//         options,
-//         categories,
-//         status: "Active", // ✅ default status
-//     });
-
-//     await attribute.populate("categories", "name");
-
-//     res.status(201).json({ message: "Attribute created", attribute });
-// };
-
-// /* ---------- GET ALL (Active + Inactive) ---------- */
-// export const getAllAttributes = async (req, res) => {
-//     const { category } = req.query;
-
-//     const query = {}; // ✅ no status filter, fetch everything
-//     if (category) {
-//         query.categories = category;
-//     }
-
-//     const attributes = await ProductAttribute.find(query)
-//         .populate("categories", "name")
-//         .sort({ createdAt: -1 });
-
-//     res.json(attributes);
-// };
-
-// /* ---------- UPDATE ---------- */
-// export const updateAttribute = async (req, res) => {
-//     const { id } = req.params;
-//     const { name, type, options, status, categories } = req.body;
-
-//     const updated = await ProductAttribute.findByIdAndUpdate(
-//         id,
-//         { name, type, options, status, categories },
-//         { new: true }
-//     ).populate("categories", "name");
-
-//     if (!updated) {
-//         return res.status(404).json({ message: "Attribute not found" });
-//     }
-
-//     res.json({ message: "Updated", updated });
-// };
-
-// /* ---------- HARD DELETE (Permanent) ---------- */
-// export const deleteAttribute = async (req, res) => {
-//     const { id } = req.params;
-
-//     const deleted = await ProductAttribute.findByIdAndDelete(id);
-
-//     if (!deleted) {
-//         return res.status(404).json({ message: "Attribute not found" });
-//     }
-
-//     res.json({ message: "Deleted permanently", deleted });
-// };
-
-// /* ---------- GET BY CATEGORY (Active only) ---------- */
-// export const getAttributesByCategory = async (req, res) => {
-//     const { category } = req.params;
-//     if (!category) {
-//         return res.status(400).json({ message: "Category is required" });
-//     }
-
-//     const attributes = await ProductAttribute.find({
-//         categories: category,
-//         status: "Active",
-//     }).populate("categories", "name");
-
-//     res.json(attributes);
-// };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 import ProductAttribute from '../models/ProductAttribute.js';
 
 /* ---------- CREATE ---------- */
@@ -135,6 +27,27 @@ export const getAllAttributes = async (req, res) => {
         .sort({ createdAt: -1 });
 
     res.json(attributes);
+};
+
+/* ---------- GET SINGLE ATTRIBUTE ---------- */
+export const getSingleAttribute = async (req, res) => {
+    const { id } = req.params;
+
+    if (!id) return res.status(400).json({ message: "Attribute ID is required" });
+
+    try {
+        const attribute = await ProductAttribute.findById(id)
+            .populate("categoryOptions.category", "name");
+
+        if (!attribute) {
+            return res.status(404).json({ message: "Attribute not found" });
+        }
+
+        res.json({ attribute });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error" });
+    }
 };
 
 /* ---------- UPDATE ---------- */

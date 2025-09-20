@@ -70,7 +70,6 @@ export const getCart = async (req, res) => {
   res.status(200).json({ cart: user.cart });
 };
 
-// ✅ Update item quantity
 export const updateCartItem = async (req, res) => {
   const { productId, quantity, variantSku } = req.body;
   const user = await User.findById(req.user._id);
@@ -110,10 +109,6 @@ export const removeFromCart = async (req, res) => {
     res.status(500).json({ message: "Error removing from cart", error: err.message });
   }
 };
-
-// export const getCartSummary = async (req, res) => {
-
-
 
 export const getCartSummary = async (req, res) => {
   try {
