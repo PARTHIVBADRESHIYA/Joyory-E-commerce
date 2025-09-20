@@ -168,20 +168,45 @@ export const deleteAttribute = async (req, res) => {
 };
 
 /* ---------- GET BY CATEGORY (Active only) ---------- */
+// export const getAttributesByCategory = async (req, res) => {
+//     const { category } = req.params;
+//     if (!category) {
+//         return res.status(400).json({ message: "Category is required" });
+//     }
+
+//     const attributes = await ProductAttribute.find({
+//         status: "Active",
+//         "categoryOptions.category": category
+//     }).populate("categoryOptions.category", "name");
+
+//     // ✅ filter only the options for this category
+//     const filtered = attributes.map(attr => {
+//         const catData = attr.categoryOptions.find(co => co.category.toString() === category);
+//         return {
+//             id: attr._id,
+//             name: attr.name,
+//             type: attr.type,
+//             options: catData?.options || [],
+//             category: catData?.category
+//         };
+//     });
+
+//     res.json(filtered);
+// };
+
+
+
 export const getAttributesByCategory = async (req, res) => {
     const { category } = req.params;
-    if (!category) {
-        return res.status(400).json({ message: "Category is required" });
-    }
+    if (!category) return res.status(400).json({ message: "Category is required" });
 
     const attributes = await ProductAttribute.find({
         status: "Active",
         "categoryOptions.category": category
     }).populate("categoryOptions.category", "name");
 
-    // ✅ filter only the options for this category
     const filtered = attributes.map(attr => {
-        const catData = attr.categoryOptions.find(co => co.category.toString() === category);
+        const catData = attr.categoryOptions.find(co => co.category._id.toString() === category);
         return {
             id: attr._id,
             name: attr.name,
