@@ -29,7 +29,7 @@ function mapShipmentStatus(status) {
     "Out For Delivery": "Out for Delivery",
     Delivered: "Delivered",
     Cancelled: "Cancelled",
-    Returned: "Returned"
+    Returned: "Returned"  
   };
 
   return map[status] || status; // fallback to raw if unknown
