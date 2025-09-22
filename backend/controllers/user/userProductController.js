@@ -660,7 +660,7 @@ export const getProductWithRelated = async (req, res) => {
 // 🔥 Top Categories (most popular categories – based on product count)
 export const getTopCategories = async (req, res) => {
     try {
-        const BASE_SLUGS = ['lipcare', 'eyecare', 'facecare', 'fragrance'];
+        const BASE_SLUGS = ['lips', 'eyes', 'face', 'skin'];
 
         // 1️⃣ Get base categories
         const baseCategories = await Category.find({ slug: { $in: BASE_SLUGS } })
