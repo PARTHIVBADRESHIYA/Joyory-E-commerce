@@ -31,8 +31,8 @@ router.put(
     '/:id',
     verifyAdminOrTeamMember,
     uploadCategory.fields([
-        { name: 'bannerImage', maxCount: 1 },
-        { name: 'thumbnailImage', maxCount: 1 }
+        { name: 'bannerImage', maxCount: 5 },
+        { name: 'thumbnailImage', maxCount: 5 }
     ]),
     updateCategory
 );

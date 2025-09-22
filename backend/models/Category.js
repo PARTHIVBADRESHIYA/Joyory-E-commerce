@@ -36,9 +36,9 @@ const categorySchema = new mongoose.Schema({
             type: { type: String, enum: ["string", "number", "color", "array"], default: "string" }
         }
     ],
-    bannerImage: { type: String, default: null },
-    thumbnailImage: { type: String, default: null }
-    ,// URL for top banner
+    bannerImage: [{ type: String }],      // ✅ now allows multiple images
+    thumbnailImage: [{ type: String }],   // ✅ now allows multiple images
+    // URL for top banner
     // ancestors array stores parent chain: [grandparentId, parentId]
     ancestors: [{
         type: mongoose.Schema.Types.ObjectId,

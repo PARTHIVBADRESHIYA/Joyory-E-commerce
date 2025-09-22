@@ -26,6 +26,7 @@ export const resolveFormulationId = async (input) => {
 };
 
 
+
 const addProductController = async (req, res) => {
     try {
         const {
@@ -115,16 +116,18 @@ const addProductController = async (req, res) => {
 
         // ✅ Parse product tags
         let productTags = [];
-        try { productTags = rawTags ? (typeof rawTags === "string" ? JSON.parse(rawTags) : rawTags) : []; } catch { productTags = []; }
+        try {
+            productTags = rawTags ? (typeof rawTags === "string" ? JSON.parse(rawTags) : rawTags) : [];
+        } catch {
+            productTags = [];
+        }
 
         // ✅ Numeric values
         const parsedPrice = Number(price);
         const parsedBuyingPrice = Number(buyingPrice);
-        const parsedQuantity = quantity !== undefined ? Number(quantity) : 0;
-        const thresholdValue = Number(rawThresholdValue);
 
         if (isNaN(parsedPrice) || isNaN(parsedBuyingPrice)) {
-            return res.status(400).json({ message: "❌ Invalid numeric values" });
+            return res.status(400).json({ message: "❌ Invalid numeric values for price or buyingPrice" });
         }
 
         // ✅ Variants logic
@@ -143,9 +146,9 @@ const addProductController = async (req, res) => {
 
                     return {
                         ...v,
-                        stock: v.stock !== undefined ? Number(v.stock) : undefined, // keep undefined if missing
+                        stock: v.stock !== undefined ? Number(v.stock) : undefined,
                         sales: v.sales !== undefined ? Number(v.sales) : 0,
-                        thresholdValue: v.thresholdValue !== undefined ? Number(v.thresholdValue) : undefined, // keep undefined
+                        thresholdValue: v.thresholdValue !== undefined ? Number(v.thresholdValue) : undefined,
                         images: variantImages.slice(-5),
                         isActive: v.isActive !== false,
                         createdAt: new Date()
@@ -160,15 +163,24 @@ const addProductController = async (req, res) => {
             return res.status(400).json({ message: "Invalid variants data", error: err.message });
         }
 
-        // ✅ Validation based on global vs variant
+        // ✅ Validation: non-variant vs variant products
         if (variants.length === 0) {
-            if (isNaN(parsedQuantity) || parsedQuantity < 0) {
-                return res.status(400).json({ message: "❌ quantity is required for non-variant products and must be a number" });
+            // Non-variant products must have quantity & thresholdValue
+            if (quantity === undefined) {
+                return res.status(400).json({ message: "❌ quantity is required for non-variant products" });
             }
-            if (isNaN(thresholdValue) || thresholdValue < 0) {
-                return res.status(400).json({ message: "❌ thresholdValue is required for non-variant products and must be a number" });
+            if (isNaN(Number(quantity)) || Number(quantity) < 0) {
+                return res.status(400).json({ message: "❌ quantity must be a valid number >= 0" });
+            }
+
+            if (rawThresholdValue === undefined) {
+                return res.status(400).json({ message: "❌ thresholdValue is required for non-variant products" });
+            }
+            if (isNaN(Number(rawThresholdValue)) || Number(rawThresholdValue) < 0) {
+                return res.status(400).json({ message: "❌ thresholdValue must be a valid number >= 0" });
             }
         } else {
+            // Variant products cannot have global quantity/thresholdValue
             if (quantity !== undefined || rawThresholdValue !== undefined) {
                 return res.status(400).json({ message: "❌ Do not provide global quantity/thresholdValue when variants exist" });
             }
@@ -216,14 +228,14 @@ const addProductController = async (req, res) => {
         }
 
         // ✅ Compute total quantity & status
-        const totalQuantity = variants.length > 0 ? variants.reduce((sum, v) => sum + (v.stock || 0), 0) : parsedQuantity;
+        const totalQuantity = variants.length > 0 ? variants.reduce((sum, v) => sum + (v.stock || 0), 0) : Number(quantity);
         let status = "In-stock";
         if (variants.length > 0) {
             const allStatuses = variants.map(v => v.stock === 0 ? "Out of stock" : v.stock < (v.thresholdValue || 0) ? "Low stock" : "In-stock");
             if (allStatuses.every(s => s === "Out of stock")) status = "Out of stock";
             else if (allStatuses.some(s => s === "Low stock")) status = "Low stock";
         } else {
-            status = totalQuantity === 0 ? "Out of stock" : totalQuantity < thresholdValue ? "Low stock" : "In-stock";
+            status = totalQuantity === 0 ? "Out of stock" : totalQuantity < Number(rawThresholdValue) ? "Low stock" : "In-stock";
         }
 
         // ✅ Extract dynamic category attributes
@@ -246,8 +258,8 @@ const addProductController = async (req, res) => {
             formulation: formulationId,
             price: parsedPrice,
             buyingPrice: parsedBuyingPrice,
-            quantity: variants.length > 0 ? undefined : parsedQuantity,
-            thresholdValue: variants.length > 0 ? undefined : thresholdValue,
+            quantity: variants.length > 0 ? undefined : Number(quantity),
+            thresholdValue: variants.length > 0 ? undefined : Number(rawThresholdValue),
             expiryDate,
             images,
             brand,
@@ -272,6 +284,7 @@ const addProductController = async (req, res) => {
 
         await product.save();
         res.status(201).json({ message: "✅ Product created successfully", product });
+
     } catch (error) {
         console.error("❌ Product placement error:", util.inspect(error, { showHidden: false, depth: null }));
         res.status(500).json({ message: "❌ Product placement failed", error: error.message || "Unknown error", stack: error.stack });
