@@ -214,6 +214,207 @@ export const getAllFilteredProducts = async (req, res) => {
     }
 };
 
+// export const getSingleProduct = async (req, res) => {
+//     try {
+//         const productId = req.params.id;
+//         if (!mongoose.Types.ObjectId.isValid(productId)) {
+//             return res.status(400).json({ message: "Invalid product id" });
+//         }
+
+//         // 1) Load product + increment views
+//         const product = await Product.findOneAndUpdate(
+//             { _id: productId, isPublished: true },
+//             { $inc: { views: 1 } },
+//             { new: true, lean: true }
+//         );
+
+//         if (!product) return res.status(404).json({ message: "Product not found" });
+
+//         // 2) Save to user's recent history
+//         if (req.user?.id) {
+//             const categoryValue = mongoose.Types.ObjectId.isValid(product.category)
+//                 ? product.category
+//                 : product.category?.slug || String(product.category || "");
+
+//             await User.bulkWrite([
+//                 {
+//                     updateOne: {
+//                         filter: { _id: req.user.id },
+//                         update: { $pull: { recentProducts: product._id, recentCategories: categoryValue } }
+//                     }
+//                 },
+//                 {
+//                     updateOne: {
+//                         filter: { _id: req.user.id },
+//                         update: {
+//                             $push: {
+//                                 recentProducts: { $each: [product._id], $position: 0, $slice: 20 },
+//                                 recentCategories: { $each: [categoryValue], $position: 0, $slice: 20 }
+//                             }
+//                         }
+//                     }
+//                 }
+//             ]);
+//         }
+
+//         // 3) Category info
+//         let categoryObj = null;
+//         if (mongoose.Types.ObjectId.isValid(product.category)) {
+//             categoryObj = await Category.findById(product.category)
+//                 .select("name slug parent")
+//                 .lean();
+//         }
+
+//         // 4) Ratings
+//         const [{ avg = 0, count = 0 } = {}] = await Review.aggregate([
+//             { $match: { productId: product._id, status: "Active" } },
+//             { $group: { _id: "$productId", avg: { $avg: "$rating" }, count: { $sum: 1 } } }
+//         ]);
+//         const avgRating = Math.round((avg || 0) * 10) / 10;
+
+//         // 5) Promotions
+//         const now = new Date();
+//         const promotions = await Promotion.find({
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now }
+//         }).lean();
+
+//         const originalPrice = Number(product.price ?? product.mrp ?? 0) || 0;
+//         const mrp = Number(product.mrp ?? product.price ?? 0) || 0;
+
+//         // 6) Best promo logic
+//         let bestPromo = null;
+//         let bestPrice = originalPrice;
+//         let bestDiscountAmount = 0;
+//         let bestDiscountPercent = 0;
+
+//         for (const promo of promotions) {
+//             if (!productMatchesPromo(product, promo)) continue;
+//             const type = promo.promotionType;
+
+//             if (type === "discount") {
+//                 const unit = promo.discountUnit;
+//                 const val = Number(promo.discountValue || 0);
+
+//                 if (unit === "percent" && val > 0) {
+//                     const price = Math.max(0, mrp - (mrp * val) / 100);
+//                     const da = mrp - price;
+//                     const dp = mrp > 0 ? Math.floor((da / mrp) * 100) : 0;
+
+//                     const isBetter =
+//                         da > bestDiscountAmount || (da === bestDiscountAmount && dp > bestDiscountPercent);
+//                     if (isBetter) {
+//                         bestPromo = promo;
+//                         bestPrice = price;
+//                         bestDiscountAmount = da;
+//                         bestDiscountPercent = dp;
+//                     }
+//                 } else if (unit === "amount" && val > 0) {
+//                     const price = Math.max(0, mrp - val);
+//                     const da = mrp - price;
+//                     const dp = mrp > 0 ? Math.floor((da / mrp) * 100) : 0;
+
+//                     const isBetter =
+//                         da > bestDiscountAmount || (da === bestDiscountAmount && dp > bestDiscountPercent);
+//                     if (isBetter) {
+//                         bestPromo = promo;
+//                         bestPrice = price;
+//                         bestDiscountAmount = da;
+//                         bestDiscountPercent = dp;
+//                     }
+//                 }
+//             }
+//         }
+
+//         // 7) Badge/message
+//         let badge = null;
+//         let promoMessage = null;
+
+//         if (bestPromo) {
+//             badge =
+//                 bestPromo.discountUnit === "percent"
+//                     ? `${bestPromo.discountValue}% Off`
+//                     : `₹${asMoney(bestPromo.discountValue)} Off`;
+//             promoMessage = `Save ${badge} on this product`;
+//         } else {
+//             const awareness =
+//                 promotions
+//                     .filter(p => productMatchesPromo(product, p))
+//                     .sort((a, b) => {
+//                         const order = { tieredDiscount: 1, bogo: 2, buy1get1: 2, bundle: 3, gift: 4, discount: 5 };
+//                         return (order[a.promotionType] || 99) - (order[b.promotionType] || 99);
+//                     })[0] || null;
+
+//             if (awareness) {
+//                 const t = awareness.promotionType;
+//                 if (t === "tieredDiscount") {
+//                     const tiers = awareness.promotionConfig?.tiers || [];
+//                     const top = tiers.length
+//                         ? Math.max(...tiers.map(ti => Number(ti.discountPercent || 0)))
+//                         : 0;
+//                     badge = `Buy More Save More${top ? ` (Up to ${top}%)` : ""}`;
+//                     promoMessage = `Add more to save up to ${top}%`;
+//                 } else if (t === "bogo" || t === "buy1get1") {
+//                     const bq = awareness.promotionConfig?.buyQty ?? 1;
+//                     const gq = awareness.promotionConfig?.getQty ?? 1;
+//                     badge = `BOGO ${bq}+${gq}`;
+//                     promoMessage = `Buy ${bq}, Get ${gq} Free`;
+//                 } else if (t === "bundle") {
+//                     badge = "Bundle Deal";
+//                     promoMessage = "Special price when bought together";
+//                 } else if (t === "gift") {
+//                     badge = "Free Gift";
+//                     promoMessage = "Get a free gift on qualifying order";
+//                 }
+//             }
+//         }
+
+//         // 8) Recommendations
+//         const [moreLikeThis, boughtTogether, alsoViewed] = await Promise.all([
+//             getRecommendations({ mode: "moreLikeThis", productId, userId: req.user?.id }),
+//             getRecommendations({ mode: "boughtTogether", productId, userId: req.user?.id }),
+//             getRecommendations({ mode: "alsoViewed", productId, userId: req.user?.id })
+//         ]);
+
+//         // 9) Response
+//         res.status(200).json({
+//             _id: product._id,
+//             name: product.name,
+//             brand: product.brand,
+//             variant: product.variant,
+//             description: product.description || "",
+//             summary: product.summary || "",
+//             features: product.features || [],
+//             howToUse: product.howToUse || "",
+//             ingredients: product.ingredients || [],
+//             mrp: Math.round(mrp),
+//             price: Math.round(bestPrice),
+//             discountPercent: Math.max(0, Math.round(bestDiscountPercent)),
+//             discountAmount: Math.max(0, Math.round(bestDiscountAmount)),
+//             badge,
+//             promoMessage,
+//             images: normalizeImages(product.images || []),
+//             category: categoryObj,
+//             shadeOptions: buildOptions(product).shadeOptions,
+//             colorOptions: buildOptions(product).colorOptions,
+//             variants: product.variants || [],
+//             avgRating,
+//             totalRatings: count || 0,
+//             // ✅ Add this
+//             inStock: product.inStock ?? true,
+//             // ✅ Added recommendation sections
+//             recommendations: {
+//                 moreLikeThis,
+//                 boughtTogether,
+//                 alsoViewed
+//             }
+//         });
+//     } catch (err) {
+//         console.error("❌ getSingleProduct error:", err);
+//         res.status(500).json({ message: "Server error", error: err.message });
+//     }
+// };
 export const getSingleProduct = async (req, res) => {
     try {
         const productId = req.params.id;
@@ -370,14 +571,30 @@ export const getSingleProduct = async (req, res) => {
             }
         }
 
-        // 8) Recommendations
+        // 8) ✅ Stock status (like admin)
+        let stockStatus = "In-stock";
+        if (product.variants?.length) {
+            product.variants = product.variants.map(v => {
+                let statusMessage;
+                if (v.stock === 0) statusMessage = "Out of stock";
+                else if (v.stock < (v.thresholdValue || 5)) statusMessage = `Hurry! Only ${v.stock} left`;
+                else statusMessage = "In-stock";
+                return { ...v, status: statusMessage };
+            });
+        } else {
+            if (product.quantity === 0) stockStatus = "Out of stock";
+            else if (product.quantity < (product.thresholdValue || 5))
+                stockStatus = `Hurry! Only ${product.quantity} left`;
+        }
+
+        // 9) Recommendations
         const [moreLikeThis, boughtTogether, alsoViewed] = await Promise.all([
             getRecommendations({ mode: "moreLikeThis", productId, userId: req.user?.id }),
             getRecommendations({ mode: "boughtTogether", productId, userId: req.user?.id }),
             getRecommendations({ mode: "alsoViewed", productId, userId: req.user?.id })
         ]);
 
-        // 9) Response
+        // 10) Response
         res.status(200).json({
             _id: product._id,
             name: product.name,
@@ -401,9 +618,7 @@ export const getSingleProduct = async (req, res) => {
             variants: product.variants || [],
             avgRating,
             totalRatings: count || 0,
-            // ✅ Add this
-            inStock: product.inStock ?? true,
-            // ✅ Added recommendation sections
+            stockStatus, // ✅ Added for non-variant products
             recommendations: {
                 moreLikeThis,
                 boughtTogether,
