@@ -2,6 +2,7 @@
 import express from 'express';
 import {
     addCategory,
+    getCategoryById,
     getCategories,
     updateCategory,
     deleteCategory
@@ -16,14 +17,15 @@ router.post(
     '/',
     verifyAdminOrTeamMember,
     uploadCategory.fields([
-        { name: 'bannerImage', maxCount: 1 },
-        { name: 'thumbnailImage', maxCount: 1 }
+        { name: 'bannerImage', maxCount: 5 },
+        { name: 'thumbnailImage', maxCount: 5 }
     ]),
     addCategory
 );
 
 router.get('/', verifyAdminOrTeamMember, getCategories);
 
+router.get('/:id', verifyAdminOrTeamMember, getCategoryById);
 // Update category (optional banner image update)
 router.put(
     '/:id',

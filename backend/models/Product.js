@@ -128,28 +128,139 @@
 
 
 
-// models/Product.js
+// // models/Product.js
+// import mongoose from 'mongoose';
+
+// const variantSchema = new mongoose.Schema({
+//     sku: { type: String, required: true },
+//     shadeName: { type: String }, // 🔹 now optional
+//     hex: { type: String },
+//     images: [{ type: String }],
+//     stock: { type: Number, default: 0 }, // 🔹 stock moved to variant-level
+//     sales: { type: Number, default: 0 }, // 🔹 sales per variant
+//     thresholdValue: {
+//         type: Number,
+//         default: 0,
+//         required: function () {
+//             // Required only if product has no variants
+//             return !this.variants || this.variants.length === 0;
+//         }
+//     },
+//     isActive: { type: Boolean, default: true },
+//     createdAt: { type: Date, default: Date.now },
+
+//     // foundation-specific (optional)
+//     familyKey: { type: String },
+//     toneKeys: [{ type: String }],
+//     undertoneKeys: [{ type: String }],
+//     lab: { L: Number, a: Number, b: Number }
+// }, { _id: false });
+
+// const productSchema = new mongoose.Schema({
+//     name: { type: String, required: true, unique: true },
+//     variant: String, // general type label
+//     buyingPrice: { type: Number, required: true },
+//     price: { type: Number, required: true },
+
+//     // 🔹 Global quantity is now optional (only required if no variants)
+//     quantity: { type: Number, default: 0 },
+
+//     thresholdValue: { type: Number, required: true },
+//     expiryDate: Date,
+
+//     brand: { type: mongoose.Schema.Types.ObjectId, ref: "Brand" },
+//     category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
+//     categoryHierarchy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Category' }],
+
+//     attributes: mongoose.Schema.Types.Mixed,
+//     skinTypes: [{ type: mongoose.Schema.Types.ObjectId, ref: "SkinType", index: true }],
+//     description: String,
+//     ingredients: [String],
+//     summary: String,
+//     features: [String],
+//     howToUse: String,
+//     image: String,
+//     images: [{ type: String }],
+
+//     // 🔹 Variants array (shade products)
+//     variants: [variantSchema],
+
+//     productTags: [String],
+//     shadeOptions: [{ type: String }],
+//     colorOptions: [{ type: String }],
+
+//     formulation: {
+//         type: mongoose.Schema.Types.ObjectId,
+//         ref: "Formulation",
+//         index: true
+//     },
+
+//     status: { type: String, enum: ['In-stock', 'Low stock', 'Out of stock'], default: 'In-stock' },
+
+//     // 🔹 moved sales down to variant level but also keep total for fast queries
+//     sales: { type: Number, default: 0 },
+//     views: { type: Number, default: 0 },
+//     commentsCount: { type: Number, default: 0 },
+//     affiliateEarnings: { type: Number, default: 0 },
+//     affiliateClicks: { type: Number, default: 0 },
+//     avgRating: { type: Number, default: 0 },
+//     totalRatings: { type: Number, default: 0 },
+
+//     seller: { type: mongoose.Schema.Types.ObjectId, ref: 'Seller', index: true },
+//     isPublished: { type: Boolean, default: true },
+//     scheduledAt: { type: Date, default: null },
+
+//     ratingsBreakdown: {
+//         Excellent: { type: Number, default: 0 },
+//         VeryGood: { type: Number, default: 0 },
+//         Average: { type: Number, default: 0 },
+//         Good: { type: Number, default: 0 },
+//         Poor: { type: Number, default: 0 }
+//     }
+
+// }, { timestamps: true });
+
+// // indexes
+// productSchema.index({ brand: 1 });
+// productSchema.index({ brand: 1, category: 1 });
+// productSchema.index({ createdAt: -1 });
+// productSchema.index({ seller: 1, category: 1 });
+// productSchema.index({ category: 1, formulation: 1 });
+// productSchema.index({ "variants.familyKey": 1 });
+// productSchema.index({ "variants.toneKeys": 1 });
+// productSchema.index({ "variants.undertoneKeys": 1 });
+
+// export default mongoose.model('Product', productSchema);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 import mongoose from 'mongoose';
 
 const variantSchema = new mongoose.Schema({
     sku: { type: String, required: true },
-    shadeName: { type: String }, // 🔹 now optional
+    shadeName: { type: String },
     hex: { type: String },
     images: [{ type: String }],
-    stock: { type: Number, default: 0 }, // 🔹 stock moved to variant-level
-    sales: { type: Number, default: 0 }, // 🔹 sales per variant
-    thresholdValue: {
-        type: Number,
-        default: 0,
-        required: function () {
-            // Required only if product has no variants
-            return !this.variants || this.variants.length === 0;
-        }
-    },
+    stock: { type: Number, default: 0 },
+    sales: { type: Number, default: 0 },
+    thresholdValue: { type: Number, default: 0 },
     isActive: { type: Boolean, default: true },
     createdAt: { type: Date, default: Date.now },
 
-    // foundation-specific (optional)
+    // foundation-specific
     familyKey: { type: String },
     toneKeys: [{ type: String }],
     undertoneKeys: [{ type: String }],
@@ -158,16 +269,27 @@ const variantSchema = new mongoose.Schema({
 
 const productSchema = new mongoose.Schema({
     name: { type: String, required: true, unique: true },
-    variant: String, // general type label
+    variant: String,
     buyingPrice: { type: Number, required: true },
     price: { type: Number, required: true },
 
-    // 🔹 Global quantity is now optional (only required if no variants)
-    quantity: { type: Number, default: 0 },
+    // ✅ Global values only if no variants
+    quantity: {
+        type: Number,
+        default: 0,
+        required: function () {
+            return !this.variants || this.variants.length === 0;
+        }
+    },
+    thresholdValue: {
+        type: Number,
+        required: function () {
+            return !this.variants || this.variants.length === 0;
+        },
+        default: 0
+    },
 
-    thresholdValue: { type: Number, required: true },
     expiryDate: Date,
-
     brand: { type: mongoose.Schema.Types.ObjectId, ref: "Brand" },
     category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
     categoryHierarchy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Category' }],
@@ -182,8 +304,7 @@ const productSchema = new mongoose.Schema({
     image: String,
     images: [{ type: String }],
 
-    // 🔹 Variants array (shade products)
-    variants: [variantSchema],
+    variants: [variantSchema], // ✅ if exists, quantity/threshold handled at variant level
 
     productTags: [String],
     shadeOptions: [{ type: String }],
@@ -196,8 +317,6 @@ const productSchema = new mongoose.Schema({
     },
 
     status: { type: String, enum: ['In-stock', 'Low stock', 'Out of stock'], default: 'In-stock' },
-
-    // 🔹 moved sales down to variant level but also keep total for fast queries
     sales: { type: Number, default: 0 },
     views: { type: Number, default: 0 },
     commentsCount: { type: Number, default: 0 },

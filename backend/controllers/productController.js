@@ -66,7 +66,6 @@ const addProductController = async (req, res) => {
         // ✅ Handle scheduling
         let isPublished = true;
         let scheduleDate = null;
-
         if (scheduledAt) {
             const parsedDateIST = moment.tz(scheduledAt, "YYYY-MM-DD HH:mm", "Asia/Kolkata");
             if (!parsedDateIST.isValid()) {
@@ -75,36 +74,23 @@ const addProductController = async (req, res) => {
                 });
             }
             const parsedDateUTC = parsedDateIST.toDate();
-            const now = new Date();
-
-            if (parsedDateUTC > now) {
+            if (parsedDateUTC > new Date()) {
                 isPublished = false;
                 scheduleDate = parsedDateUTC;
             }
         }
 
-        // ✅ Normalize categories
-        let finalCategories = [];
-        if (categories && categories.length > 0) {
-            finalCategories = Array.isArray(categories) ? categories : [categories];
-        } else if (category) {
-            finalCategories = [category];
-        }
-
-        // ✅ Resolve categories to ObjectIds
+        // ✅ Normalize and resolve categories
+        let finalCategories = categories && categories.length ? (Array.isArray(categories) ? categories : [categories]) : [category];
         const resolvedCategories = [];
         for (let cat of finalCategories) {
             if (!cat) continue;
-            const trimmedCat = String(cat).trim();
-            if (mongoose.Types.ObjectId.isValid(trimmedCat)) {
-                resolvedCategories.push(trimmedCat);
+            const trimmed = String(cat).trim();
+            if (mongoose.Types.ObjectId.isValid(trimmed)) {
+                resolvedCategories.push(trimmed);
             } else {
-                const foundCat = await Category.findOne({
-                    name: { $regex: `^${trimmedCat}$`, $options: "i" },
-                });
-                if (!foundCat) {
-                    return res.status(400).json({ message: `Category "${trimmedCat}" not found` });
-                }
+                const foundCat = await Category.findOne({ name: { $regex: `^${trimmed}$`, $options: "i" } });
+                if (!foundCat) return res.status(400).json({ message: `Category "${trimmed}" not found` });
                 resolvedCategories.push(foundCat._id);
             }
         }
@@ -115,9 +101,9 @@ const addProductController = async (req, res) => {
         }
 
         // ✅ Build category hierarchy
-        const buildCategoryHierarchy = async (leafCategoryId) => {
-            let hierarchy = [];
-            let current = await Category.findById(leafCategoryId);
+        const buildCategoryHierarchy = async (leafId) => {
+            const hierarchy = [];
+            let current = await Category.findById(leafId);
             while (current) {
                 hierarchy.unshift(current._id);
                 if (!current.parent) break;
@@ -129,19 +115,13 @@ const addProductController = async (req, res) => {
 
         // ✅ Parse product tags
         let productTags = [];
-        try {
-            if (rawTags) {
-                productTags = typeof rawTags === "string" ? JSON.parse(rawTags) : rawTags;
-            }
-        } catch {
-            productTags = [];
-        }
+        try { productTags = rawTags ? (typeof rawTags === "string" ? JSON.parse(rawTags) : rawTags) : []; } catch { productTags = []; }
 
         // ✅ Numeric values
         const parsedPrice = Number(price);
         const parsedBuyingPrice = Number(buyingPrice);
         const parsedQuantity = quantity !== undefined ? Number(quantity) : 0;
-        let thresholdValue = Number(rawThresholdValue) || 0;
+        const thresholdValue = Number(rawThresholdValue);
 
         if (isNaN(parsedPrice) || isNaN(parsedBuyingPrice)) {
             return res.status(400).json({ message: "❌ Invalid numeric values" });
@@ -153,62 +133,69 @@ const addProductController = async (req, res) => {
         let colorOptions = [];
 
         try {
-            let variantArray = [];
-            if (rawVariants) {
-                variantArray = typeof rawVariants === "string" ? JSON.parse(rawVariants) : rawVariants;
-            }
-
+            let variantArray = rawVariants ? (typeof rawVariants === "string" ? JSON.parse(rawVariants) : rawVariants) : [];
             if (Array.isArray(variantArray) && variantArray.length > 0) {
                 variants = variantArray.map((v, i) => {
-                    let variantImages = [];
-                    if (req.files && req.files.length > 0) {
-                        const filesForVariant = req.files.filter(
-                            (f) => f.fieldname === `variantImages_${i}`
-                        );
-                        variantImages.push(...filesForVariant.map((f) => f.secure_url || f.path || f.url));
-                    }
-                    if (v.images && Array.isArray(v.images)) {
-                        variantImages.push(...v.images);
-                    }
+                    const variantImages = [
+                        ...(req.files?.filter(f => f.fieldname === `variantImages_${i}`).map(f => f.secure_url || f.path || f.url) || []),
+                        ...(Array.isArray(v.images) ? v.images : [])
+                    ];
+
                     return {
                         ...v,
-                        stock: v.stock !== undefined ? Number(v.stock) : 0,
+                        stock: v.stock !== undefined ? Number(v.stock) : undefined, // keep undefined if missing
                         sales: v.sales !== undefined ? Number(v.sales) : 0,
-                        thresholdValue: v.thresholdValue !== undefined ? Number(v.thresholdValue) : 0,
+                        thresholdValue: v.thresholdValue !== undefined ? Number(v.thresholdValue) : undefined, // keep undefined
                         images: variantImages.slice(-5),
                         isActive: v.isActive !== false,
-                        createdAt: new Date(),
+                        createdAt: new Date()
                     };
                 });
 
-                shadeOptions = variants.map((v) => v.shadeName).filter(Boolean);
-                colorOptions = variants.map((v) => v.hex).filter(Boolean);
+                shadeOptions = variants.map(v => v.shadeName).filter(Boolean);
+                colorOptions = variants.map(v => v.hex).filter(Boolean);
             }
         } catch (err) {
             console.error("❌ Variants parsing error:", err);
             return res.status(400).json({ message: "Invalid variants data", error: err.message });
         }
 
-        // ✅ Global threshold for non-variant products
-        if (variants.length === 0 && isNaN(thresholdValue)) {
-            return res
-                .status(400)
-                .json({ message: "❌ thresholdValue is required for non-variant products" });
+        // ✅ Validation based on global vs variant
+        if (variants.length === 0) {
+            if (isNaN(parsedQuantity) || parsedQuantity < 0) {
+                return res.status(400).json({ message: "❌ quantity is required for non-variant products and must be a number" });
+            }
+            if (isNaN(thresholdValue) || thresholdValue < 0) {
+                return res.status(400).json({ message: "❌ thresholdValue is required for non-variant products and must be a number" });
+            }
+        } else {
+            if (quantity !== undefined || rawThresholdValue !== undefined) {
+                return res.status(400).json({ message: "❌ Do not provide global quantity/thresholdValue when variants exist" });
+            }
+
+            for (let i = 0; i < variants.length; i++) {
+                const v = variants[i];
+                if (!v.images || v.images.length === 0) {
+                    return res.status(400).json({ message: `❌ Variant #${i + 1}: at least one image is required` });
+                }
+                if (v.stock === undefined || isNaN(v.stock)) {
+                    return res.status(400).json({ message: `❌ Variant #${i + 1}: stock is required and must be a number` });
+                }
+                if (v.thresholdValue === undefined || isNaN(v.thresholdValue)) {
+                    return res.status(400).json({ message: `❌ Variant #${i + 1}: thresholdValue is required and must be a number` });
+                }
+            }
         }
 
         // ✅ Image upload helper
         const uploadImageFromUrl = async (url) => {
-            const result = await cloudinary.uploader.upload(url, {
-                folder: "products",
-                resource_type: "image",
-            });
+            const result = await cloudinary.uploader.upload(url, { folder: "products", resource_type: "image" });
             return result.secure_url;
         };
 
         let images = [];
         if (req.files?.length > 0) {
-            const mainImages = req.files.filter((f) => f.fieldname === "images");
-            images.push(...mainImages.map((file) => file.secure_url || file.path || file.url));
+            images.push(...req.files.filter(f => f.fieldname === "images").map(f => f.secure_url || f.path || f.url));
         }
 
         if (req.body.images || req.body.imageUrls) {
@@ -217,59 +204,33 @@ const addProductController = async (req, res) => {
                 if (typeof raw === "string") raw = JSON.parse(raw);
                 const urls = Array.isArray(raw) ? raw : [raw];
                 for (const url of urls) {
-                    try {
-                        const uploaded = await uploadImageFromUrl(url);
-                        images.push(uploaded);
-                    } catch (err) {
-                        console.warn(`❌ Failed to upload image from URL: ${url}`, err.message);
-                    }
+                    try { images.push(await uploadImageFromUrl(url)); } catch (err) { console.warn("⚠️ Failed to upload image:", url, err.message); }
                 }
-            } catch (err) {
-                console.warn("⚠️ Could not parse image URLs:", err.message);
-            }
+            } catch (err) { console.warn("⚠️ Could not parse image URLs:", err.message); }
         }
 
         // ✅ Resolve formulation
         let formulationId = null;
         if (formulation) {
-            try {
-                formulationId = await resolveFormulationId(formulation);
-            } catch (err) {
-                return res.status(400).json({ message: err.message });
-            }
+            try { formulationId = await resolveFormulationId(formulation); } catch (err) { return res.status(400).json({ message: err.message }); }
         }
 
-        // ✅ Compute total quantity
-        const totalQuantity =
-            variants.length > 0
-                ? variants.reduce((sum, v) => sum + (v.stock || 0), 0)
-                : parsedQuantity;
-
-        // ✅ Stock status
+        // ✅ Compute total quantity & status
+        const totalQuantity = variants.length > 0 ? variants.reduce((sum, v) => sum + (v.stock || 0), 0) : parsedQuantity;
         let status = "In-stock";
         if (variants.length > 0) {
-            const allStatuses = variants.map((v) =>
-                v.stock === 0 ? "Out of stock" : v.stock < (v.thresholdValue || 0) ? "Low stock" : "In-stock"
-            );
-            if (allStatuses.every((s) => s === "Out of stock")) status = "Out of stock";
-            else if (allStatuses.some((s) => s === "Low stock")) status = "Low stock";
+            const allStatuses = variants.map(v => v.stock === 0 ? "Out of stock" : v.stock < (v.thresholdValue || 0) ? "Low stock" : "In-stock");
+            if (allStatuses.every(s => s === "Out of stock")) status = "Out of stock";
+            else if (allStatuses.some(s => s === "Low stock")) status = "Low stock";
         } else {
-            status =
-                totalQuantity === 0
-                    ? "Out of stock"
-                    : totalQuantity < thresholdValue
-                        ? "Low stock"
-                        : "In-stock";
+            status = totalQuantity === 0 ? "Out of stock" : totalQuantity < thresholdValue ? "Low stock" : "In-stock";
         }
 
         // ✅ Extract dynamic category attributes
         let attributes = {};
-        const mainCategory = foundCategories[0];
-        if (mainCategory?.attributes?.length > 0) {
-            for (const attr of mainCategory.attributes) {
-                if (req.body[attr.key] !== undefined) {
-                    attributes[attr.key] = req.body[attr.key];
-                }
+        if (foundCategories[0]?.attributes?.length > 0) {
+            for (const attr of foundCategories[0].attributes) {
+                if (req.body[attr.key] !== undefined) attributes[attr.key] = req.body[attr.key];
             }
         }
 
@@ -285,8 +246,8 @@ const addProductController = async (req, res) => {
             formulation: formulationId,
             price: parsedPrice,
             buyingPrice: parsedBuyingPrice,
-            quantity: totalQuantity,
-            thresholdValue,
+            quantity: variants.length > 0 ? undefined : parsedQuantity,
+            thresholdValue: variants.length > 0 ? undefined : thresholdValue,
             expiryDate,
             images,
             brand,
@@ -313,11 +274,7 @@ const addProductController = async (req, res) => {
         res.status(201).json({ message: "✅ Product created successfully", product });
     } catch (error) {
         console.error("❌ Product placement error:", util.inspect(error, { showHidden: false, depth: null }));
-        res.status(500).json({
-            message: "❌ Product placement failed",
-            error: error.message || "Unknown error",
-            stack: error.stack,
-        });
+        res.status(500).json({ message: "❌ Product placement failed", error: error.message || "Unknown error", stack: error.stack });
     }
 };
 
