@@ -169,7 +169,90 @@ const normalizeByType = async (body) => {
 // ✅ Create
 // const createPromotion = async (req, res) => {
 //   try {
-//     const status = calculateStatus(req.body.startDate, req.body.endDate);
+//     if (!req.body.startDate || !req.body.endDate) {
+//       return res
+//         .status(400)
+//         .json({ message: "❌ startDate and endDate are required" });
+//     }
+
+//     // ✅ Parse IST → UTC
+//     let startDateUTC, endDateUTC;
+//     try {
+//       startDateUTC = parseISTtoUTC(req.body.startDate, "startDate");
+//       endDateUTC = parseISTtoUTC(req.body.endDate, "endDate");
+//     } catch (err) {
+//       return res.status(400).json({ message: err.message });
+//     }
+
+//     if (endDateUTC <= startDateUTC) {
+//       return res
+//         .status(400)
+//         .json({ message: "❌ endDate must be after startDate" });
+//     }
+
+//     const categories = await resolveCategories(req.body.categories);
+//     const brands = await resolveBrands(req.body.brands);
+
+//     // Images
+//     const images = [
+//       ...(req.files?.map((f) => f.path) || []),
+//       ...(Array.isArray(req.body.images)
+//         ? req.body.images.filter(Boolean)
+//         : []),
+//       ...(req.body.image ? [req.body.image] : []),
+//     ];
+
+//     const { promotionConfig } = await normalizeByType(req.body);
+
+//     // ✅ Status calculation based on UTC
+//     const status = calculateStatus(startDateUTC, endDateUTC);
+//     const isScheduled = status === "upcoming"; // 👈 fix
+
+//     const promotion = await Promotion.create({
+//       ...req.body,
+//       categories,
+//       brands,
+//       images,
+//       promotionConfig,
+//       startDate: startDateUTC,
+//       endDate: endDateUTC,
+//       status,
+//       isScheduled,
+//     });
+
+//     res.status(201).json({
+//       message: "✅ Promotion created",
+//       id: promotion._id,  // ✅ added
+//       promotion
+//     });
+
+//   } catch (err) {
+//     res.status(400).json({
+//       message: "❌ Failed to create promotion",
+//       error: err.message,
+//     });
+//   }
+// };
+// ✅ Create Promotion
+// const createPromotion = async (req, res) => {
+//   try {
+//     if (!req.body.startDate || !req.body.endDate) {
+//       return res.status(400).json({ message: "❌ startDate and endDate are required" });
+//     }
+
+//     // ✅ Parse IST → UTC
+//     let startDateUTC, endDateUTC;
+//     try {
+//       startDateUTC = parseISTtoUTC(req.body.startDate, "startDate");
+//       endDateUTC = parseISTtoUTC(req.body.endDate, "endDate");
+//     } catch (err) {
+//       return res.status(400).json({ message: err.message });
+//     }
+
+//     if (endDateUTC <= startDateUTC) {
+//       return res.status(400).json({ message: "❌ endDate must be after startDate" });
+//     }
+
 //     const categories = await resolveCategories(req.body.categories);
 //     const brands = await resolveBrands(req.body.brands);
 
@@ -182,63 +265,108 @@ const normalizeByType = async (body) => {
 
 //     const { promotionConfig } = await normalizeByType(req.body);
 
+//     // ✅ Handle displaySection
+//     let displaySection = ["product"]; // default
+//     if (req.body.displaySection) {
+//       if (typeof req.body.displaySection === "string") {
+//         displaySection = req.body.displaySection.split(",").map((s) => s.trim());
+//       } else if (Array.isArray(req.body.displaySection)) {
+//         displaySection = req.body.displaySection;
+//       }
+//     }
+
+//     // ✅ Status calculation based on UTC
+//     const status = calculateStatus(startDateUTC, endDateUTC);
+//     const isScheduled = status === "upcoming";
+
 //     const promotion = await Promotion.create({
 //       ...req.body,
 //       categories,
-//       isScheduled: true,
 //       brands,
-//       status,
 //       images,
 //       promotionConfig,
+//       startDate: startDateUTC,
+//       endDate: endDateUTC,
+//       status,
+//       isScheduled,
+//       displaySection, // 👈 added
 //     });
 
-//     res.status(201).json({ message: "Promotion created", promotion });
+//     res.status(201).json({
+//       message: "✅ Promotion created",
+//       id: promotion._id,
+//       promotion,
+//     });
 //   } catch (err) {
-//     res.status(400).json({ message: "Failed to create promotion", error: err.message });
+//     res.status(400).json({
+//       message: "❌ Failed to create promotion",
+//       error: err.message,
+//     });
 //   }
 // };
 
-// ✅ Create
+
+const ALLOWED_SECTIONS = ["banner", "product", "offers"];
+
 const createPromotion = async (req, res) => {
   try {
-    if (!req.body.startDate || !req.body.endDate) {
-      return res
-        .status(400)
-        .json({ message: "❌ startDate and endDate are required" });
+    const { startDate, endDate, displaySection } = req.body;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({ message: "❌ startDate and endDate are required" });
     }
 
-    // ✅ Parse IST → UTC
-    let startDateUTC, endDateUTC;
-    try {
-      startDateUTC = parseISTtoUTC(req.body.startDate, "startDate");
-      endDateUTC = parseISTtoUTC(req.body.endDate, "endDate");
-    } catch (err) {
-      return res.status(400).json({ message: err.message });
-    }
+    // Parse IST → UTC
+    const startDateUTC = parseISTtoUTC(startDate, "startDate");
+    const endDateUTC = parseISTtoUTC(endDate, "endDate");
 
     if (endDateUTC <= startDateUTC) {
-      return res
-        .status(400)
-        .json({ message: "❌ endDate must be after startDate" });
+      return res.status(400).json({ message: "❌ endDate must be after startDate" });
     }
 
-    const categories = await resolveCategories(req.body.categories);
-    const brands = await resolveBrands(req.body.brands);
+    // Parse and validate displaySection
+    if (!displaySection) {
+      return res.status(400).json({
+        message: `❌ At least one display section must be selected (${ALLOWED_SECTIONS.join(", ")})`,
+      });
+    }
 
-    // Images
+    let sections = [];
+    if (typeof displaySection === "string") {
+      sections = displaySection.split(",").map((s) => s.trim().toLowerCase());
+    } else if (Array.isArray(displaySection)) {
+      sections = displaySection.map((s) => s.trim().toLowerCase());
+    }
+
+    // Keep only valid sections
+    sections = sections.filter((s) => ALLOWED_SECTIONS.includes(s));
+    if (sections.length === 0) {
+      return res.status(400).json({
+        message: `❌ At least one valid display section must be selected (${ALLOWED_SECTIONS.join(", ")})`,
+      });
+    }
+
+    // ✅ Normalize categories and brands to arrays
+    const categoriesInput = req.body.categories
+      ? Array.isArray(req.body.categories) ? req.body.categories : [req.body.categories]
+      : [];
+    const categories = await resolveCategories(categoriesInput);
+
+    const brandsInput = req.body.brands
+      ? Array.isArray(req.body.brands) ? req.body.brands : [req.body.brands]
+      : [];
+    const brands = await resolveBrands(brandsInput);
+
     const images = [
       ...(req.files?.map((f) => f.path) || []),
-      ...(Array.isArray(req.body.images)
-        ? req.body.images.filter(Boolean)
-        : []),
+      ...(Array.isArray(req.body.images) ? req.body.images.filter(Boolean) : []),
       ...(req.body.image ? [req.body.image] : []),
     ];
 
     const { promotionConfig } = await normalizeByType(req.body);
 
-    // ✅ Status calculation based on UTC
     const status = calculateStatus(startDateUTC, endDateUTC);
-    const isScheduled = status === "upcoming"; // 👈 fix
+    const isScheduled = status === "upcoming";
 
     const promotion = await Promotion.create({
       ...req.body,
@@ -250,24 +378,14 @@ const createPromotion = async (req, res) => {
       endDate: endDateUTC,
       status,
       isScheduled,
+      displaySection: sections,
     });
 
-    res.status(201).json({
-      message: "✅ Promotion created",
-      id: promotion._id,  // ✅ added
-      promotion
-    });
-
+    res.status(201).json({ message: "✅ Promotion created", id: promotion._id, promotion });
   } catch (err) {
-    res.status(400).json({
-      message: "❌ Failed to create promotion",
-      error: err.message,
-    });
+    res.status(400).json({ message: "❌ Failed to create promotion", error: err.message });
   }
 };
-// ✅ Simplified Update Promotion
-// controllers/admin/promotionController.js
-// ✅ Get Promotion by ID
 const getPromotionById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -322,36 +440,50 @@ const getPromotionById = async (req, res) => {
   }
 };
 
-
 const updatePromotion = async (req, res) => {
   try {
     const { id } = req.params;
+    const existing = await Promotion.findById(id);
+    if (!existing) return res.status(404).json({ message: "Promotion not found" });
 
-    // compute status fresh
-    const status = calculateStatus(req.body.startDate, req.body.endDate);
+    // Handle displaySection if passed
+    let displaySection = existing.displaySection;
+    if (req.body.displaySection) {
+      let sections = [];
+      if (typeof req.body.displaySection === "string") {
+        sections = req.body.displaySection.split(",").map((s) => s.trim().toLowerCase());
+      } else if (Array.isArray(req.body.displaySection)) {
+        sections = req.body.displaySection.map((s) => s.trim().toLowerCase());
+      }
 
-    // resolve categories & brands (only if provided)
+      // Keep only valid sections
+      sections = sections.filter((s) => ALLOWED_SECTIONS.includes(s));
+      if (sections.length === 0) {
+        return res.status(400).json({
+          message: `❌ At least one valid display section must be selected (${ALLOWED_SECTIONS.join(", ")})`,
+        });
+      }
+
+      displaySection = sections;
+    }
+
+    const status = calculateStatus(req.body.startDate || existing.startDate, req.body.endDate || existing.endDate);
+
+    // Normalize categories & brands
     const categories = req.body.categories
-      ? await resolveCategories(req.body.categories)
+      ? await resolveCategories(Array.isArray(req.body.categories) ? req.body.categories : [req.body.categories])
       : undefined;
 
     const brands = req.body.brands
-      ? await resolveBrands(req.body.brands)
+      ? await resolveBrands(Array.isArray(req.body.brands) ? req.body.brands : [req.body.brands])
       : undefined;
 
-    // handle images
     const incomingImages = [
       ...(req.files?.map((f) => f.path) || []),
       ...(Array.isArray(req.body.images) ? req.body.images.filter(Boolean) : []),
       ...(req.body.image ? [req.body.image] : []),
     ];
 
-    const existing = await Promotion.findById(id);
-    if (!existing) {
-      return res.status(404).json({ message: "Promotion not found" });
-    }
-
-    // ✅ Normalize promotionConfig if passed
     let normalizedConfig = existing.promotionConfig;
     if (req.body.promotionConfig || req.body.promotionType) {
       const { promotionConfig } = await normalizeByType({
@@ -363,39 +495,177 @@ const updatePromotion = async (req, res) => {
       normalizedConfig = promotionConfig;
     }
 
-    // prepare update data
     const updateData = {
-      ...req.body, // take all body fields directly
+      ...req.body,
       status,
       ...(categories !== undefined && { categories }),
       ...(brands !== undefined && { brands }),
-      images: incomingImages.length
-        ? [...(existing.images || []), ...incomingImages]
-        : existing.images,
-      promotionConfig: normalizedConfig, // ✅ allow update
+      images: incomingImages.length ? [...(existing.images || []), ...incomingImages] : existing.images,
+      promotionConfig: normalizedConfig,
+      displaySection,
     };
 
-    // prevent overwriting promotionType accidentally (unless explicitly provided)
-    if (!req.body.promotionType) {
-      updateData.promotionType = existing.promotionType;
-    }
+    if (!req.body.promotionType) updateData.promotionType = existing.promotionType;
 
-    const promotion = await Promotion.findByIdAndUpdate(id, updateData, {
-      new: true,
-      runValidators: true,
-    });
+    const promotion = await Promotion.findByIdAndUpdate(id, updateData, { new: true, runValidators: true });
 
-    res.status(200).json({
-      message: "Promotion updated",
-      id: promotion._id,  // ✅ added
-      promotion
-    });
+    res.status(200).json({ message: "Promotion updated", id: promotion._id, promotion });
   } catch (err) {
-    res
-      .status(400)
-      .json({ message: "Failed to update promotion", error: err.message });
+    res.status(400).json({ message: "Failed to update promotion", error: err.message });
   }
 };
+// ✅ Update Promotion
+// const updatePromotion = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+
+//     const existing = await Promotion.findById(id);
+//     if (!existing) {
+//       return res.status(404).json({ message: "Promotion not found" });
+//     }
+
+//     // compute status fresh
+//     const status = calculateStatus(req.body.startDate || existing.startDate, req.body.endDate || existing.endDate);
+
+//     // resolve categories & brands (only if provided)
+//     const categories = req.body.categories ? await resolveCategories(req.body.categories) : undefined;
+//     const brands = req.body.brands ? await resolveBrands(req.body.brands) : undefined;
+
+//     // handle images
+//     const incomingImages = [
+//       ...(req.files?.map((f) => f.path) || []),
+//       ...(Array.isArray(req.body.images) ? req.body.images.filter(Boolean) : []),
+//       ...(req.body.image ? [req.body.image] : []),
+//     ];
+
+//     // ✅ Normalize promotionConfig if passed
+//     let normalizedConfig = existing.promotionConfig;
+//     if (req.body.promotionConfig || req.body.promotionType) {
+//       const { promotionConfig } = await normalizeByType({
+//         promotionType: req.body.promotionType || existing.promotionType,
+//         promotionConfig: req.body.promotionConfig || existing.promotionConfig,
+//         discountUnit: req.body.discountUnit || existing.discountUnit,
+//         discountValue: req.body.discountValue || existing.discountValue,
+//       });
+//       normalizedConfig = promotionConfig;
+//     }
+
+//     // ✅ Handle displaySection
+//     let displaySection = existing.displaySection;
+//     if (req.body.displaySection) {
+//       if (typeof req.body.displaySection === "string") {
+//         displaySection = req.body.displaySection.split(",").map((s) => s.trim());
+//       } else if (Array.isArray(req.body.displaySection)) {
+//         displaySection = req.body.displaySection;
+//       }
+//     }
+
+//     // prepare update data
+//     const updateData = {
+//       ...req.body,
+//       status,
+//       ...(categories !== undefined && { categories }),
+//       ...(brands !== undefined && { brands }),
+//       images: incomingImages.length
+//         ? [...(existing.images || []), ...incomingImages]
+//         : existing.images,
+//       promotionConfig: normalizedConfig,
+//       displaySection, // 👈 added
+//     };
+
+//     // prevent overwriting promotionType accidentally
+//     if (!req.body.promotionType) {
+//       updateData.promotionType = existing.promotionType;
+//     }
+
+//     const promotion = await Promotion.findByIdAndUpdate(id, updateData, {
+//       new: true,
+//       runValidators: true,
+//     });
+
+//     res.status(200).json({
+//       message: "Promotion updated",
+//       id: promotion._id,
+//       promotion,
+//     });
+//   } catch (err) {
+//     res.status(400).json({ message: "Failed to update promotion", error: err.message });
+//   }
+// };
+
+// const updatePromotion = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+
+//     // compute status fresh
+//     const status = calculateStatus(req.body.startDate, req.body.endDate);
+
+//     // resolve categories & brands (only if provided)
+//     const categories = req.body.categories
+//       ? await resolveCategories(req.body.categories)
+//       : undefined;
+
+//     const brands = req.body.brands
+//       ? await resolveBrands(req.body.brands)
+//       : undefined;
+
+//     // handle images
+//     const incomingImages = [
+//       ...(req.files?.map((f) => f.path) || []),
+//       ...(Array.isArray(req.body.images) ? req.body.images.filter(Boolean) : []),
+//       ...(req.body.image ? [req.body.image] : []),
+//     ];
+
+//     const existing = await Promotion.findById(id);
+//     if (!existing) {
+//       return res.status(404).json({ message: "Promotion not found" });
+//     }
+
+//     // ✅ Normalize promotionConfig if passed
+//     let normalizedConfig = existing.promotionConfig;
+//     if (req.body.promotionConfig || req.body.promotionType) {
+//       const { promotionConfig } = await normalizeByType({
+//         promotionType: req.body.promotionType || existing.promotionType,
+//         promotionConfig: req.body.promotionConfig || existing.promotionConfig,
+//         discountUnit: req.body.discountUnit || existing.discountUnit,
+//         discountValue: req.body.discountValue || existing.discountValue,
+//       });
+//       normalizedConfig = promotionConfig;
+//     }
+
+//     // prepare update data
+//     const updateData = {
+//       ...req.body, // take all body fields directly
+//       status,
+//       ...(categories !== undefined && { categories }),
+//       ...(brands !== undefined && { brands }),
+//       images: incomingImages.length
+//         ? [...(existing.images || []), ...incomingImages]
+//         : existing.images,
+//       promotionConfig: normalizedConfig, // ✅ allow update
+//     };
+
+//     // prevent overwriting promotionType accidentally (unless explicitly provided)
+//     if (!req.body.promotionType) {
+//       updateData.promotionType = existing.promotionType;
+//     }
+
+//     const promotion = await Promotion.findByIdAndUpdate(id, updateData, {
+//       new: true,
+//       runValidators: true,
+//     });
+
+//     res.status(200).json({
+//       message: "Promotion updated",
+//       id: promotion._id,  // ✅ added
+//       promotion
+//     });
+//   } catch (err) {
+//     res
+//       .status(400)
+//       .json({ message: "Failed to update promotion", error: err.message });
+//   }
+// };
 
 // ✅ Delete Promotion
 const deletePromotion = async (req, res) => {
