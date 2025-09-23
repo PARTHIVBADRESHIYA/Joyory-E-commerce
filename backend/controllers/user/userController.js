@@ -172,53 +172,135 @@ const userSignup = async (req, res) => {
     }
 };
 
-
-// @desc    User Login (5 attempts → 5min lock)
 const userLogin = async (req, res) => {
     try {
         const { email, password } = req.body;
 
-
-        const user = await User.findOne({ email });
-        if (!user || user.role !== 'user') return res.status(401).json({ message: 'Invalid credentials' });
-
-        if (!user.isVerified) {
-            return res.status(403).json({ message: 'Please verify your email before logging in.' });
+        // 1) Validate input
+        if (!email || !password) {
+            return res.status(400).json({
+                message: "Please enter both your email and password to log in."
+            });
         }
 
+        // 2) Check user exists & role
+        const user = await User.findOne({ email });
+        if (!user || user.role !== "user") {
+            return res.status(401).json({
+                message: "No account found with this email. Please check your email or sign up to continue."
+            });
+        }
 
-        // Check lock
+        // 3) Email verification check
+        if (!user.isVerified) {
+            return res.status(403).json({
+                message: "Your email is not verified yet. Please verify your email before logging in."
+            });
+        }
+
+        // 4) Lockout check
         if (user.lockUntil && user.lockUntil > new Date()) {
             const remaining = user.lockUntil - new Date();
             const m = Math.floor((remaining % 3600000) / 60000);
             const s = Math.floor((remaining % 60000) / 1000);
-            return res.status(403).json({ message: `Account locked. Try again in ${m}m ${s}s.` });
+            return res.status(403).json({
+                message: `Your account has been temporarily locked due to multiple failed login attempts. Please try again in ${m}m ${s}s.`
+            });
         }
 
+        // 5) Password check
         const isMatch = await user.matchPassword(password);
         if (!isMatch) {
             user.loginAttempts = (user.loginAttempts || 0) + 1;
 
             if (user.loginAttempts >= 5) {
-                user.lockUntil = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+                user.lockUntil = new Date(Date.now() + 5 * 60 * 1000); // lock 5 mins
                 user.loginAttempts = 0;
+
+                await user.save();
+                return res.status(403).json({
+                    message: "Too many failed attempts. Your account has been locked for 5 minutes."
+                });
             }
 
             await user.save();
-            return res.status(401).json({ message: 'Invalid credentials' });
+            return res.status(401).json({
+                message: `The password you entered is incorrect. You have ${5 - user.loginAttempts} attempts left.`
+            });
         }
 
-        // Success
+        // 6) Success
         user.loginAttempts = 0;
         user.lockUntil = undefined;
         await user.save();
 
         const token = generateToken(user);
-        res.status(200).json({ token, user: { id: user._id, name: user.name, role: user.role } });
+
+        return res.status(200).json({
+            message: `Welcome back, ${user.name}!`,
+            token,
+            user: {
+                id: user._id,
+                name: user.name,
+                role: user.role
+            }
+        });
+
     } catch (err) {
-        res.status(500).json({ message: 'Login failed', error: err.message });
+        console.error("❌ Login error:", err);
+        return res.status(500).json({
+            message: "Something went wrong while trying to log you in. Please try again later."
+        });
     }
 };
+
+
+// @desc    User Login (5 attempts → 5min lock)
+// const userLogin = async (req, res) => {
+//     try {
+//         const { email, password } = req.body;
+
+
+//         const user = await User.findOne({ email });
+//         if (!user || user.role !== 'user') return res.status(401).json({ message: 'Invalid credentials' });
+
+//         if (!user.isVerified) {
+//             return res.status(403).json({ message: 'Please verify your email before logging in.' });
+//         }
+
+
+//         // Check lock
+//         if (user.lockUntil && user.lockUntil > new Date()) {
+//             const remaining = user.lockUntil - new Date();
+//             const m = Math.floor((remaining % 3600000) / 60000);
+//             const s = Math.floor((remaining % 60000) / 1000);
+//             return res.status(403).json({ message: `Account locked. Try again in ${m}m ${s}s.` });
+//         }
+
+//         const isMatch = await user.matchPassword(password);
+//         if (!isMatch) {
+//             user.loginAttempts = (user.loginAttempts || 0) + 1;
+
+//             if (user.loginAttempts >= 5) {
+//                 user.lockUntil = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+//                 user.loginAttempts = 0;
+//             }
+
+//             await user.save();
+//             return res.status(401).json({ message: 'Invalid credentials' });
+//         }
+
+//         // Success
+//         user.loginAttempts = 0;
+//         user.lockUntil = undefined;
+//         await user.save();
+
+//         const token = generateToken(user);
+//         res.status(200).json({ token, user: { id: user._id, name: user.name, role: user.role } });
+//     } catch (err) {
+//         res.status(500).json({ message: 'Login failed', error: err.message });
+//     }
+// };
 
 // Track Product View (with authenticated user)
 const trackProductView = async (req, res) => {

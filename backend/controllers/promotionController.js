@@ -478,6 +478,7 @@ const updatePromotion = async (req, res) => {
       ? await resolveBrands(Array.isArray(req.body.brands) ? req.body.brands : [req.body.brands])
       : undefined;
 
+    // Collect new images
     const incomingImages = [
       ...(req.files?.map((f) => f.path) || []),
       ...(Array.isArray(req.body.images) ? req.body.images.filter(Boolean) : []),
@@ -500,7 +501,8 @@ const updatePromotion = async (req, res) => {
       status,
       ...(categories !== undefined && { categories }),
       ...(brands !== undefined && { brands }),
-      images: incomingImages.length ? [...(existing.images || []), ...incomingImages] : existing.images,
+      // ✅ Replace old images with new ones if uploaded
+      images: incomingImages.length ? incomingImages : existing.images,
       promotionConfig: normalizedConfig,
       displaySection,
     };
@@ -514,6 +516,7 @@ const updatePromotion = async (req, res) => {
     res.status(400).json({ message: "Failed to update promotion", error: err.message });
   }
 };
+
 // ✅ Update Promotion
 // const updatePromotion = async (req, res) => {
 //   try {

@@ -570,22 +570,50 @@ export const getSingleProduct = async (req, res) => {
                 }
             }
         }
-
-        // 8) ✅ Stock status (like admin)
-        let stockStatus = "In-stock";
+        // 8) ✅ Stock status (user-friendly + status flag)
         if (product.variants?.length) {
+            // Variant-level only
             product.variants = product.variants.map(v => {
-                let statusMessage;
-                if (v.stock === 0) statusMessage = "Out of stock";
-                else if (v.stock < (v.thresholdValue || 5)) statusMessage = `Hurry! Only ${v.stock} left`;
-                else statusMessage = "In-stock";
-                return { ...v, status: statusMessage };
+                let message, status;
+
+                if (v.stock === 0) {
+                    status = "outOfStock";
+                    message = "No stock available now, please try again later";
+                } else if (v.stock < (v.thresholdValue || 5)) {
+                    status = "lowStock";
+                    message = `Few left (${v.stock})`;
+                } else {
+                    status = "inStock";
+                    message = "In-stock";
+                }
+
+                return { ...v, status, message };
             });
+
+            // ❌ remove global fields when variants exist
+            delete product.quantity;
+            delete product.status;
         } else {
-            if (product.quantity === 0) stockStatus = "Out of stock";
-            else if (product.quantity < (product.thresholdValue || 5))
-                stockStatus = `Hurry! Only ${product.quantity} left`;
+            // Non-variant product
+            let message, status;
+
+            if (product.quantity === 0) {
+                status = "outOfStock";
+                message = "No stock available now, please try again later";
+            } else if (product.quantity < (product.thresholdValue || 5)) {
+                status = "lowStock";
+                message = `Few left (${product.quantity})`;
+            } else {
+                status = "inStock";
+                message = "In-stock";
+            }
+
+            product.status = status;   // ✅ flag
+            product.message = message; // ✅ user-friendly text
         }
+
+
+
 
         // 9) Recommendations
         const [moreLikeThis, boughtTogether, alsoViewed] = await Promise.all([
@@ -594,7 +622,6 @@ export const getSingleProduct = async (req, res) => {
             getRecommendations({ mode: "alsoViewed", productId, userId: req.user?.id })
         ]);
 
-        // 10) Response
         res.status(200).json({
             _id: product._id,
             name: product.name,
@@ -615,16 +642,20 @@ export const getSingleProduct = async (req, res) => {
             category: categoryObj,
             shadeOptions: buildOptions(product).shadeOptions,
             colorOptions: buildOptions(product).colorOptions,
-            variants: product.variants || [],
+            variants: product.variants || [],   // ✅ each variant has {status, message}
+            status: product.status || null,     // ✅ for non-variant products
+            message: product.message || null,   // ✅ for non-variant products
             avgRating,
             totalRatings: count || 0,
-            stockStatus, // ✅ Added for non-variant products
             recommendations: {
                 moreLikeThis,
                 boughtTogether,
                 alsoViewed
             }
         });
+
+
+
     } catch (err) {
         console.error("❌ getSingleProduct error:", err);
         res.status(500).json({ message: "Server error", error: err.message });
