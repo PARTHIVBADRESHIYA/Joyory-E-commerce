@@ -35,25 +35,47 @@ export const verifyOrderOwnership = async (req, res, next) => {
     }
 };
 
+// export const authenticateUser = async (req, res, next) => {
+//     try {
+//         const token = req.headers.authorization?.split(' ')[1];
+//         if (!token) return res.status(401).json({ message: 'Unauthorized' });
+
+//         const decoded = jwt.verify(token, JWT_SECRET);
+//         const user = await User.findById(decoded.id);
+
+//         if (!user || user.role !== 'user') {
+//             return res.status(403).json({ message: 'Forbidden: Not a user' });
+//         }
+
+//         req.user = user;
+//         next();
+//     } catch (err) {
+//         res.status(401).json({ message: 'Invalid Token', error: err.message });
+//     }
+// };
 export const authenticateUser = async (req, res, next) => {
     try {
-        const token = req.headers.authorization?.split(' ')[1];
-        if (!token) return res.status(401).json({ message: 'Unauthorized' });
+        // ✅ Read token from cookie
+        const token = req.cookies?.token;
+        if (!token) return res.status(401).json({ message: 'Unauthorized: No token provided' });
 
+        // ✅ Verify JWT
         const decoded = jwt.verify(token, JWT_SECRET);
-        const user = await User.findById(decoded.id);
 
+        // ✅ Fetch user
+        const user = await User.findById(decoded.id);
         if (!user || user.role !== 'user') {
             return res.status(403).json({ message: 'Forbidden: Not a user' });
         }
 
+        // ✅ Attach user to request
         req.user = user;
         next();
     } catch (err) {
-        res.status(401).json({ message: 'Invalid Token', error: err.message });
+        console.error("❌ JWT verification failed:", err.message);
+        return res.status(401).json({ message: 'Invalid token', error: err.message });
     }
 };
-
 /* ===============================
    SELLER AUTHENTICATION
 ================================ */
@@ -92,74 +114,6 @@ export const optionalAuth = async (req, res, next) => {
     }
     next();
 };
-
-// export const verifyAdminOrTeamMember = async (req, res, next) => {
-//     const token = req.headers.authorization?.split(' ')[1];
-//     if (!token) return res.status(401).json({ message: 'Unauthorized: No token provided' });
-
-//     try {
-//         const decoded = jwt.verify(token, JWT_SECRET);
-
-//         // ✅ SUPER ADMIN
-//         const mainAdmin = await Admin.findById(decoded.id);
-//         if (mainAdmin) {
-//             req.admin = mainAdmin;
-//             req.isSuperAdmin = true;
-//             req.adminId = decoded.id;
-
-//             // ✅ REQUIRED for Notification system
-//             req.user = {
-//                 id: mainAdmin._id,
-//                 email: mainAdmin.email,
-//                 type: 'Admin',
-//             };
-
-//             return next();
-//         }
-
-//         // ✅ ADMIN ROLE ADMIN
-//         const roleAdmin = await AdminRoleAdmin.findById(decoded.id).populate('role');
-//         if (roleAdmin) {
-//             if (!roleAdmin.role || !roleAdmin.role._id) {
-//                 return res.status(500).json({ message: 'Assigned role not found or not populated' });
-//             }
-
-//             req.roleAdmin = roleAdmin;
-//             req.rolePermissions = roleAdmin.role.permissions;
-//             req.isRoleAdmin = true;
-
-//             // ✅ REQUIRED for Notification system
-//             req.user = {
-//                 id: roleAdmin._id,
-//                 email: roleAdmin.email,
-//                 type: 'AdminRoleAdmin',
-//             };
-
-//             return next();
-//         }
-
-//         // ✅ TEAM MEMBER
-//         const teamMember = await TeamMember.findById(decoded.id).populate('role');
-//         if (teamMember) {
-//             req.teamMember = teamMember;
-//             req.rolePermissions = teamMember.role.permissions;
-
-//             // ✅ REQUIRED for Notification system
-//             req.user = {
-//                 id: teamMember._id,
-//                 email: teamMember.email,
-//                 type: 'TeamMember',
-//             };
-
-//             return next();
-//         }
-
-//         return res.status(403).json({ message: 'Invalid token or user not found' });
-//     } catch (err) {
-//         return res.status(401).json({ message: 'Invalid token', error: err.message });
-//     }
-// };
-
 
 export const verifyAdminOrTeamMember = async (req, res, next) => {
     const token = req.headers.authorization?.split(' ')[1];

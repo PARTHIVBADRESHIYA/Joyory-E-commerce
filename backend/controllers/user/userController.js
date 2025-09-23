@@ -236,15 +236,22 @@ const userLogin = async (req, res) => {
 
         const token = generateToken(user);
 
+        res.cookie("token", token, {
+            httpOnly: true,           // JS cannot access it → prevents XSS
+            secure: process.env.NODE_ENV === "production", // HTTPS only
+            sameSite: "Strict",       // prevents CSRF
+            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+        });
+
         return res.status(200).json({
             message: `Welcome back, ${user.name}!`,
-            token,
             user: {
                 id: user._id,
                 name: user.name,
                 role: user.role
             }
         });
+
 
     } catch (err) {
         console.error("❌ Login error:", err);
@@ -338,12 +345,18 @@ const trackProductView = async (req, res) => {
     }
 };
 
+// controllers/authController.js
+const logoutUser = (req, res) => {
+    res.clearCookie('token'); // removes the JWT cookie
+    return res.status(200).json({ message: 'Logged out successfully' });
+};
 
 
 export {
     userSignup,
     userLogin,
-    trackProductView
+    trackProductView,
+    logoutUser
 };
 
 
