@@ -9,6 +9,7 @@ import Category from '../../models/Category.js';
 import { getDescendantCategoryIds, getCategoryFallbackChain } from '../../middlewares/utils/categoryUtils.js';
 import { getRecommendations } from '../../middlewares/utils/recommendationService.js';
 import { formatProductCard } from '../../middlewares/utils/recommendationService.js';
+import { enrichProductWithStockAndOptions } from "../../middlewares/services/productHelpers.js";
 import { applyFlatDiscount, asMoney, productMatchesPromo } from '../../controllers/user/userPromotionController.js'; // reuse helpers
 import { fetchProducts } from "../../middlewares/services/productQueryBuilder.js";
 import mongoose from 'mongoose';
@@ -75,7 +76,6 @@ export const applyDynamicFilters = (baseFilter, filters) => {
     if (filters.colorFamilies?.length) f.colorFamily = { $in: filters.colorFamilies };
     return f;
 };
-
 
 export const normalizeImages = (images = []) => {
     return images.map(img =>
@@ -214,207 +214,6 @@ export const getAllFilteredProducts = async (req, res) => {
     }
 };
 
-// export const getSingleProduct = async (req, res) => {
-//     try {
-//         const productId = req.params.id;
-//         if (!mongoose.Types.ObjectId.isValid(productId)) {
-//             return res.status(400).json({ message: "Invalid product id" });
-//         }
-
-//         // 1) Load product + increment views
-//         const product = await Product.findOneAndUpdate(
-//             { _id: productId, isPublished: true },
-//             { $inc: { views: 1 } },
-//             { new: true, lean: true }
-//         );
-
-//         if (!product) return res.status(404).json({ message: "Product not found" });
-
-//         // 2) Save to user's recent history
-//         if (req.user?.id) {
-//             const categoryValue = mongoose.Types.ObjectId.isValid(product.category)
-//                 ? product.category
-//                 : product.category?.slug || String(product.category || "");
-
-//             await User.bulkWrite([
-//                 {
-//                     updateOne: {
-//                         filter: { _id: req.user.id },
-//                         update: { $pull: { recentProducts: product._id, recentCategories: categoryValue } }
-//                     }
-//                 },
-//                 {
-//                     updateOne: {
-//                         filter: { _id: req.user.id },
-//                         update: {
-//                             $push: {
-//                                 recentProducts: { $each: [product._id], $position: 0, $slice: 20 },
-//                                 recentCategories: { $each: [categoryValue], $position: 0, $slice: 20 }
-//                             }
-//                         }
-//                     }
-//                 }
-//             ]);
-//         }
-
-//         // 3) Category info
-//         let categoryObj = null;
-//         if (mongoose.Types.ObjectId.isValid(product.category)) {
-//             categoryObj = await Category.findById(product.category)
-//                 .select("name slug parent")
-//                 .lean();
-//         }
-
-//         // 4) Ratings
-//         const [{ avg = 0, count = 0 } = {}] = await Review.aggregate([
-//             { $match: { productId: product._id, status: "Active" } },
-//             { $group: { _id: "$productId", avg: { $avg: "$rating" }, count: { $sum: 1 } } }
-//         ]);
-//         const avgRating = Math.round((avg || 0) * 10) / 10;
-
-//         // 5) Promotions
-//         const now = new Date();
-//         const promotions = await Promotion.find({
-//             status: "active",
-//             startDate: { $lte: now },
-//             endDate: { $gte: now }
-//         }).lean();
-
-//         const originalPrice = Number(product.price ?? product.mrp ?? 0) || 0;
-//         const mrp = Number(product.mrp ?? product.price ?? 0) || 0;
-
-//         // 6) Best promo logic
-//         let bestPromo = null;
-//         let bestPrice = originalPrice;
-//         let bestDiscountAmount = 0;
-//         let bestDiscountPercent = 0;
-
-//         for (const promo of promotions) {
-//             if (!productMatchesPromo(product, promo)) continue;
-//             const type = promo.promotionType;
-
-//             if (type === "discount") {
-//                 const unit = promo.discountUnit;
-//                 const val = Number(promo.discountValue || 0);
-
-//                 if (unit === "percent" && val > 0) {
-//                     const price = Math.max(0, mrp - (mrp * val) / 100);
-//                     const da = mrp - price;
-//                     const dp = mrp > 0 ? Math.floor((da / mrp) * 100) : 0;
-
-//                     const isBetter =
-//                         da > bestDiscountAmount || (da === bestDiscountAmount && dp > bestDiscountPercent);
-//                     if (isBetter) {
-//                         bestPromo = promo;
-//                         bestPrice = price;
-//                         bestDiscountAmount = da;
-//                         bestDiscountPercent = dp;
-//                     }
-//                 } else if (unit === "amount" && val > 0) {
-//                     const price = Math.max(0, mrp - val);
-//                     const da = mrp - price;
-//                     const dp = mrp > 0 ? Math.floor((da / mrp) * 100) : 0;
-
-//                     const isBetter =
-//                         da > bestDiscountAmount || (da === bestDiscountAmount && dp > bestDiscountPercent);
-//                     if (isBetter) {
-//                         bestPromo = promo;
-//                         bestPrice = price;
-//                         bestDiscountAmount = da;
-//                         bestDiscountPercent = dp;
-//                     }
-//                 }
-//             }
-//         }
-
-//         // 7) Badge/message
-//         let badge = null;
-//         let promoMessage = null;
-
-//         if (bestPromo) {
-//             badge =
-//                 bestPromo.discountUnit === "percent"
-//                     ? `${bestPromo.discountValue}% Off`
-//                     : `₹${asMoney(bestPromo.discountValue)} Off`;
-//             promoMessage = `Save ${badge} on this product`;
-//         } else {
-//             const awareness =
-//                 promotions
-//                     .filter(p => productMatchesPromo(product, p))
-//                     .sort((a, b) => {
-//                         const order = { tieredDiscount: 1, bogo: 2, buy1get1: 2, bundle: 3, gift: 4, discount: 5 };
-//                         return (order[a.promotionType] || 99) - (order[b.promotionType] || 99);
-//                     })[0] || null;
-
-//             if (awareness) {
-//                 const t = awareness.promotionType;
-//                 if (t === "tieredDiscount") {
-//                     const tiers = awareness.promotionConfig?.tiers || [];
-//                     const top = tiers.length
-//                         ? Math.max(...tiers.map(ti => Number(ti.discountPercent || 0)))
-//                         : 0;
-//                     badge = `Buy More Save More${top ? ` (Up to ${top}%)` : ""}`;
-//                     promoMessage = `Add more to save up to ${top}%`;
-//                 } else if (t === "bogo" || t === "buy1get1") {
-//                     const bq = awareness.promotionConfig?.buyQty ?? 1;
-//                     const gq = awareness.promotionConfig?.getQty ?? 1;
-//                     badge = `BOGO ${bq}+${gq}`;
-//                     promoMessage = `Buy ${bq}, Get ${gq} Free`;
-//                 } else if (t === "bundle") {
-//                     badge = "Bundle Deal";
-//                     promoMessage = "Special price when bought together";
-//                 } else if (t === "gift") {
-//                     badge = "Free Gift";
-//                     promoMessage = "Get a free gift on qualifying order";
-//                 }
-//             }
-//         }
-
-//         // 8) Recommendations
-//         const [moreLikeThis, boughtTogether, alsoViewed] = await Promise.all([
-//             getRecommendations({ mode: "moreLikeThis", productId, userId: req.user?.id }),
-//             getRecommendations({ mode: "boughtTogether", productId, userId: req.user?.id }),
-//             getRecommendations({ mode: "alsoViewed", productId, userId: req.user?.id })
-//         ]);
-
-//         // 9) Response
-//         res.status(200).json({
-//             _id: product._id,
-//             name: product.name,
-//             brand: product.brand,
-//             variant: product.variant,
-//             description: product.description || "",
-//             summary: product.summary || "",
-//             features: product.features || [],
-//             howToUse: product.howToUse || "",
-//             ingredients: product.ingredients || [],
-//             mrp: Math.round(mrp),
-//             price: Math.round(bestPrice),
-//             discountPercent: Math.max(0, Math.round(bestDiscountPercent)),
-//             discountAmount: Math.max(0, Math.round(bestDiscountAmount)),
-//             badge,
-//             promoMessage,
-//             images: normalizeImages(product.images || []),
-//             category: categoryObj,
-//             shadeOptions: buildOptions(product).shadeOptions,
-//             colorOptions: buildOptions(product).colorOptions,
-//             variants: product.variants || [],
-//             avgRating,
-//             totalRatings: count || 0,
-//             // ✅ Add this
-//             inStock: product.inStock ?? true,
-//             // ✅ Added recommendation sections
-//             recommendations: {
-//                 moreLikeThis,
-//                 boughtTogether,
-//                 alsoViewed
-//             }
-//         });
-//     } catch (err) {
-//         console.error("❌ getSingleProduct error:", err);
-//         res.status(500).json({ message: "Server error", error: err.message });
-//     }
-// };
 export const getSingleProduct = async (req, res) => {
     try {
         const productId = req.params.id;
@@ -662,6 +461,7 @@ export const getSingleProduct = async (req, res) => {
     }
 };
 
+
 export const getProductsByCategory = async (req, res) => {
     try {
         const slug = req.params.slug.toLowerCase();
@@ -670,16 +470,9 @@ export const getProductsByCategory = async (req, res) => {
         limit = Number(limit) || 12;
 
         // 🔹 Fetch category by slug or ObjectId
-        let category = null;
-        if (mongoose.Types.ObjectId.isValid(slug)) {
-            category = await Category.findById(slug)
-                .select("name slug bannerImage thumbnailImage ancestors")
-                .lean();
-        } else {
-            category = await Category.findOne({ slug })
-                .select("name slug bannerImage thumbnailImage ancestors")
-                .lean();
-        }
+        let category = mongoose.Types.ObjectId.isValid(slug)
+            ? await Category.findById(slug).select("name slug bannerImage thumbnailImage ancestors").lean()
+            : await Category.findOne({ slug }).select("name slug bannerImage thumbnailImage ancestors").lean();
         if (!category) return res.status(404).json({ message: "Category not found" });
 
         // 🔹 Track user's recent categories
@@ -707,8 +500,7 @@ export const getProductsByCategory = async (req, res) => {
         // 🔹 Apply dynamic filters from query
         const filters = normalizeFilters(queryFilters);
         const finalFilter = applyDynamicFilters(baseCategoryFilter, filters);
-        finalFilter.isPublished = true;   // 👈 add here
-
+        finalFilter.isPublished = true;
 
         // 🔹 Sorting options
         const sortOptions = {
@@ -726,7 +518,10 @@ export const getProductsByCategory = async (req, res) => {
             .limit(limit)
             .lean();
 
-        const cards = await Promise.all(products.map(p => formatProductCard(p)));
+        // 🔹 Enrich products with stock/status/options
+        const productsWithStock = products.map(enrichProductWithStockAndOptions);
+
+        const cards = await Promise.all(productsWithStock.map(p => formatProductCard(p)));
 
         // 🔹 Breadcrumbs
         let ancestors = [];
@@ -747,19 +542,23 @@ export const getProductsByCategory = async (req, res) => {
             getRecommendations({ mode: "trending", limit: 6 })
         ]);
 
+        // 🔹 Apply stock/status/options helper to recommendations
+        const handleVariantsForRecs = recProducts => (recProducts || []).map(enrichProductWithStockAndOptions);
+
+        topSelling = handleVariantsForRecs(topSelling.products);
+        moreLikeThis = handleVariantsForRecs(moreLikeThis.products);
+        trending = handleVariantsForRecs(trending.products);
+
         // 🔹 Remove duplicate recommendations
         const usedIds = new Set();
-        const filterUnique = (rec) => {
-            if (!rec?.products?.length) return [];
-            return rec.products.filter(p => {
-                const id = p._id.toString();
-                if (usedIds.has(id)) return false;
-                usedIds.add(id);
-                return true;
-            });
-        };
+        const filterUnique = rec => rec.filter(p => {
+            const id = p._id.toString();
+            if (usedIds.has(id)) return false;
+            usedIds.add(id);
+            return true;
+        });
 
-        // 🔹 Friendly message like in promotions
+        // 🔹 Friendly message
         let message = null;
         if (total === 0) {
             if (queryFilters.search) {
@@ -775,7 +574,6 @@ export const getProductsByCategory = async (req, res) => {
             category,
             breadcrumb: ancestors,
             products: cards,
-
             pagination: {
                 page,
                 limit,
@@ -795,8 +593,143 @@ export const getProductsByCategory = async (req, res) => {
         console.error("❌ getProductsByCategory error:", err);
         return res.status(500).json({ message: "Server error", error: err.message });
     }
-};
+};  
 
+
+// export const getProductsByCategory = async (req, res) => {
+//     try {
+//         const slug = req.params.slug.toLowerCase();
+//         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
+//         page = Number(page) || 1;
+//         limit = Number(limit) || 12;
+
+//         // 🔹 Fetch category by slug or ObjectId
+//         let category = null;
+//         if (mongoose.Types.ObjectId.isValid(slug)) {
+//             category = await Category.findById(slug)
+//                 .select("name slug bannerImage thumbnailImage ancestors")
+//                 .lean();
+//         } else {
+//             category = await Category.findOne({ slug })
+//                 .select("name slug bannerImage thumbnailImage ancestors")
+//                 .lean();
+//         }
+//         if (!category) return res.status(404).json({ message: "Category not found" });
+
+//         // 🔹 Track user's recent categories
+//         if (req.user?.id) {
+//             await User.findByIdAndUpdate(req.user.id, { $pull: { recentCategories: category._id } });
+//             await User.findByIdAndUpdate(req.user.id, {
+//                 $push: { recentCategories: { $each: [category._id], $position: 0, $slice: 20 } }
+//             });
+//         }
+
+//         // 🔹 Fetch descendant categories
+//         const descendantIds = (await getDescendantCategoryIds(category._id))
+//             .filter(id => mongoose.Types.ObjectId.isValid(id))
+//             .map(id => new mongoose.Types.ObjectId(id));
+//         descendantIds.push(category._id);
+
+//         // 🔹 Base category filter ($or)
+//         const baseCategoryFilter = {
+//             $or: [
+//                 { category: { $in: descendantIds } },
+//                 { categories: { $in: descendantIds } },
+//             ]
+//         };
+
+//         // 🔹 Apply dynamic filters from query
+//         const filters = normalizeFilters(queryFilters);
+//         const finalFilter = applyDynamicFilters(baseCategoryFilter, filters);
+//         finalFilter.isPublished = true;   // 👈 add here
+
+
+//         // 🔹 Sorting options
+//         const sortOptions = {
+//             recent: { createdAt: -1 },
+//             priceLowToHigh: { price: 1 },
+//             priceHighToLow: { price: -1 },
+//             rating: { avgRating: -1 }
+//         };
+
+//         // 🔹 Fetch products
+//         const total = await Product.countDocuments(finalFilter);
+//         const products = await Product.find(finalFilter)
+//             .sort(sortOptions[sort] || { createdAt: -1 })
+//             .skip((page - 1) * limit)
+//             .limit(limit)
+//             .lean();
+
+//         const cards = await Promise.all(products.map(p => formatProductCard(p)));
+
+//         // 🔹 Breadcrumbs
+//         let ancestors = [];
+//         if (Array.isArray(category.ancestors) && category.ancestors.length) {
+//             const ancestorDocs = await Category.find({ _id: { $in: category.ancestors } })
+//                 .select("name slug")
+//                 .lean();
+//             ancestors = category.ancestors
+//                 .map(id => ancestorDocs.find(a => String(a._id) === String(id)))
+//                 .filter(Boolean);
+//         }
+
+//         // 🔹 Recommendations
+//         const firstProduct = products[0] || await Product.findOne({ category: category._id }).lean();
+//         let [topSelling, moreLikeThis, trending] = await Promise.all([
+//             getRecommendations({ mode: "topSelling", categorySlug: category.slug, limit: 6 }),
+//             firstProduct ? getRecommendations({ mode: "moreLikeThis", productId: firstProduct._id, limit: 6 }) : Promise.resolve({ products: [] }),
+//             getRecommendations({ mode: "trending", limit: 6 })
+//         ]);
+
+//         // 🔹 Remove duplicate recommendations
+//         const usedIds = new Set();
+//         const filterUnique = (rec) => {
+//             if (!rec?.products?.length) return [];
+//             return rec.products.filter(p => {
+//                 const id = p._id.toString();
+//                 if (usedIds.has(id)) return false;
+//                 usedIds.add(id);
+//                 return true;
+//             });
+//         };
+
+//         // 🔹 Friendly message like in promotions
+//         let message = null;
+//         if (total === 0) {
+//             if (queryFilters.search) {
+//                 message = `No products found matching “${queryFilters.search}” in this category.`;
+//             } else if (filters.minPrice || filters.maxPrice || filters.brandIds?.length) {
+//                 message = `No products found with the selected filters in this category.`;
+//             } else {
+//                 message = `No products available in ${category.name} at the moment.`;
+//             }
+//         }
+
+//         return res.status(200).json({
+//             category,
+//             breadcrumb: ancestors,
+//             products: cards,
+
+//             pagination: {
+//                 page,
+//                 limit,
+//                 total,
+//                 totalPages: Math.ceil(total / limit),
+//                 hasMore: page < Math.ceil(total / limit)
+//             },
+//             message,
+//             recommendations: {
+//                 topSelling: filterUnique(topSelling),
+//                 moreLikeThis: filterUnique(moreLikeThis),
+//                 trending: filterUnique(trending)
+//             },
+//         });
+
+//     } catch (err) {
+//         console.error("❌ getProductsByCategory error:", err);
+//         return res.status(500).json({ message: "Server error", error: err.message });
+//     }
+// };
 
 // 🔥 Top Selling Products
 export const getTopSellingProducts = async (req, res) => {

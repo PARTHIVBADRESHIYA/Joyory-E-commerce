@@ -416,6 +416,34 @@ import { getCategoryFallbackChain } from "../../middlewares/utils/categoryUtils.
 /**
  * Format a single product into a full card
  */
+// export const formatProductCard = async (product) => {
+//     if (!product) return null;
+
+//     let categoryObj = null;
+//     if (mongoose.Types.ObjectId.isValid(product.category)) {
+//         categoryObj = await Category.findById(product.category).select("name slug").lean();
+//     }
+
+//     const { shadeOptions, colorOptions } = buildOptions(product);
+
+//     return {
+//         _id: product._id,
+//         name: product.name,
+//         brand: product.brand,
+//         variant: product.variant,
+//         price: product.price,
+//         mrp: product.mrp,
+//         discountPercent: product.mrp
+//             ? Math.round(((product.mrp - product.price) / product.mrp) * 100)
+//             : 0,
+//         images: normalizeImages(product.images || []),
+//         shadeOptions,
+//         colorOptions,
+//         avgRating: product.avgRating || 0,
+//         totalRatings: product.commentsCount || 0,
+//         inStock: product.inStock ?? true
+//     };
+// };
 export const formatProductCard = async (product) => {
     if (!product) return null;
 
@@ -425,6 +453,43 @@ export const formatProductCard = async (product) => {
     }
 
     const { shadeOptions, colorOptions } = buildOptions(product);
+
+    let status = null;
+    let message = null;
+    let inStock = null;
+
+    if (product.variants?.length) {
+        // Variant-level stock info
+        product.variants = product.variants.map(v => {
+            let vStatus, vMessage;
+            if (v.stock === 0) {
+                vStatus = "outOfStock";
+                vMessage = "No stock available now, please try again later";
+            } else if (v.stock < (v.thresholdValue || 5)) {
+                vStatus = "lowStock";
+                vMessage = `Few left (${v.stock})`;
+            } else {
+                vStatus = "inStock";
+                vMessage = "In-stock";
+            }
+            return { ...v, status: vStatus, message: vMessage };
+        });
+    } else {
+        // Non-variant product
+        if (product.quantity === 0) {
+            status = "outOfStock";
+            message = "No stock available now, please try again later";
+            inStock = false;
+        } else if (product.quantity < (product.thresholdValue || 5)) {
+            status = "lowStock";
+            message = `Few left (${product.quantity})`;
+            inStock = true;
+        } else {
+            status = "inStock";
+            message = "In-stock";
+            inStock = true;
+        }
+    }
 
     return {
         _id: product._id,
@@ -441,9 +506,14 @@ export const formatProductCard = async (product) => {
         colorOptions,
         avgRating: product.avgRating || 0,
         totalRatings: product.commentsCount || 0,
-        inStock: product.inStock ?? true
+        inStock,
+        status,
+        message,
+        variants: product.variants || [],
+        category: categoryObj ? { _id: categoryObj._id, name: categoryObj.name, slug: categoryObj.slug } : null
     };
 };
+
 
 export const getRecommendations = async ({
     mode,
