@@ -609,6 +609,102 @@ import { getCategoryFallbackChain } from "../../middlewares/utils/categoryUtils.
 //     };
 // };
 
+// export const formatProductCard = async (product) => {
+//     if (!product) return null;
+
+//     let categoryObj = null;
+//     if (mongoose.Types.ObjectId.isValid(product.category)) {
+//         categoryObj = await Category.findById(product.category)
+//             .select("name slug")
+//             .lean();
+//     }
+
+//     const { shadeOptions, colorOptions } = buildOptions(product);
+
+//     let status = null;
+//     let message = null;
+//     let inStock = null;
+//     let selectedVariant = null;
+
+//     if (product.variants?.length) {
+//         // Compute variant-level stock + messages
+//         product.variants = product.variants.map(v => {
+//             let vStatus, vMessage;
+//             if (v.stock === 0) {
+//                 vStatus = "outOfStock";
+//                 vMessage = "No stock available now, please try again later";
+//             } else if (v.stock < (v.thresholdValue || 5)) {
+//                 vStatus = "lowStock";
+//                 vMessage = `Few left (${v.stock})`;
+//             } else {
+//                 vStatus = "inStock";
+//                 vMessage = "In-stock";
+//             }
+
+//             // Choose first available variant as default
+//             if (!selectedVariant && vStatus === "inStock") {
+//                 selectedVariant = { ...v, status: vStatus, message: vMessage };
+//             }
+
+//             return { ...v, status: vStatus, message: vMessage };
+//         });
+
+//         // If all variants are out-of-stock, pick the first anyway
+//         if (!selectedVariant && product.variants.length) {
+//             const first = product.variants[0];
+//             selectedVariant = { ...first };
+//         }
+
+//         // ❌ Do NOT expose global status/message for variant products
+//         status = undefined;
+//         message = undefined;
+//         inStock = undefined;
+//     } else {
+//         // ✅ Simple product → global stock
+//         if (product.quantity === 0) {
+//             status = "outOfStock";
+//             message = "No stock available now, please try again later";
+//             inStock = false;
+//         } else if (product.quantity < (product.thresholdValue || 5)) {
+//             status = "lowStock";
+//             message = `Few left (${product.quantity})`;
+//             inStock = true;
+//         } else {
+//             status = "inStock";
+//             message = "In-stock";
+//             inStock = true;
+//         }
+//     }
+
+//     return {
+//         _id: product._id,
+//         name: product.name,
+//         brand: product.brand,
+//         variant: product.variant,
+//         price: product.price,
+//         mrp: product.mrp,
+//         discountPercent: product.mrp
+//             ? Math.round(((product.mrp - product.price) / product.mrp) * 100)
+//             : 0,
+//         images: normalizeImages(product.images || []),
+//         shadeOptions,
+//         colorOptions,
+//         avgRating: product.avgRating || 0,
+//         totalRatings: product.commentsCount || 0,
+
+//         // Only include if non-variant product
+//         ...(status && { status }),
+//         ...(message && { message }),
+//         ...(inStock !== null && { inStock }),
+
+//         variants: product.variants || [],
+//         selectedVariant,
+//         category: categoryObj
+//             ? { _id: categoryObj._id, name: categoryObj.name, slug: categoryObj.slug }
+//             : null
+//     };
+// };
+
 export const formatProductCard = async (product) => {
     if (!product) return null;
 
@@ -624,7 +720,6 @@ export const formatProductCard = async (product) => {
     let status = null;
     let message = null;
     let inStock = null;
-    let selectedVariant = null;
 
     if (product.variants?.length) {
         // Compute variant-level stock + messages
@@ -641,20 +736,10 @@ export const formatProductCard = async (product) => {
                 vMessage = "In-stock";
             }
 
-            // Choose first available variant as default
-            if (!selectedVariant && vStatus === "inStock") {
-                selectedVariant = { ...v, status: vStatus, message: vMessage };
-            }
-
             return { ...v, status: vStatus, message: vMessage };
         });
 
-        // If all variants are out-of-stock, pick the first anyway
-        if (!selectedVariant && product.variants.length) {
-            const first = product.variants[0];
-            selectedVariant = { ...first };
-        }
-
+        // ❌ Do NOT select any variant by default
         // ❌ Do NOT expose global status/message for variant products
         status = undefined;
         message = undefined;
@@ -698,13 +783,12 @@ export const formatProductCard = async (product) => {
         ...(inStock !== null && { inStock }),
 
         variants: product.variants || [],
-        selectedVariant,
+        selectedVariant: null, // ❌ Never select any variant by default
         category: categoryObj
             ? { _id: categoryObj._id, name: categoryObj.name, slug: categoryObj.slug }
             : null
     };
 };
-
 
 
 export const getRecommendations = async ({

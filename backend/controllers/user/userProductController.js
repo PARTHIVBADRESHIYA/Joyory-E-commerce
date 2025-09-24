@@ -4,6 +4,7 @@ import Promotion from '../../models/Promotion.js';
 import User from '../../models/User.js';
 import Review from '../../models/Review.js';
 import Order from '../../models/Order.js';
+import Brand from '../../models/Brand.js';
 import SkinType from '../../models/SkinType.js';
 import Category from '../../models/Category.js';
 import { getDescendantCategoryIds, getCategoryFallbackChain } from '../../middlewares/utils/categoryUtils.js';
@@ -265,6 +266,12 @@ export const getSingleProduct = async (req, res) => {
                 .lean();
         }
 
+        let brandObj = null;
+        if (mongoose.Types.ObjectId.isValid(product.brand)) {
+            brandObj = await Brand.findById(product.brand).select("name").lean();
+        }
+
+
         // 4) Ratings
         const [{ avg = 0, count = 0 } = {}] = await Review.aggregate([
             { $match: { productId: product._id, status: "Active" } },
@@ -424,7 +431,7 @@ export const getSingleProduct = async (req, res) => {
         res.status(200).json({
             _id: product._id,
             name: product.name,
-            brand: product.brand,
+            brand: brandObj ? brandObj.name : product.brand,
             variant: product.variant,
             description: product.description || "",
             summary: product.summary || "",
@@ -593,7 +600,7 @@ export const getProductsByCategory = async (req, res) => {
         console.error("❌ getProductsByCategory error:", err);
         return res.status(500).json({ message: "Server error", error: err.message });
     }
-};  
+};
 
 
 // export const getProductsByCategory = async (req, res) => {

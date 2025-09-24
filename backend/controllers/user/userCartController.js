@@ -64,7 +64,7 @@ export const addToCart = async (req, res) => {
   await user.save();
   res.status(200).json({ message: "✅ Added to cart", cart: user.cart });
 }
-// ✅ Add to Cart with shade/variant selection
+
 
 // -------------------- ADD TO CART --------------------
 // export const addToCart = async (req, res) => {
@@ -298,7 +298,6 @@ export const addToCart = async (req, res) => {
 //     res.status(500).json({ message: "Failed to add to cart", error: err.message });
 //   }
 // };
-
 
 // ✅ Get full cart
 export const getCart = async (req, res) => {
