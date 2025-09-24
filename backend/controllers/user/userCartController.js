@@ -135,6 +135,93 @@ import { calculateCartSummary } from "../../middlewares/utils/cartPricingHelper.
 //   }
 // };
 
+// export const addToCart = async (req, res) => {
+//   try {
+//     const { productId, quantity = 1, variantSku } = req.body;
+//     const user = await User.findById(req.user._id);
+//     const product = await Product.findById(productId);
+
+//     if (!product)
+//       return res.status(404).json({ message: "Product not found" });
+
+//     let selectedVariant = null;
+//     let maxAvailable = 0;
+
+//     // ✅ Variant exists
+//     if (product.variants?.length) {
+//       if (variantSku) {
+//         const variant = product.variants.find(v => v.sku === variantSku);
+//         if (!variant)
+//           return res.status(404).json({ message: "Variant not found" });
+
+//         if (variant.stock <= 0)
+//           return res.status(400).json({
+//             message: `❌ Variant "${variant.shadeName}" is out of stock.`
+//           });
+
+//         selectedVariant = {
+//           sku: variant.sku,
+//           shadeName: variant.shadeName,
+//           hex: variant.hex,
+//           image: variant.images?.[0] || product.images?.[0] || null
+//         };
+//         maxAvailable = variant.stock;
+
+//       } else {
+//         // 🔹 Auto-select first in-stock variant
+//         const availableVariant = product.variants.find(v => v.stock > 0);
+//         if (!availableVariant)
+//           return res.status(400).json({ message: "❌ All variants are out of stock" });
+
+//         selectedVariant = {
+//           sku: availableVariant.sku,
+//           shadeName: availableVariant.shadeName,
+//           hex: availableVariant.hex,
+//           image: availableVariant.images?.[0] || product.images?.[0] || null
+//         };
+//         maxAvailable = availableVariant.stock;
+//       }
+
+//     } else {
+//       // 🔹 Non-variant product
+//       if (product.quantity <= 0)
+//         return res.status(400).json({ message: "❌ Product is out of stock" });
+
+//       maxAvailable = product.quantity;
+//     }
+
+//     // Check current quantity in cart
+//     const existing = user.cart.find(
+//       item =>
+//         item.product.toString() === productId &&
+//         (!variantSku || item.selectedVariant?.sku === selectedVariant?.sku)
+//     );
+
+//     const existingQty = existing ? existing.quantity : 0;
+
+//     // Prevent exceeding stock
+//     if (existingQty + quantity > maxAvailable) {
+//       return res.status(400).json({
+//         message: `❌ Cannot add ${quantity} items. Only ${maxAvailable - existingQty} left in stock.`
+//       });
+//     }
+
+//     // Add or update cart
+//     if (existing) {
+//       existing.quantity += quantity;
+//     } else {
+//       user.cart.push({ product: productId, quantity, selectedVariant });
+//     }
+
+//     await user.save();
+//     res.status(200).json({ message: "✅ Added to cart", cart: user.cart });
+
+//   } catch (err) {
+//     console.error("addToCart error:", err);
+//     res.status(500).json({ message: "Failed to add to cart", error: err.message });
+//   }
+// };
+
 export const addToCart = async (req, res) => {
   try {
     const { productId, quantity = 1, variantSku } = req.body;
@@ -147,40 +234,30 @@ export const addToCart = async (req, res) => {
     let selectedVariant = null;
     let maxAvailable = 0;
 
-    // ✅ Variant exists
+    // ✅ If product has variants → variantSku must be provided
     if (product.variants?.length) {
-      if (variantSku) {
-        const variant = product.variants.find(v => v.sku === variantSku);
-        if (!variant)
-          return res.status(404).json({ message: "Variant not found" });
-
-        if (variant.stock <= 0)
-          return res.status(400).json({
-            message: `❌ Variant "${variant.shadeName}" is out of stock.`
-          });
-
-        selectedVariant = {
-          sku: variant.sku,
-          shadeName: variant.shadeName,
-          hex: variant.hex,
-          image: variant.images?.[0] || product.images?.[0] || null
-        };
-        maxAvailable = variant.stock;
-
-      } else {
-        // 🔹 Auto-select first in-stock variant
-        const availableVariant = product.variants.find(v => v.stock > 0);
-        if (!availableVariant)
-          return res.status(400).json({ message: "❌ All variants are out of stock" });
-
-        selectedVariant = {
-          sku: availableVariant.sku,
-          shadeName: availableVariant.shadeName,
-          hex: availableVariant.hex,
-          image: availableVariant.images?.[0] || product.images?.[0] || null
-        };
-        maxAvailable = availableVariant.stock;
+      if (!variantSku) {
+        return res.status(400).json({
+          message: "❌ Please select a variant before adding to cart"
+        });
       }
+
+      const variant = product.variants.find(v => v.sku === variantSku);
+      if (!variant)
+        return res.status(404).json({ message: "Variant not found" });
+
+      if (variant.stock <= 0)
+        return res.status(400).json({
+          message: `❌ Variant "${variant.shadeName}" is out of stock.`
+        });
+
+      selectedVariant = {
+        sku: variant.sku,
+        shadeName: variant.shadeName,
+        hex: variant.hex,
+        image: variant.images?.[0] || product.images?.[0] || null
+      };
+      maxAvailable = variant.stock;
 
     } else {
       // 🔹 Non-variant product

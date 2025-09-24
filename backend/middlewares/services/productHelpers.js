@@ -56,10 +56,54 @@ import { buildOptions } from "../../controllers/user/userProductController.js"; 
 // };
 
 
+// export const enrichProductWithStockAndOptions = (product) => {
+//     const { shadeOptions, colorOptions } = buildOptions(product);
+
+//     if (product.variants?.length) {
+//         product.variants = product.variants.map(v => {
+//             let status, message;
+
+//             if (v.stock === 0) {
+//                 status = "outOfStock";
+//                 message = "No stock available now, please try again later";
+//             } else if (v.stock < (v.thresholdValue || 5)) {
+//                 status = "lowStock";
+//                 message = `Few left (${v.stock})`;
+//             } else {
+//                 status = "inStock";
+//                 message = "In-stock";
+//             }
+
+//             return { ...v, status, message };
+//         });
+
+//         delete product.quantity;
+//         delete product.status;
+//         delete product.message;
+//     } else {
+//         let status, message;
+//         if (product.quantity === 0) {
+//             status = "outOfStock";
+//             message = "No stock available now, please try again later";
+//         } else if (product.quantity < (product.thresholdValue || 5)) {
+//             status = "lowStock";
+//             message = `Few left (${product.quantity})`;
+//         } else {
+//             status = "inStock";
+//             message = "In-stock";
+//         }
+
+//         product.status = status;
+//         product.message = message;
+//     }
+
+//     return { ...product, shadeOptions, colorOptions };
+// };
 export const enrichProductWithStockAndOptions = (product) => {
     const { shadeOptions, colorOptions } = buildOptions(product);
 
     if (product.variants?.length) {
+        // Variant-based product
         product.variants = product.variants.map(v => {
             let status, message;
 
@@ -77,10 +121,15 @@ export const enrichProductWithStockAndOptions = (product) => {
             return { ...v, status, message };
         });
 
-        delete product.quantity;
-        delete product.status;
-        delete product.message;
+        // ❌ Remove any global stock fields for variant products
+        return {
+            ...product,
+            variants: product.variants,
+            shadeOptions,
+            colorOptions
+        };
     } else {
+        // Simple product (no variants) → add global stock fields
         let status, message;
         if (product.quantity === 0) {
             status = "outOfStock";
@@ -93,9 +142,12 @@ export const enrichProductWithStockAndOptions = (product) => {
             message = "In-stock";
         }
 
-        product.status = status;
-        product.message = message;
+        return {
+            ...product,
+            status,
+            message,
+            shadeOptions,
+            colorOptions
+        };
     }
-
-    return { ...product, shadeOptions, colorOptions };
 };
