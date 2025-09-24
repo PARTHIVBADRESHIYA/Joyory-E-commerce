@@ -24,46 +24,46 @@ import GiftCard from "../../models/GiftCard.js";
 import { calculateCartSummary } from "../../middlewares/utils/cartPricingHelper.js";
 
 // ✅ Add to Cart with shade/variant selection
-// export const addToCart = async (req, res) => {
-//   const { productId, quantity, variantSku } = req.body;
-//   const user = await User.findById(req.user._id);
-//   const product = await Product.findById(productId);
+export const addToCart = async (req, res) => {
+  const { productId, quantity, variantSku } = req.body;
+  const user = await User.findById(req.user._id);
+  const product = await Product.findById(productId);
 
-//   if (!product) return res.status(404).json({ message: "Product not found" });
+  if (!product) return res.status(404).json({ message: "Product not found" });
 
-//   let selectedVariant = null;
-//   if (variantSku) {
-//     const variant = product.variants.find(v => v.sku === variantSku);
-//     if (variant) {
-//       selectedVariant = {
-//         sku: variant.sku,
-//         shadeName: variant.shadeName,
-//         hex: variant.hex,
-//         image: variant.images?.[0] || product.images?.[0] || null
-//       };
-//     }
-//   }
+  let selectedVariant = null;
+  if (variantSku) {
+    const variant = product.variants.find(v => v.sku === variantSku);
+    if (variant) {
+      selectedVariant = {
+        sku: variant.sku,
+        shadeName: variant.shadeName,
+        hex: variant.hex,
+        image: variant.images?.[0] || product.images?.[0] || null
+      };
+    }
+  }
 
-//   // Check if already exists in cart with same variant
-//   const existing = user.cart.find(
-//     item =>
-//       item.product.toString() === productId &&
-//       (!variantSku || item.selectedVariant?.sku === variantSku)
-//   );
+  // Check if already exists in cart with same variant
+  const existing = user.cart.find(
+    item =>
+      item.product.toString() === productId &&
+      (!variantSku || item.selectedVariant?.sku === variantSku)
+  );
 
-//   if (existing) {
-//     existing.quantity += quantity;
-//   } else {
-//     user.cart.push({
-//       product: productId,
-//       quantity,
-//       selectedVariant
-//     });
-//   }
+  if (existing) {
+    existing.quantity += quantity;
+  } else {
+    user.cart.push({
+      product: productId,
+      quantity,
+      selectedVariant
+    });
+  }
 
-//   await user.save();
-//   res.status(200).json({ message: "✅ Added to cart", cart: user.cart });
-// };|
+  await user.save();
+  res.status(200).json({ message: "✅ Added to cart", cart: user.cart });
+}
 // ✅ Add to Cart with shade/variant selection
 
 // -------------------- ADD TO CART --------------------
@@ -222,82 +222,82 @@ import { calculateCartSummary } from "../../middlewares/utils/cartPricingHelper.
 //   }
 // };
 
-export const addToCart = async (req, res) => {
-  try {
-    const { productId, quantity = 1, variantSku } = req.body;
-    const user = await User.findById(req.user._id);
-    const product = await Product.findById(productId);
+// export const addToCart = async (req, res) => {
+//   try {
+//     const { productId, quantity = 1, variantSku } = req.body;
+//     const user = await User.findById(req.user._id);
+//     const product = await Product.findById(productId);
 
-    if (!product)
-      return res.status(404).json({ message: "Product not found" });
+//     if (!product)
+//       return res.status(404).json({ message: "Product not found" });
 
-    let selectedVariant = null;
-    let maxAvailable = 0;
+//     let selectedVariant = null;
+//     let maxAvailable = 0;
 
-    // ✅ If product has variants → variantSku must be provided
-    if (product.variants?.length) {
-      if (!variantSku) {
-        return res.status(400).json({
-          message: "❌ Please select a variant before adding to cart"
-        });
-      }
+//     // ✅ If product has variants → variantSku must be provided
+//     if (product.variants?.length) {
+//       if (!variantSku) {
+//         return res.status(400).json({
+//           message: "❌ Please select a variant before adding to cart"
+//         });
+//       }
 
-      const variant = product.variants.find(v => v.sku === variantSku);
-      if (!variant)
-        return res.status(404).json({ message: "Variant not found" });
+//       const variant = product.variants.find(v => v.sku === variantSku);
+//       if (!variant)
+//         return res.status(404).json({ message: "Variant not found" });
 
-      if (variant.stock <= 0)
-        return res.status(400).json({
-          message: `❌ Variant "${variant.shadeName}" is out of stock.`
-        });
+//       if (variant.stock <= 0)
+//         return res.status(400).json({
+//           message: `❌ Variant "${variant.shadeName}" is out of stock.`
+//         });
 
-      selectedVariant = {
-        sku: variant.sku,
-        shadeName: variant.shadeName,
-        hex: variant.hex,
-        image: variant.images?.[0] || product.images?.[0] || null
-      };
-      maxAvailable = variant.stock;
+//       selectedVariant = {
+//         sku: variant.sku,
+//         shadeName: variant.shadeName,
+//         hex: variant.hex,
+//         image: variant.images?.[0] || product.images?.[0] || null
+//       };
+//       maxAvailable = variant.stock;
 
-    } else {
-      // 🔹 Non-variant product
-      if (product.quantity <= 0)
-        return res.status(400).json({ message: "❌ Product is out of stock" });
+//     } else {
+//       // 🔹 Non-variant product
+//       if (product.quantity <= 0)
+//         return res.status(400).json({ message: "❌ Product is out of stock" });
 
-      maxAvailable = product.quantity;
-    }
+//       maxAvailable = product.quantity;
+//     }
 
-    // Check current quantity in cart
-    const existing = user.cart.find(
-      item =>
-        item.product.toString() === productId &&
-        (!variantSku || item.selectedVariant?.sku === selectedVariant?.sku)
-    );
+//     // Check current quantity in cart
+//     const existing = user.cart.find(
+//       item =>
+//         item.product.toString() === productId &&
+//         (!variantSku || item.selectedVariant?.sku === selectedVariant?.sku)
+//     );
 
-    const existingQty = existing ? existing.quantity : 0;
+//     const existingQty = existing ? existing.quantity : 0;
 
-    // Prevent exceeding stock
-    if (existingQty + quantity > maxAvailable) {
-      return res.status(400).json({
-        message: `❌ Cannot add ${quantity} items. Only ${maxAvailable - existingQty} left in stock.`
-      });
-    }
+//     // Prevent exceeding stock
+//     if (existingQty + quantity > maxAvailable) {
+//       return res.status(400).json({
+//         message: `❌ Cannot add ${quantity} items. Only ${maxAvailable - existingQty} left in stock.`
+//       });
+//     }
 
-    // Add or update cart
-    if (existing) {
-      existing.quantity += quantity;
-    } else {
-      user.cart.push({ product: productId, quantity, selectedVariant });
-    }
+//     // Add or update cart
+//     if (existing) {
+//       existing.quantity += quantity;
+//     } else {
+//       user.cart.push({ product: productId, quantity, selectedVariant });
+//     }
 
-    await user.save();
-    res.status(200).json({ message: "✅ Added to cart", cart: user.cart });
+//     await user.save();
+//     res.status(200).json({ message: "✅ Added to cart", cart: user.cart });
 
-  } catch (err) {
-    console.error("addToCart error:", err);
-    res.status(500).json({ message: "Failed to add to cart", error: err.message });
-  }
-};
+//   } catch (err) {
+//     console.error("addToCart error:", err);
+//     res.status(500).json({ message: "Failed to add to cart", error: err.message });
+//   }
+// };
 
 
 // ✅ Get full cart
@@ -559,6 +559,15 @@ export const removeFromCart = async (req, res) => {
 //     });
 //   }
 // };
+
+
+
+
+
+
+
+
+
 
 
 export const getCartSummary = async (req, res) => {
