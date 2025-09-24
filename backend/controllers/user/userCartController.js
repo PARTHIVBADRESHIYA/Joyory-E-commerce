@@ -269,6 +269,221 @@ export const removeFromCart = async (req, res) => {
   }
 };
 
+// export const getCartSummary = async (req, res) => {
+//   try {
+//     if (!req.user || !req.user._id) {
+//       return res.status(401).json({ message: "Unauthorized" });
+//     }
+
+//     const user = await User.findById(req.user._id).populate("cart.product");
+//     if (!user) return res.status(404).json({ message: "User not found" });
+
+//     const validCartItems = (user.cart || []).filter((item) => item.product);
+//     if (!validCartItems.length) {
+//       return res.status(400).json({ message: "Cart is empty" });
+//     }
+
+//     /* -------------------- 🔥 Apply Promotions -------------------- */
+//     const itemsInput = validCartItems.map((i) => ({
+//       productId: String(i.product._id),
+//       qty: i.quantity,
+//       selectedVariant: i.selectedVariant || null, // <-- add this
+//     }));
+
+//     const promoResult = await applyPromotions(itemsInput, {
+//       userContext: { isNewUser: user.isNewUser },
+//     });
+
+//     const { items, summary, appliedPromotions } = promoResult;
+
+//     /* -------------------- 🎟️ Coupon Discounts -------------------- */
+//     const allDiscountDocs = await Discount.find({ status: "Active" }).lean();
+
+//     const nonPromoItemsInput = items
+//       .filter((i) => !i.discounts || i.discounts.length === 0)
+//       .map((i) => ({
+//         productId: i.productId,
+//         qty: i.qty,
+//       }));
+
+//     const couponsChecked = await Promise.all(
+//       allDiscountDocs.map(async (d) => {
+//         try {
+//           if (!nonPromoItemsInput.length) {
+//             return {
+//               code: d.code,
+//               label: d.name,
+//               type: d.type,
+//               value: d.value,
+//               status: "Not applicable",
+//               message: "All items already on offer – coupons not applicable 🎉",
+//             };
+//           }
+
+//           await validateDiscountForCartInternal({
+//             code: d.code,
+//             cart: nonPromoItemsInput,
+//             userId: req.user._id,
+//           });
+
+//           return {
+//             code: d.code,
+//             label: d.name,
+//             type: d.type,
+//             value: d.value,
+//             status: "Applicable",
+//             message: `Apply code ${d.code} and save ${d.type === "Percentage" ? d.value + "%" : "₹" + d.value
+//               } on non-promotional items`,
+//           };
+//         } catch {
+//           return {
+//             code: d.code,
+//             label: d.name,
+//             type: d.type,
+//             value: d.value,
+//             status: "Not applicable",
+//             message: "Not valid for current cart",
+//           };
+//         }
+//       })
+//     );
+
+//     const applicableCoupons = couponsChecked.filter((c) => c.status === "Applicable");
+//     const inapplicableCoupons = couponsChecked.filter((c) => c.status !== "Applicable");
+
+//     let appliedCoupon = null;
+//     let discountFromCoupon = 0;
+
+//     if (req.query.discount && nonPromoItemsInput.length) {
+//       try {
+//         const result = await validateDiscountForCartInternal({
+//           code: req.query.discount.trim(),
+//           cart: nonPromoItemsInput,
+//           userId: req.user._id,
+//         });
+
+//         const COUPON_MAX_CAP = result.discount.maxCap || 500;
+//         discountFromCoupon = Math.min(result.priced.discountAmount, COUPON_MAX_CAP);
+
+//         appliedCoupon = {
+//           code: result.discount.code,
+//           discount: discountFromCoupon,
+//         };
+//       } catch {
+//         appliedCoupon = null;
+//         discountFromCoupon = 0;
+//       }
+//     }
+
+//     /* -------------------- 💰 Apply Referral Points -------------------- */
+//     let pointsUsed = 0;
+//     let pointsDiscount = 0;
+//     let pointsMessage = "";
+
+//     const wallet = await getOrCreateWallet(req.user._id);
+
+//     if (req.query.pointsToUse) {
+//       pointsUsed = Number(req.query.pointsToUse);
+
+//       if (!isNaN(pointsUsed) && pointsUsed > 0 && wallet.rewardPoints > 0) {
+//         if (pointsUsed > wallet.rewardPoints) pointsUsed = wallet.rewardPoints;
+
+//         pointsDiscount = pointsUsed * 0.1; // 1 point = ₹0.1
+//         pointsMessage = `🎉 You used ${pointsUsed} points from your wallet! Discount applied: ₹${pointsDiscount}`;
+//       }
+//     }
+
+//     /* -------------------- 🎁 Apply Gift Card -------------------- */
+//     /* -------------------- 🎁 Apply Gift Card -------------------- */
+//     let giftCardApplied = null;
+//     let giftCardDiscount = 0;
+
+//     if (req.query.giftCardCode && req.query.giftCardPin) {
+//       const giftCard = await GiftCard.findOne({
+//         code: req.query.giftCardCode.trim(),
+//         pin: req.query.giftCardPin.trim(),
+//       });
+
+//       if (!giftCard) {
+//         giftCardApplied = { status: "Invalid", message: "❌ Invalid gift card code or PIN" };
+//       } else if (giftCard.expiryDate < new Date()) {
+//         giftCardApplied = { status: "Invalid", message: "⏰ Gift card has expired" };
+//       } else if (giftCard.balance <= 0) {
+//         giftCardApplied = { status: "Invalid", message: "⚠️ Gift card has no balance left" };
+//       } else {
+//         const amountRequested = Number(req.query.giftCardAmount);
+
+//         if (!amountRequested || amountRequested <= 0) {
+//           giftCardApplied = { status: "Invalid", message: "⚠️ Please enter a valid amount to redeem" };
+//         } else if (amountRequested > giftCard.balance) {
+//           giftCardApplied = {
+//             status: "Invalid",
+//             message: `⚠️ Insufficient balance. Your card has only ₹${giftCard.balance} left`,
+//           };
+//         } else {
+//           const payableBeforeGC = Math.max(
+//             0,
+//             summary.payable - discountFromCoupon - pointsDiscount
+//           );
+
+//           if (amountRequested > payableBeforeGC) {
+//             giftCardApplied = {
+//               status: "Invalid",
+//               message: `⚠️ You tried to apply ₹${amountRequested}, but payable amount is only ₹${payableBeforeGC}`,
+//             };
+//           } else {
+//             giftCardDiscount = amountRequested;
+//             giftCardApplied = {
+//               status: "Applied",
+//               code: giftCard.code,
+//               appliedAmount: giftCardDiscount,
+//               remainingBalance: giftCard.balance - giftCardDiscount,
+//               message: `🎉 Successfully applied ₹${giftCardDiscount} from your gift card!`,
+//             };
+//           }
+//         }
+//       }
+//     }
+
+//     /* -------------------- 📊 Final Totals -------------------- */
+//     const round2 = (n) => Math.round(n * 100) / 100;
+//     const grandTotal = round2(
+//       Math.max(0, summary.payable - discountFromCoupon - pointsDiscount - giftCardDiscount)
+//     );
+
+//     /* -------------------- ✅ Response -------------------- */
+//     res.json({
+//       cart: items,
+//       priceDetails: {
+//         bagMrp: round2(summary.mrpTotal),
+//         bagDiscount: round2(summary.savings),
+//         autoDiscount: round2(summary.savings),
+//         couponDiscount: round2(discountFromCoupon),
+//         referralPointsDiscount: round2(pointsDiscount),
+//         giftCardDiscount: round2(giftCardDiscount),
+//         shipping: 0,
+//         payable: grandTotal,
+//       },
+//       appliedCoupon,
+//       appliedPromotions,
+//       applicableCoupons,
+//       inapplicableCoupons,
+//       pointsUsed,
+//       pointsDiscount,
+//       pointsMessage,
+//       giftCardApplied,
+//       grandTotal,
+//     });
+//   } catch (error) {
+//     console.error("getCartSummary error:", error);
+//     res.status(500).json({
+//       message: "Failed to get cart summary",
+//       error: error.message,
+//     });
+//   }
+// };
+
+
 export const getCartSummary = async (req, res) => {
   try {
     if (!req.user || !req.user._id) {
@@ -287,6 +502,7 @@ export const getCartSummary = async (req, res) => {
     const itemsInput = validCartItems.map((i) => ({
       productId: String(i.product._id),
       qty: i.quantity,
+      selectedVariant: i.selectedVariant || null,
     }));
 
     const promoResult = await applyPromotions(itemsInput, {
@@ -295,10 +511,21 @@ export const getCartSummary = async (req, res) => {
 
     const { items, summary, appliedPromotions } = promoResult;
 
+    // ✅ Merge selectedVariant back from user.cart
+    const cartWithVariants = items.map((i) => {
+      const originalItem = validCartItems.find(
+        (v) => String(v.product._id) === i.productId
+      );
+      return {
+        ...i,
+        selectedVariant: originalItem?.selectedVariant || null,
+      };
+    });
+
     /* -------------------- 🎟️ Coupon Discounts -------------------- */
     const allDiscountDocs = await Discount.find({ status: "Active" }).lean();
 
-    const nonPromoItemsInput = items
+    const nonPromoItemsInput = cartWithVariants
       .filter((i) => !i.discounts || i.discounts.length === 0)
       .map((i) => ({
         productId: i.productId,
@@ -387,12 +614,11 @@ export const getCartSummary = async (req, res) => {
       if (!isNaN(pointsUsed) && pointsUsed > 0 && wallet.rewardPoints > 0) {
         if (pointsUsed > wallet.rewardPoints) pointsUsed = wallet.rewardPoints;
 
-        pointsDiscount = pointsUsed * 0.1; // 1 point = ₹0.1
+        pointsDiscount = pointsUsed * 0.1;
         pointsMessage = `🎉 You used ${pointsUsed} points from your wallet! Discount applied: ₹${pointsDiscount}`;
       }
     }
 
-    /* -------------------- 🎁 Apply Gift Card -------------------- */
     /* -------------------- 🎁 Apply Gift Card -------------------- */
     let giftCardApplied = null;
     let giftCardDiscount = 0;
@@ -452,7 +678,7 @@ export const getCartSummary = async (req, res) => {
 
     /* -------------------- ✅ Response -------------------- */
     res.json({
-      cart: items,
+      cart: cartWithVariants, // ✅ includes selectedVariant now
       priceDetails: {
         bagMrp: round2(summary.mrpTotal),
         bagDiscount: round2(summary.savings),
