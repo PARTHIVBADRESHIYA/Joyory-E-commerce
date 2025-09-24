@@ -1070,7 +1070,7 @@ export const getProductsBySkinType = async (req, res) => {
             } else if (filters.minPrice || filters.maxPrice || filters.brandIds?.length) {
                 message = `No products found with the selected filters in this category.`;
             } else {
-                message = `No products available in ${category.name} at the moment.`;
+                message = `No products available in ${categories.name} at the moment.`;
             }
         }
 
