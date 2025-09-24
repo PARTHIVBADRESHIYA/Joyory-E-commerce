@@ -237,9 +237,9 @@ const userLogin = async (req, res) => {
         const token = generateToken(user);
 
         res.cookie("token", token, {
-            httpOnly: true,           // JS cannot access it → prevents XSS
-            secure: process.env.NODE_ENV === "production", // HTTPS only
-            sameSite: "None",       
+            httpOnly: true, // JS cannot access it → prevents XSS
+            secure: process.env.NODE_ENV === "production", // HTTPS only in production
+            sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax", // cross-domain only in prod
             maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
         });
 
@@ -251,6 +251,7 @@ const userLogin = async (req, res) => {
                 role: user.role
             }
         });
+
 
 
     } catch (err) {
