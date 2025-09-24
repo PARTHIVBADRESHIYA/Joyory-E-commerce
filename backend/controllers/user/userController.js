@@ -239,7 +239,7 @@ const userLogin = async (req, res) => {
         res.cookie("token", token, {
             httpOnly: true,           // JS cannot access it → prevents XSS
             secure: process.env.NODE_ENV === "production", // HTTPS only
-            sameSite: "Strict",       // prevents CSRF
+            sameSite: "None",       
             maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
         });
 
