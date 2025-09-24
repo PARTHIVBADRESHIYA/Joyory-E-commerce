@@ -1030,6 +1030,7 @@ import dotenv from "dotenv";
 dotenv.config();
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import http from "http";
 import { Server } from "socket.io";
 import bodyParser from "body-parser";
@@ -1132,6 +1133,8 @@ app.use(
 
 // 🔹 Body Parser AFTER webhook
 app.use(express.json({ limit: "1mb" }));
+app.use(cookieParser()); // ✅ add this
+
 
 // ================= SOCKET.IO =================
 const server = http.createServer(app);

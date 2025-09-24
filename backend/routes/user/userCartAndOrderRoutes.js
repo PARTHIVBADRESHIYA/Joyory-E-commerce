@@ -21,7 +21,7 @@ const router = express.Router();
 
 // 🛒 Cart Routes
 router.post('/add', protect, addToCart);
-router.put('/update', protect, updateCartItem);
+router.put('/update', protect, updateCartItem); 
 router.delete('/remove/:productId', protect, removeFromCart);
 router.get('/', protect, getCart);
 router.get('/summary', protect,validateDiscount, getCartSummary);
