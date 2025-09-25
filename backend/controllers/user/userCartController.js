@@ -23,48 +23,102 @@ import Referral from "../../models/Referral.js";
 import GiftCard from "../../models/GiftCard.js";
 import { calculateCartSummary } from "../../middlewares/utils/cartPricingHelper.js";
 
-// ✅ Add to Cart with shade/variant selection
+// // ✅ Add to Cart with shade/variant selection
+// export const addToCart = async (req, res) => {
+//   const { productId, quantity, variantSku } = req.body;
+//   const user = await User.findById(req.user._id);
+//   const product = await Product.findById(productId);
+
+//   if (!product) return res.status(404).json({ message: "Product not found" });
+
+//   let selectedVariant = null;
+//   if (variantSku) {
+//     const variant = product.variants.find(v => v.sku === variantSku);
+//     if (variant) {
+//       selectedVariant = {
+//         sku: variant.sku,
+//         shadeName: variant.shadeName,
+//         hex: variant.hex,
+//         image: variant.images?.[0] || product.images?.[0] || null
+//       };
+//     }
+//   }
+
+//   // Check if already exists in cart with same variant
+//   const existing = user.cart.find(
+//     item =>
+//       item.product.toString() === productId &&
+//       (!variantSku || item.selectedVariant?.sku === variantSku)
+//   );
+
+//   if (existing) {
+//     existing.quantity += quantity;
+//   } else {
+//     user.cart.push({
+//       product: productId,
+//       quantity,
+//       selectedVariant
+//     });
+//   }
+
+//   await user.save();
+//   res.status(200).json({ message: "✅ Added to cart", cart: user.cart });
+// }
+
+// ✅ Add to Cart with shade/variant selection (multiple variant support)
 export const addToCart = async (req, res) => {
-  const { productId, quantity, variantSku } = req.body;
-  const user = await User.findById(req.user._id);
-  const product = await Product.findById(productId);
+  try {
+    const { productId, variants = [] } = req.body;
+    // variants = [{ variantSku: "401", quantity: 1 }, { variantSku: "402", quantity: 2 }]
 
-  if (!product) return res.status(404).json({ message: "Product not found" });
+    const user = await User.findById(req.user._id);
+    const product = await Product.findById(productId);
 
-  let selectedVariant = null;
-  if (variantSku) {
-    const variant = product.variants.find(v => v.sku === variantSku);
-    if (variant) {
-      selectedVariant = {
-        sku: variant.sku,
-        shadeName: variant.shadeName,
-        hex: variant.hex,
-        image: variant.images?.[0] || product.images?.[0] || null
-      };
+    if (!product) return res.status(404).json({ message: "Product not found" });
+
+    for (const { variantSku, quantity } of variants) {
+      if (!quantity || quantity <= 0) continue;
+
+      let selectedVariant = null;
+      if (variantSku) {
+        const variant = product.variants.find(v => v.sku === variantSku);
+        if (variant) {
+          selectedVariant = {
+            sku: variant.sku,
+            shadeName: variant.shadeName,
+            hex: variant.hex,
+            image: variant.images?.[0] || product.images?.[0] || null
+          };
+        } else {
+          // Skip invalid variant
+          continue;
+        }
+      }
+
+      // ✅ Check if already exists in cart with same variant
+      const existing = user.cart.find(
+        item =>
+          item.product.toString() === productId &&
+          (!variantSku || item.selectedVariant?.sku === variantSku)
+      );
+
+      if (existing) {
+        existing.quantity += quantity;
+      } else {
+        user.cart.push({
+          product: productId,
+          quantity,
+          selectedVariant
+        });
+      }
     }
+
+    await user.save();
+    res.status(200).json({ message: "✅ Added to cart", cart: user.cart });
+  } catch (err) {
+    res.status(500).json({ message: "Something went wrong", error: err.message });
   }
-
-  // Check if already exists in cart with same variant
-  const existing = user.cart.find(
-    item =>
-      item.product.toString() === productId &&
-      (!variantSku || item.selectedVariant?.sku === variantSku)
-  );
-
-  if (existing) {
-    existing.quantity += quantity;
-  } else {
-    user.cart.push({
-      product: productId,
-      quantity,
-      selectedVariant
-    });
-  }
-
-  await user.save();
-  res.status(200).json({ message: "✅ Added to cart", cart: user.cart });
-}
-
+};
 
 // -------------------- ADD TO CART --------------------
 // export const addToCart = async (req, res) => {

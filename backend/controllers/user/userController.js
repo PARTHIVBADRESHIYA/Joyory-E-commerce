@@ -352,12 +352,42 @@ const logoutUser = (req, res) => {
     return res.status(200).json({ message: 'Logged out successfully' });
 };
 
+// @desc Delete account permanently
+const deleteAccount = async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        // 1) Find user
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        // 2) Delete related records
+        await Order.deleteMany({ user: userId });       // delete all user orders
+        await Referral.deleteMany({ $or: [{ referrer: userId }, { referee: userId }] }); // remove referrals
+
+        // 3) Delete user
+        await User.findByIdAndDelete(userId);
+
+        // 4) Clear token cookie
+        res.clearCookie("token");
+
+        return res.status(200).json({ message: "✅ Your account and all related data have been deleted permanently." });
+    } catch (error) {
+        console.error("❌ Account deletion error:", error);
+        return res.status(500).json({ message: "Failed to delete account", error: error.message });
+    }
+};
+
+
 
 export {
     userSignup,
     userLogin,
     trackProductView,
-    logoutUser
+    logoutUser,
+    deleteAccount
 };
 
 
