@@ -815,9 +815,34 @@ export const getCartSummary = async (req, res) => {
       Math.max(0, summary.payable - discountFromCoupon - pointsDiscount - giftCardDiscount)
     );
 
+    // 🔥 Group items by productId and merge variants
+    const groupedCart = Object.values(
+      cartWithVariants.reduce((acc, item) => {
+        if (!acc[item.productId]) {
+          acc[item.productId] = {
+            productId: item.productId,
+            product: item.product, // already populated with details
+            variants: [],
+          };
+        }
+
+        acc[item.productId].variants.push({
+          sku: item.selectedVariant?.sku || null,
+          shadeName: item.selectedVariant?.shadeName || null,
+          hex: item.selectedVariant?.hex || null,
+          image: item.selectedVariant?.image || item.product.images?.[0] || null,
+          qty: item.qty,
+          discounts: item.discounts || [],
+        });
+
+        return acc;
+      }, {})
+    );
+
+
     /* -------------------- ✅ Response -------------------- */
     res.json({
-      cart: cartWithVariants, // ✅ includes selectedVariant now
+      cart: groupedCart, // ✅ now grouped by product with variants inside
       priceDetails: {
         bagMrp: round2(summary.mrpTotal),
         bagDiscount: round2(summary.savings),
