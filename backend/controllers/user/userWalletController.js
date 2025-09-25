@@ -11,47 +11,6 @@ const razorpay = new Razorpay({
 });
 
 // ========================== USER SIDE ========================== //
-
-
-// GET /api/wallet
-// export const getWallet = async (req, res) => {
-//     try {
-//         const wallet = await getOrCreateWallet(req.user._id);
-
-//         // Fetch config for conversion rate
-//         const config = (await WalletConfig.findOne()) || {};
-//         const pointsRate = config.pointsToCurrencyRate ?? 0.1;
-
-//         const pointsValue = wallet.rewardPoints * pointsRate;
-
-//         return res.json({
-//             joyoryCash: wallet.joyoryCash,
-//             rewardPoints: wallet.rewardPoints,
-//             pointsValue,
-//             walletBalance: wallet.joyoryCash + pointsValue,
-//             transactions: wallet.transactions
-//                 .slice()
-//                 .reverse()
-//                 .slice(0, 50),
-//         });
-//     } catch (err) {
-//         return res.status(500).json({ message: "Error fetching wallet", error: err.message });
-//     }
-// };
-
-// // GET /api/wallet/options
-// export const getWalletOptions = async (req, res) => {
-//     try {
-//         // You can also load this from DB config if you want it dynamic
-//         const options = [200, 400, 500, 1000];
-//         return res.json({ options });
-//     } catch (err) {
-//         return res.status(500).json({ message: "Error fetching wallet options", error: err.message });
-//     }
-// };
-
-
-
 // GET /api/wallet
 export const getWallet = async (req, res) => {
     try {
@@ -154,7 +113,7 @@ export const verifyWalletPayment = async (req, res) => {
         const wallet = await getOrCreateWallet(req.user._id);
 
         // ✅ Credit actual ₹ amount (not paise)
-        const creditedAmount = amount / 100;
+        const creditedAmount = amount;
 
         wallet.joyoryCash += creditedAmount;
         wallet.transactions.push({
@@ -263,26 +222,6 @@ export const refundToWallet = async (req, res) => {
             .json({ message: "Error refunding", error: err.message });
     }
 };
-
-// // Utility: add reward points
-// export const addRewardPoints = async ({
-//     userId,
-//     points = 0,
-//     description = "Reward",
-// }) => {
-//     if (!userId || !points) return null;
-//     const wallet = await getOrCreateWallet(userId);
-//     wallet.rewardPoints += points;
-//     wallet.transactions.push({
-//         type: "REWARD",
-//         amount: points,
-//         mode: "POINTS",
-//         description,
-//     });
-//     await wallet.save();
-//     return wallet;
-// };
-
 
 export const addRewardPoints = async ({
     userId,
