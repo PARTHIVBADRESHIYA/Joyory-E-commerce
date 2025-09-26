@@ -1762,6 +1762,9 @@ export const getCartSummary = async (req, res) => {
       shippingDiscount
     );
 
+    const savingsMessage = totalSavings > 0
+      ? `🎉 You saved ₹${totalSavings} on this order!`
+      : '';
 
     /* -------------------- ✅ Response -------------------- */
     res.json({
@@ -1778,7 +1781,8 @@ export const getCartSummary = async (req, res) => {
         shippingDiscount,                 // Waived amount if free
         shipping,                         // Final shipping charged
         payable: grandTotal,
-        shippingMessage                   // Added message
+        shippingMessage,
+        savingsMessage                      // Added message
       },
       appliedCoupon,
       appliedPromotions,
