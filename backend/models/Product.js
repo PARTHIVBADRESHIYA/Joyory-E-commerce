@@ -259,6 +259,7 @@ const variantSchema = new mongoose.Schema({
     thresholdValue: { type: Number, default: 0 },
     isActive: { type: Boolean, default: true },
     createdAt: { type: Date, default: Date.now },
+    discountedPrice: { type: Number, default: null },
 
     // foundation-specific
     familyKey: { type: String },

@@ -29,7 +29,7 @@ function mapShipmentStatus(status) {
     "Out For Delivery": "Out for Delivery",
     Delivered: "Delivered",
     Cancelled: "Cancelled",
-    Returned: "Returned"  
+    Returned: "Returned"
   };
 
   return map[status] || status; // fallback to raw if unknown
@@ -335,14 +335,13 @@ export const initiateOrderFromCart = async (req, res) => {
     const latestOrder = await Order.findOne().sort({ createdAt: -1 });
     const nextOrderNumber = latestOrder ? latestOrder.orderNumber + 1 : 1001;
     const orderId = `ORDER-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
     // -------------------- 💾 Save new order --------------------
     const newOrder = new Order({
       products: cart.map((item) => ({
-        productId: item.productId,
-        quantity: item.qty,
-        price: item.product.price,
-        selectedVariant: item.selectedVariant || null,
+        productId: item.product, // product _id
+        quantity: item.quantity, // quantity
+        price: item.variant?.discountedPrice || item.variant?.originalPrice || 0, // variant price
+        selectedVariant: item.variant || null, // keep variant details
       })),
       orderId,
       orderNumber: nextOrderNumber,
@@ -365,6 +364,7 @@ export const initiateOrderFromCart = async (req, res) => {
       paid: false,
       paymentStatus: "pending",
     });
+
 
     await newOrder.save();
 

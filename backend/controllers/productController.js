@@ -25,6 +25,269 @@ export const resolveFormulationId = async (input) => {
     return formulationDoc._id;
 };
 
+// const addProductController = async (req, res) => {
+//     try {
+//         const {
+//             name,
+//             variant,
+//             summary,
+//             description,
+//             ingredients,
+//             features,
+//             howToUse,
+//             price,
+//             buyingPrice,
+//             brand,
+//             category,
+//             categories,
+//             quantity,
+//             expiryDate,
+//             scheduledAt,
+//             productTags: rawTags,
+//             variants: rawVariants,
+//             thresholdValue: rawThresholdValue,
+//             formulation,
+//             seller,
+//         } = req.body;
+
+//         // ✅ Prevent duplicate product names
+//         if (!name) return res.status(400).json({ message: "Product name is required" });
+//         const existingProduct = await Product.findOne({ name: name.trim() });
+//         if (existingProduct) {
+//             return res.status(400).json({ message: `Product with name "${name}" already exists` });
+//         }
+
+//         // ✅ Ensure at least one category provided
+//         if (!category && (!categories || categories.length === 0)) {
+//             return res.status(400).json({ message: "Category is required" });
+//         }
+
+//         // ✅ Handle scheduling
+//         let isPublished = true;
+//         let scheduleDate = null;
+//         if (scheduledAt) {
+//             const parsedDateIST = moment.tz(scheduledAt, "YYYY-MM-DD HH:mm", "Asia/Kolkata");
+//             if (!parsedDateIST.isValid()) {
+//                 return res.status(400).json({
+//                     message: "❌ Invalid scheduledAt date format. Use YYYY-MM-DD HH:mm (IST)",
+//                 });
+//             }
+//             const parsedDateUTC = parsedDateIST.toDate();
+//             if (parsedDateUTC > new Date()) {
+//                 isPublished = false;
+//                 scheduleDate = parsedDateUTC;
+//             }
+//         }
+
+//         // ✅ Normalize and resolve categories
+//         let finalCategories = categories && categories.length ? (Array.isArray(categories) ? categories : [categories]) : [category];
+//         const resolvedCategories = [];
+//         for (let cat of finalCategories) {
+//             if (!cat) continue;
+//             const trimmed = String(cat).trim();
+//             if (mongoose.Types.ObjectId.isValid(trimmed)) {
+//                 resolvedCategories.push(trimmed);
+//             } else {
+//                 const foundCat = await Category.findOne({ name: { $regex: `^${trimmed}$`, $options: "i" } });
+//                 if (!foundCat) return res.status(400).json({ message: `Category "${trimmed}" not found` });
+//                 resolvedCategories.push(foundCat._id);
+//             }
+//         }
+
+//         const foundCategories = await Category.find({ _id: { $in: resolvedCategories } });
+//         if (foundCategories.length !== resolvedCategories.length) {
+//             return res.status(400).json({ message: "One or more category IDs are invalid" });
+//         }
+
+//         // ✅ Build category hierarchy
+//         const buildCategoryHierarchy = async (leafId) => {
+//             const hierarchy = [];
+//             let current = await Category.findById(leafId);
+//             while (current) {
+//                 hierarchy.unshift(current._id);
+//                 if (!current.parent) break;
+//                 current = await Category.findById(current.parent);
+//             }
+//             return hierarchy;
+//         };
+//         const categoryHierarchy = await buildCategoryHierarchy(resolvedCategories[0]);
+
+//         // ✅ Parse product tags
+//         let productTags = [];
+//         try {
+//             productTags = rawTags ? (typeof rawTags === "string" ? JSON.parse(rawTags) : rawTags) : [];
+//         } catch {
+//             productTags = [];
+//         }
+
+//         // ✅ Numeric values
+//         const parsedPrice = Number(price);
+//         const parsedBuyingPrice = Number(buyingPrice);
+
+//         if (isNaN(parsedPrice) || isNaN(parsedBuyingPrice)) {
+//             return res.status(400).json({ message: "❌ Invalid numeric values for price or buyingPrice" });
+//         }
+
+//         // ✅ Variants logic
+//         let variants = [];
+//         let shadeOptions = [];
+//         let colorOptions = [];
+
+//         try {
+//             let variantArray = rawVariants ? (typeof rawVariants === "string" ? JSON.parse(rawVariants) : rawVariants) : [];
+//             if (Array.isArray(variantArray) && variantArray.length > 0) {
+//                 variants = variantArray.map((v, i) => {
+//                     const variantImages = [
+//                         ...(req.files?.filter(f => f.fieldname === `variantImages_${i}`).map(f => f.secure_url || f.path || f.url) || []),
+//                         ...(Array.isArray(v.images) ? v.images : [])
+//                     ];
+
+//                     return {
+//                         ...v,
+//                         stock: v.stock !== undefined ? Number(v.stock) : undefined,
+//                         sales: v.sales !== undefined ? Number(v.sales) : 0,
+//                         thresholdValue: v.thresholdValue !== undefined ? Number(v.thresholdValue) : undefined,
+//                         images: variantImages.slice(-5),
+//                         isActive: v.isActive !== false,
+//                         createdAt: new Date()
+//                     };
+//                 });
+
+//                 shadeOptions = variants.map(v => v.shadeName).filter(Boolean);
+//                 colorOptions = variants.map(v => v.hex).filter(Boolean);
+//             }
+//         } catch (err) {
+//             console.error("❌ Variants parsing error:", err);
+//             return res.status(400).json({ message: "Invalid variants data", error: err.message });
+//         }
+
+//         // ✅ Validation: non-variant vs variant products
+//         if (variants.length === 0) {
+//             // Non-variant products must have quantity & thresholdValue
+//             if (quantity === undefined) {
+//                 return res.status(400).json({ message: "❌ quantity is required for non-variant products" });
+//             }
+//             if (isNaN(Number(quantity)) || Number(quantity) < 0) {
+//                 return res.status(400).json({ message: "❌ quantity must be a valid number >= 0" });
+//             }
+
+//             if (rawThresholdValue === undefined) {
+//                 return res.status(400).json({ message: "❌ thresholdValue is required for non-variant products" });
+//             }
+//             if (isNaN(Number(rawThresholdValue)) || Number(rawThresholdValue) < 0) {
+//                 return res.status(400).json({ message: "❌ thresholdValue must be a valid number >= 0" });
+//             }
+//         } else {
+//             // Variant products cannot have global quantity/thresholdValue
+//             if (quantity !== undefined || rawThresholdValue !== undefined) {
+//                 return res.status(400).json({ message: "❌ Do not provide global quantity/thresholdValue when variants exist" });
+//             }
+
+//             for (let i = 0; i < variants.length; i++) {
+//                 const v = variants[i];
+//                 if (!v.images || v.images.length === 0) {
+//                     return res.status(400).json({ message: `❌ Variant #${i + 1}: at least one image is required` });
+//                 }
+//                 if (v.stock === undefined || isNaN(v.stock)) {
+//                     return res.status(400).json({ message: `❌ Variant #${i + 1}: stock is required and must be a number` });
+//                 }
+//                 if (v.thresholdValue === undefined || isNaN(v.thresholdValue)) {
+//                     return res.status(400).json({ message: `❌ Variant #${i + 1}: thresholdValue is required and must be a number` });
+//                 }
+//             }
+//         }
+
+//         // ✅ Image upload helper
+//         const uploadImageFromUrl = async (url) => {
+//             const result = await cloudinary.uploader.upload(url, { folder: "products", resource_type: "image" });
+//             return result.secure_url;
+//         };
+
+//         let images = [];
+//         if (req.files?.length > 0) {
+//             images.push(...req.files.filter(f => f.fieldname === "images").map(f => f.secure_url || f.path || f.url));
+//         }
+
+//         if (req.body.images || req.body.imageUrls) {
+//             let raw = req.body.images || req.body.imageUrls;
+//             try {
+//                 if (typeof raw === "string") raw = JSON.parse(raw);
+//                 const urls = Array.isArray(raw) ? raw : [raw];
+//                 for (const url of urls) {
+//                     try { images.push(await uploadImageFromUrl(url)); } catch (err) { console.warn("⚠️ Failed to upload image:", url, err.message); }
+//                 }
+//             } catch (err) { console.warn("⚠️ Could not parse image URLs:", err.message); }
+//         }
+
+//         // ✅ Resolve formulation
+//         let formulationId = null;
+//         if (formulation) {
+//             try { formulationId = await resolveFormulationId(formulation); } catch (err) { return res.status(400).json({ message: err.message }); }
+//         }
+
+//         // ✅ Compute total quantity & status
+//         const totalQuantity = variants.length > 0 ? variants.reduce((sum, v) => sum + (v.stock || 0), 0) : Number(quantity);
+//         let status = "In-stock";
+//         if (variants.length > 0) {
+//             const allStatuses = variants.map(v => v.stock === 0 ? "Out of stock" : v.stock < (v.thresholdValue || 0) ? "Low stock" : "In-stock");
+//             if (allStatuses.every(s => s === "Out of stock")) status = "Out of stock";
+//             else if (allStatuses.some(s => s === "Low stock")) status = "Low stock";
+//         } else {
+//             status = totalQuantity === 0 ? "Out of stock" : totalQuantity < Number(rawThresholdValue) ? "Low stock" : "In-stock";
+//         }
+
+//         // ✅ Extract dynamic category attributes
+//         let attributes = {};
+//         if (foundCategories[0]?.attributes?.length > 0) {
+//             for (const attr of foundCategories[0].attributes) {
+//                 if (req.body[attr.key] !== undefined) attributes[attr.key] = req.body[attr.key];
+//             }
+//         }
+
+//         // ✅ Create product
+//         const product = new Product({
+//             name,
+//             variant,
+//             summary,
+//             description,
+//             ingredients,
+//             features,
+//             howToUse,
+//             formulation: formulationId,
+//             price: parsedPrice,
+//             buyingPrice: parsedBuyingPrice,
+//             quantity: variants.length > 0 ? undefined : Number(quantity),
+//             thresholdValue: variants.length > 0 ? undefined : Number(rawThresholdValue),
+//             expiryDate,
+//             images,
+//             brand,
+//             category: resolvedCategories[0],
+//             categories: resolvedCategories,
+//             categoryHierarchy,
+//             status,
+//             productTags,
+//             shadeOptions,
+//             colorOptions,
+//             variants,
+//             isPublished,
+//             scheduledAt: scheduleDate,
+//             sales: 0,
+//             views: 0,
+//             commentsCount: 0,
+//             affiliateEarnings: 0,
+//             affiliateClicks: 0,
+//             attributes,
+//             seller: seller || null,
+//         });
+
+//         await product.save();
+//         res.status(201).json({ message: "✅ Product created successfully", product });
+
+//     } catch (error) {
+//         console.error("❌ Product placement error:", util.inspect(error, { showHidden: false, depth: null }));
+//         res.status(500).json({ message: "❌ Product placement failed", error: error.message || "Unknown error", stack: error.stack });
+//     }
+// };
 const addProductController = async (req, res) => {
     try {
         const {
@@ -123,12 +386,11 @@ const addProductController = async (req, res) => {
         // ✅ Numeric values
         const parsedPrice = Number(price);
         const parsedBuyingPrice = Number(buyingPrice);
-
         if (isNaN(parsedPrice) || isNaN(parsedBuyingPrice)) {
             return res.status(400).json({ message: "❌ Invalid numeric values for price or buyingPrice" });
         }
 
-        // ✅ Variants logic
+        // ✅ Variants logic (with discountedPrice)
         let variants = [];
         let shadeOptions = [];
         let colorOptions = [];
@@ -147,6 +409,7 @@ const addProductController = async (req, res) => {
                         stock: v.stock !== undefined ? Number(v.stock) : undefined,
                         sales: v.sales !== undefined ? Number(v.sales) : 0,
                         thresholdValue: v.thresholdValue !== undefined ? Number(v.thresholdValue) : undefined,
+                        discountedPrice: v.discountedPrice !== undefined ? Number(v.discountedPrice) : null, // ✅ New field
                         images: variantImages.slice(-5),
                         isActive: v.isActive !== false,
                         createdAt: new Date()
@@ -163,37 +426,20 @@ const addProductController = async (req, res) => {
 
         // ✅ Validation: non-variant vs variant products
         if (variants.length === 0) {
-            // Non-variant products must have quantity & thresholdValue
-            if (quantity === undefined) {
-                return res.status(400).json({ message: "❌ quantity is required for non-variant products" });
-            }
-            if (isNaN(Number(quantity)) || Number(quantity) < 0) {
-                return res.status(400).json({ message: "❌ quantity must be a valid number >= 0" });
-            }
-
-            if (rawThresholdValue === undefined) {
-                return res.status(400).json({ message: "❌ thresholdValue is required for non-variant products" });
-            }
-            if (isNaN(Number(rawThresholdValue)) || Number(rawThresholdValue) < 0) {
-                return res.status(400).json({ message: "❌ thresholdValue must be a valid number >= 0" });
-            }
+            if (quantity === undefined) return res.status(400).json({ message: "❌ quantity is required for non-variant products" });
+            if (isNaN(Number(quantity)) || Number(quantity) < 0) return res.status(400).json({ message: "❌ quantity must be a valid number >= 0" });
+            if (rawThresholdValue === undefined) return res.status(400).json({ message: "❌ thresholdValue is required for non-variant products" });
+            if (isNaN(Number(rawThresholdValue)) || Number(rawThresholdValue) < 0) return res.status(400).json({ message: "❌ thresholdValue must be a valid number >= 0" });
         } else {
-            // Variant products cannot have global quantity/thresholdValue
             if (quantity !== undefined || rawThresholdValue !== undefined) {
                 return res.status(400).json({ message: "❌ Do not provide global quantity/thresholdValue when variants exist" });
             }
 
             for (let i = 0; i < variants.length; i++) {
                 const v = variants[i];
-                if (!v.images || v.images.length === 0) {
-                    return res.status(400).json({ message: `❌ Variant #${i + 1}: at least one image is required` });
-                }
-                if (v.stock === undefined || isNaN(v.stock)) {
-                    return res.status(400).json({ message: `❌ Variant #${i + 1}: stock is required and must be a number` });
-                }
-                if (v.thresholdValue === undefined || isNaN(v.thresholdValue)) {
-                    return res.status(400).json({ message: `❌ Variant #${i + 1}: thresholdValue is required and must be a number` });
-                }
+                if (!v.images || v.images.length === 0) return res.status(400).json({ message: `❌ Variant #${i + 1}: at least one image is required` });
+                if (v.stock === undefined || isNaN(v.stock)) return res.status(400).json({ message: `❌ Variant #${i + 1}: stock is required and must be a number` });
+                if (v.thresholdValue === undefined || isNaN(v.thresholdValue)) return res.status(400).json({ message: `❌ Variant #${i + 1}: thresholdValue is required and must be a number` });
             }
         }
 
@@ -412,6 +658,78 @@ const updateProductStock = async (req, res) => {
     }
 };
 
+// const updateProductById = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const updateData = { ...req.body };
+
+//         // ✅ Numbers
+//         if (req.body.price) updateData.price = Number(req.body.price);
+//         if (req.body.buyingPrice) updateData.buyingPrice = Number(req.body.buyingPrice);
+//         if (req.body.quantity !== undefined) updateData.quantity = Number(req.body.quantity);
+//         if (req.body.thresholdValue !== undefined) updateData.thresholdValue = Number(req.body.thresholdValue);
+
+//         // ✅ Variants
+//         if (req.body.variants) {
+//             let rawVariants = req.body.variants;
+//             if (typeof rawVariants === "string") {
+//                 try { rawVariants = JSON.parse(rawVariants); } catch { rawVariants = []; }
+//             }
+
+//             if (Array.isArray(rawVariants)) {
+//                 rawVariants = rawVariants.map(v => ({
+//                     sku: v.sku,
+//                     shadeName: v.shadeName || null,
+//                     hex: v.hex || null,
+//                     images: v.images || [],
+//                     stock: Number(v.stock) || 0,
+//                     sales: Number(v.sales) || 0,
+//                     isActive: v.isActive !== false
+//                 }));
+
+//                 updateData.variants = rawVariants;
+//                 updateData.shadeOptions = rawVariants.map(v => v.shadeName).filter(Boolean);
+//                 updateData.colorOptions = rawVariants.map(v => v.hex).filter(Boolean);
+
+//                 // 🔹 Auto recalc total stock & status
+//                 updateData.quantity = rawVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
+//                 const threshold = updateData.thresholdValue !== undefined
+//                     ? updateData.thresholdValue
+//                     : (await Product.findById(id))?.thresholdValue || 0;
+
+//                 updateData.status =
+//                     updateData.quantity === 0 ? "Out of stock" :
+//                         updateData.quantity < threshold ? "Low stock" :
+//                             "In-stock";
+//             }
+//         } else if (updateData.quantity !== undefined) {
+//             // 🔹 Non-variant product stock update
+//             const threshold = updateData.thresholdValue !== undefined
+//                 ? updateData.thresholdValue
+//                 : (await Product.findById(id))?.thresholdValue || 0;
+
+//             updateData.status =
+//                 updateData.quantity === 0 ? "Out of stock" :
+//                     updateData.quantity < threshold ? "Low stock" :
+//                         "In-stock";
+//         }
+
+//         // ✅ Images
+//         if (req.files?.length > 0) {
+//             updateData.images = req.files.map(f => f.path);
+//         }
+
+//         // ✅ Update product
+//         const updated = await Product.findByIdAndUpdate(id, updateData, { new: true });
+//         if (!updated) return res.status(404).json({ message: "❌ Product not found" });
+
+//         res.status(200).json({ message: "✅ Product updated successfully", product: updated });
+
+//     } catch (error) {
+//         console.error("❌ Product update error:", error);
+//         res.status(500).json({ message: "Failed to update product", error: error.message });
+//     }
+// };
 const updateProductById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -438,7 +756,8 @@ const updateProductById = async (req, res) => {
                     images: v.images || [],
                     stock: Number(v.stock) || 0,
                     sales: Number(v.sales) || 0,
-                    isActive: v.isActive !== false
+                    isActive: v.isActive !== false,
+                    discountedPrice: v.discountedPrice !== undefined ? Number(v.discountedPrice) : undefined // ✅ Add discountedPrice
                 }));
 
                 updateData.variants = rawVariants;
@@ -496,6 +815,46 @@ const deleteProduct = async (req, res) => {
     }
 }
 // -------------------- GET SINGLE PRODUCT --------------------
+// const getSingleProductById = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+
+//         if (!mongoose.Types.ObjectId.isValid(id))
+//             return res.status(400).json({ message: 'Invalid product ID format' });
+
+//         const product = await Product.findById(id)
+//             .populate('category', 'name slug')
+//             .populate('categoryHierarchy', 'name slug')
+//             .lean();
+
+//         if (!product) return res.status(404).json({ message: '❌ Product not found' });
+
+//         if (product.variants?.length) {
+//             // Variant-level stock/status only
+//             product.variants = product.variants.map(v => {
+//                 let statusMessage;
+//                 if (v.stock === 0) statusMessage = "No stock available now, please try again later";
+//                 else if (v.stock < (v.thresholdValue || 5)) statusMessage = `Few left (${v.stock})`;
+//                 else statusMessage = "In-stock";
+//                 return { ...v, status: statusMessage };
+//             });
+//             delete product.quantity;
+//             delete product.status;
+//         } else {
+//             // Non-variant product
+//             let statusMessage;
+//             if (product.quantity === 0) statusMessage = "No stock available now, please try again later";
+//             else if (product.quantity < (product.thresholdValue || 5)) statusMessage = `Few left (${product.quantity})`;
+//             else statusMessage = "In-stock";
+//             product.status = statusMessage;
+//         }
+
+//         res.status(200).json({ message: '✅ Product fetched successfully', product });
+//     } catch (error) {
+//         console.error("❌ Error fetching single product:", error);
+//         res.status(500).json({ message: 'Failed to fetch product', error: error.message });
+//     }
+// };
 const getSingleProductById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -511,13 +870,18 @@ const getSingleProductById = async (req, res) => {
         if (!product) return res.status(404).json({ message: '❌ Product not found' });
 
         if (product.variants?.length) {
-            // Variant-level stock/status only
+            // Variant-level stock/status with discountedPrice
             product.variants = product.variants.map(v => {
                 let statusMessage;
                 if (v.stock === 0) statusMessage = "No stock available now, please try again later";
                 else if (v.stock < (v.thresholdValue || 5)) statusMessage = `Few left (${v.stock})`;
                 else statusMessage = "In-stock";
-                return { ...v, status: statusMessage };
+
+                return {
+                    ...v,
+                    status: statusMessage,
+                    displayPrice: v.discountedPrice && v.discountedPrice < v.price ? v.discountedPrice : v.price
+                };
             });
             delete product.quantity;
             delete product.status;
