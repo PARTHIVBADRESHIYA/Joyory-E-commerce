@@ -65,10 +65,9 @@ import { calculateCartSummary } from "../../middlewares/utils/cartPricingHelper.
 //   res.status(200).json({ message: "✅ Added to cart", cart: user.cart });
 // }
 
-// ✅ Add to Cart with shade/variant selection (multiple variant support)
 export const addToCart = async (req, res) => {
   try {
-    const { productId, variants = [] } = req.body;
+    const { productId, variants = [], quantity: qty = 1 } = req.body;
     // variants = [{ variantSku: "401", quantity: 1 }, { variantSku: "402", quantity: 2 }]
 
     const user = await User.findById(req.user._id);
@@ -76,40 +75,51 @@ export const addToCart = async (req, res) => {
 
     if (!product) return res.status(404).json({ message: "Product not found" });
 
-    for (const { variantSku, quantity } of variants) {
-      if (!quantity || quantity <= 0) continue;
-
-      let selectedVariant = null;
-      if (variantSku) {
-        const variant = product.variants.find(v => v.sku === variantSku);
-        if (variant) {
-          selectedVariant = {
-            sku: variant.sku,
-            shadeName: variant.shadeName,
-            hex: variant.hex,
-            image: variant.images?.[0] || product.images?.[0] || null
-          };
-        } else {
-          // Skip invalid variant
-          continue;
-        }
-      }
-
-      // ✅ Check if already exists in cart with same variant
-      const existing = user.cart.find(
-        item =>
-          item.product.toString() === productId &&
-          (!variantSku || item.selectedVariant?.sku === variantSku)
-      );
-
+    if (variants.length === 0) {
+      const existing = user.cart.find(item => item.product.toString() === productId && !item.selectedVariant);
       if (existing) {
-        existing.quantity += quantity;
+        existing.quantity += qty; // now adds the requested quantity
       } else {
         user.cart.push({
           product: productId,
-          quantity,
-          selectedVariant
+          quantity: qty,  // uses the quantity from request
+          selectedVariant: null
         });
+      }
+    } else {
+      for (const { variantSku, quantity } of variants) {
+        if (!quantity || quantity <= 0) continue;
+
+        let selectedVariant = null;
+        if (variantSku) {
+          const variant = product.variants.find(v => v.sku === variantSku);
+          if (variant) {
+            selectedVariant = {
+              sku: variant.sku,
+              shadeName: variant.shadeName,
+              hex: variant.hex,
+              image: variant.images?.[0] || product.images?.[0] || null
+            };
+          } else {
+            continue;
+          }
+        }
+
+        const existing = user.cart.find(
+          item =>
+            item.product.toString() === productId &&
+            (!variantSku || item.selectedVariant?.sku === variantSku)
+        );
+
+        if (existing) {
+          existing.quantity += quantity;
+        } else {
+          user.cart.push({
+            product: productId,
+            quantity,
+            selectedVariant
+          });
+        }
       }
     }
 
@@ -119,6 +129,8 @@ export const addToCart = async (req, res) => {
     res.status(500).json({ message: "Something went wrong", error: err.message });
   }
 };
+
+
 
 // -------------------- ADD TO CART --------------------
 // export const addToCart = async (req, res) => {
@@ -1406,24 +1418,38 @@ export const removeFromCart = async (req, res) => {
 //         summary.payable - discountFromCoupon - pointsDiscount - giftCardDiscount
 //       )
 //     );
+//     const finalCart = validCartItems.map((item) => {
+//       // Product name
+//       const productName = item.product?.name || "Unknown Product";
 
-//     // ✅ Keep same structure as addToCart
-//     const finalCart = validCartItems.map((item) => ({
-//       _id: item._id,
-//       product: item.product?._id,
-//       quantity: item.quantity,
-//       selectedVariant: item.selectedVariant
-//         ? {
-//           sku: item.selectedVariant.sku,
-//           shadeName: item.selectedVariant.shadeName,
-//           hex: item.selectedVariant.hex,
-//           image:
-//             item.selectedVariant.image ||
-//             item.product?.images?.[0] ||
-//             null,
-//         }
-//         : null,
-//     }));
+//       // Shade variant (color, etc.)
+//       const displayName = item.selectedVariant?.shadeName
+//         ? `${productName} - ${item.selectedVariant.shadeName}`
+//         : productName;
+
+//       // Variant (size, quantity, etc.), optional
+//       const displayVariant = item.product?.variant || null; // e.g., "19g", "50ml"
+
+//       return {
+//         _id: item._id,
+//         product: item.product?._id,
+//         name: displayName,          // Name + shade
+//         quantity: item.quantity,
+//         selectedVariant: item.selectedVariant
+//           ? {
+//             sku: item.selectedVariant.sku,
+//             shadeName: item.selectedVariant.shadeName,
+//             hex: item.selectedVariant.hex,
+//             image:
+//               item.selectedVariant.image ||
+//               item.product?.images?.[0] ||
+//               null,
+//           }
+//           : null,
+//         variant: displayVariant,    // size like 19g
+//       };
+//     });
+
 
 //     /* -------------------- ✅ Response -------------------- */
 //     res.json({
@@ -1457,34 +1483,36 @@ export const removeFromCart = async (req, res) => {
 //   }
 // };
 
+
 export const getCartSummary = async (req, res) => {
   try {
-    if (!req.user || !req.user._id)
+    if (!req.user || !req.user._id) {
       return res.status(401).json({ message: "Unauthorized" });
+    }
 
     const user = await User.findById(req.user._id).populate("cart.product");
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    const validCartItems = (user.cart || []).filter((item) => item?.product);
-    if (!validCartItems.length)
+    const validCartItems = (user.cart || []).filter((item) => item.product);
+    if (!validCartItems.length) {
       return res.status(400).json({ message: "Cart is empty" });
+    }
 
     /* -------------------- 🔥 Apply Promotions -------------------- */
     const itemsInput = validCartItems.map((i) => ({
-      productId: String(i.product?._id || ""),
-      qty: i.quantity || 0,
+      productId: String(i.product._id),
+      qty: i.quantity,
       selectedVariant: i.selectedVariant || null,
     }));
 
     const promoResult = await applyPromotions(itemsInput, {
-      userContext: { isNewUser: user.isNewUser || false },
+      userContext: { isNewUser: user.isNewUser },
     });
 
-    const { items = [], summary = {}, appliedPromotions = [] } = promoResult;
-
+    const { items, summary, appliedPromotions } = promoResult;
     const cartWithVariants = items.map((i) => {
       const originalItem = validCartItems.find(
-        (v) => String(v.product?._id) === i.productId
+        (v) => String(v.product._id) === i.productId
       );
 
       return {
@@ -1496,23 +1524,27 @@ export const getCartSummary = async (req, res) => {
 
     /* -------------------- 🎟️ Coupon Discounts -------------------- */
     const allDiscountDocs = await Discount.find({ status: "Active" }).lean();
+
     const nonPromoItemsInput = cartWithVariants
       .filter((i) => !i.discounts || i.discounts.length === 0)
-      .map((i) => ({ productId: i.productId, qty: i.qty }));
+      .map((i) => ({
+        productId: i.productId,
+        qty: i.qty,
+      }));
 
     const couponsChecked = await Promise.all(
-      (allDiscountDocs || []).map(async (d) => {
+      allDiscountDocs.map(async (d) => {
         try {
-          if (!nonPromoItemsInput.length)
+          if (!nonPromoItemsInput.length) {
             return {
               code: d.code,
               label: d.name,
               type: d.type,
               value: d.value,
               status: "Not applicable",
-              message:
-                "All items already on offer – coupons not applicable 🎉",
+              message: "All items already on offer – coupons not applicable 🎉",
             };
+          }
 
           await validateDiscountForCartInternal({
             code: d.code,
@@ -1526,9 +1558,8 @@ export const getCartSummary = async (req, res) => {
             type: d.type,
             value: d.value,
             status: "Applicable",
-            message: `Apply code ${d.code} and save ${
-              d.type === "Percentage" ? d.value + "%" : "₹" + d.value
-            } on non-promotional items`,
+            message: `Apply code ${d.code} and save ${d.type === "Percentage" ? d.value + "%" : "₹" + d.value
+              } on non-promotional items`,
           };
         } catch {
           return {
@@ -1543,8 +1574,12 @@ export const getCartSummary = async (req, res) => {
       })
     );
 
-    const applicableCoupons = couponsChecked.filter((c) => c.status === "Applicable");
-    const inapplicableCoupons = couponsChecked.filter((c) => c.status !== "Applicable");
+    const applicableCoupons = couponsChecked.filter(
+      (c) => c.status === "Applicable"
+    );
+    const inapplicableCoupons = couponsChecked.filter(
+      (c) => c.status !== "Applicable"
+    );
 
     let appliedCoupon = null;
     let discountFromCoupon = 0;
@@ -1557,11 +1592,14 @@ export const getCartSummary = async (req, res) => {
           userId: req.user._id,
         });
 
-        const COUPON_MAX_CAP = result?.discount?.maxCap || 500;
-        discountFromCoupon = Math.min(result?.priced?.discountAmount || 0, COUPON_MAX_CAP);
+        const COUPON_MAX_CAP = result.discount.maxCap || 500;
+        discountFromCoupon = Math.min(
+          result.priced.discountAmount,
+          COUPON_MAX_CAP
+        );
 
         appliedCoupon = {
-          code: result?.discount?.code || "",
+          code: result.discount.code,
           discount: discountFromCoupon,
         };
       } catch {
@@ -1571,23 +1609,26 @@ export const getCartSummary = async (req, res) => {
     }
 
     /* -------------------- 💰 Apply Referral Points -------------------- */
-    let pointsUsed = 0,
-      pointsDiscount = 0,
-      pointsMessage = "";
+    let pointsUsed = 0;
+    let pointsDiscount = 0;
+    let pointsMessage = "";
 
     const wallet = await getOrCreateWallet(req.user._id);
+
     if (req.query.pointsToUse) {
       pointsUsed = Number(req.query.pointsToUse);
-      if (!isNaN(pointsUsed) && pointsUsed > 0 && wallet?.rewardPoints > 0) {
+
+      if (!isNaN(pointsUsed) && pointsUsed > 0 && wallet.rewardPoints > 0) {
         if (pointsUsed > wallet.rewardPoints) pointsUsed = wallet.rewardPoints;
+
         pointsDiscount = pointsUsed * 0.1;
         pointsMessage = `🎉 You used ${pointsUsed} points from your wallet! Discount applied: ₹${pointsDiscount}`;
       }
     }
 
     /* -------------------- 🎁 Apply Gift Card -------------------- */
-    let giftCardApplied = null,
-      giftCardDiscount = 0;
+    let giftCardApplied = null;
+    let giftCardDiscount = 0;
 
     if (req.query.giftCardCode && req.query.giftCardPin) {
       const giftCard = await GiftCard.findOne({
@@ -1596,88 +1637,148 @@ export const getCartSummary = async (req, res) => {
       });
 
       if (!giftCard) {
-        giftCardApplied = { status: "Invalid", message: "❌ Invalid gift card code or PIN" };
+        giftCardApplied = {
+          status: "Invalid",
+          message: "❌ Invalid gift card code or PIN",
+        };
       } else if (giftCard.expiryDate < new Date()) {
-        giftCardApplied = { status: "Invalid", message: "⏰ Gift card has expired" };
+        giftCardApplied = {
+          status: "Invalid",
+          message: "⏰ Gift card has expired",
+        };
       } else if (giftCard.balance <= 0) {
-        giftCardApplied = { status: "Invalid", message: "⚠️ Gift card has no balance left" };
+        giftCardApplied = {
+          status: "Invalid",
+          message: "⚠️ Gift card has no balance left",
+        };
       } else {
         const amountRequested = Number(req.query.giftCardAmount);
-        const payableBeforeGC = Math.max(
-          0,
-          (summary?.payable || 0) - discountFromCoupon - pointsDiscount
-        );
 
         if (!amountRequested || amountRequested <= 0) {
-          giftCardApplied = { status: "Invalid", message: "⚠️ Please enter a valid amount to redeem" };
+          giftCardApplied = {
+            status: "Invalid",
+            message: "⚠️ Please enter a valid amount to redeem",
+          };
         } else if (amountRequested > giftCard.balance) {
           giftCardApplied = {
             status: "Invalid",
             message: `⚠️ Insufficient balance. Your card has only ₹${giftCard.balance} left`,
           };
-        } else if (amountRequested > payableBeforeGC) {
-          giftCardApplied = {
-            status: "Invalid",
-            message: `⚠️ You tried to apply ₹${amountRequested}, but payable amount is only ₹${payableBeforeGC}`,
-          };
         } else {
-          giftCardDiscount = amountRequested;
-          giftCardApplied = {
-            status: "Applied",
-            code: giftCard.code,
-            appliedAmount: giftCardDiscount,
-            remainingBalance: giftCard.balance - giftCardDiscount,
-            message: `🎉 Successfully applied ₹${giftCardDiscount} from your gift card!`,
-          };
+          const payableBeforeGC = Math.max(
+            0,
+            summary.payable - discountFromCoupon - pointsDiscount
+          );
+
+          if (amountRequested > payableBeforeGC) {
+            giftCardApplied = {
+              status: "Invalid",
+              message: `⚠️ You tried to apply ₹${amountRequested}, but payable amount is only ₹${payableBeforeGC}`,
+            };
+          } else {
+            giftCardDiscount = amountRequested;
+            giftCardApplied = {
+              status: "Applied",
+              code: giftCard.code,
+              appliedAmount: giftCardDiscount,
+              remainingBalance: giftCard.balance - giftCardDiscount,
+              message: `🎉 Successfully applied ₹${giftCardDiscount} from your gift card!`,
+            };
+          }
         }
       }
     }
 
     /* -------------------- 📊 Final Totals -------------------- */
-    const round2 = (n) => Math.round((n || 0) * 100) / 100;
-    const grandTotal = round2(Math.max(0, (summary?.payable || 0) - discountFromCoupon - pointsDiscount - giftCardDiscount));
+    const round2 = (n) => Math.round(n * 100) / 100;
 
-    /* -------------------- 🔹 Group variants under each product -------------------- */
-   /* -------------------- 🔹 Group variants under each product with product details -------------------- */
-const finalCart = Object.values(
-  validCartItems.reduce((acc, item) => {
-    const productId = item?.product?._id?.toString() || "unknown";
-    if (!acc[productId]) {
-      acc[productId] = {
-        product: {
-          _id: productId,
-          name: item.product?.name || "",
-          slug: item.product?.slug || "",
-          image: item.product?.images?.[0] || "", // main product image
-        },
-        variants: [],
-      };
+    // Subtotal after all discounts but before shipping
+    let grandTotal = round2(
+      Math.max(
+        0,
+        summary.payable - discountFromCoupon - pointsDiscount - giftCardDiscount
+      )
+    );
+
+    /* -------------------- 🚚 Shipping Logic -------------------- */
+    const FREE_SHIPPING_THRESHOLD = 499;
+    const SHIPPING_FEE = 70;
+
+    let shipping = SHIPPING_FEE;
+    let shippingDiscount = 0;
+    let shippingMessage = "";
+
+    // Case 1: Order qualifies for Free Shipping
+    if (grandTotal >= FREE_SHIPPING_THRESHOLD) {
+      shippingDiscount = SHIPPING_FEE;
+      shipping = 0;
+      shippingMessage = `🎉 Yay! You’ve unlocked Free Shipping and saved ₹${SHIPPING_FEE}.`;
+
+      // Case 2: Order does NOT qualify for Free Shipping
+    } else {
+      const remaining = FREE_SHIPPING_THRESHOLD - grandTotal;
+      shippingMessage = `✨ Shop for ₹${remaining} more to enjoy Free Shipping.`;
     }
 
-    acc[productId].variants.push({
-      sku: item.selectedVariant?.sku || "",
-      shadeName: item.selectedVariant?.shadeName || "",
-      hex: item.selectedVariant?.hex || "",
-      image: item.selectedVariant?.image || item.product?.images?.[0] || "",
-      qty: item.quantity || 0,
+    // Add shipping to grand total
+    grandTotal = round2(grandTotal + shipping);
+
+
+
+    const finalCart = validCartItems.map((item) => {
+      const productName = item.product?.name || "Unknown Product";
+      const displayName = item.selectedVariant?.shadeName
+        ? `${productName} - ${item.selectedVariant.shadeName}`
+        : productName;
+
+      const displayVariant = item.product?.variant || null;
+
+      return {
+        _id: item._id,
+        product: item.product?._id,
+        name: displayName,
+        quantity: item.quantity,
+        selectedVariant: item.selectedVariant
+          ? {
+            sku: item.selectedVariant.sku,
+            shadeName: item.selectedVariant.shadeName,
+            hex: item.selectedVariant.hex,
+            image:
+              item.selectedVariant.image ||
+              item.product?.images?.[0] ||
+              null,
+          }
+          : null,
+        variant: displayVariant,
+      };
     });
 
-    return acc;
-  }, {})
-);
+    // Calculate total savings from all sources
+    const totalSavings = round2(
+      summary.savings +
+      discountFromCoupon +
+      pointsDiscount +
+      giftCardDiscount +
+      shippingDiscount
+    );
+
 
     /* -------------------- ✅ Response -------------------- */
     res.json({
       cart: finalCart,
       priceDetails: {
-        bagMrp: round2(summary?.mrpTotal),
-        bagDiscount: round2(summary?.savings),
-        autoDiscount: round2(summary?.savings),
+        bagMrp: round2(summary.mrpTotal),
+        totalSavings,   // 👈 NEW FIELD,
+        bagDiscount: round2(summary.savings),
+        autoDiscount: round2(summary.savings),
         couponDiscount: round2(discountFromCoupon),
         referralPointsDiscount: round2(pointsDiscount),
         giftCardDiscount: round2(giftCardDiscount),
-        shipping: 0,
+        shippingFee: SHIPPING_FEE,        // Always show base fee
+        shippingDiscount,                 // Waived amount if free
+        shipping,                         // Final shipping charged
         payable: grandTotal,
+        shippingMessage                   // Added message
       },
       appliedCoupon,
       appliedPromotions,
@@ -1687,7 +1788,7 @@ const finalCart = Object.values(
       pointsDiscount,
       pointsMessage,
       giftCardApplied,
-      grandTotal,
+      grandTotal, // final amount user pays (includes shipping)
     });
   } catch (error) {
     console.error("getCartSummary error:", error);
@@ -1697,4 +1798,246 @@ const finalCart = Object.values(
     });
   }
 };
+
+
+// export const getCartSummary = async (req, res) => {
+//   try {
+//     if (!req.user || !req.user._id)
+//       return res.status(401).json({ message: "Unauthorized" });
+
+//     const user = await User.findById(req.user._id).populate("cart.product");
+//     if (!user) return res.status(404).json({ message: "User not found" });
+
+//     const validCartItems = (user.cart || []).filter((item) => item?.product);
+//     if (!validCartItems.length)
+//       return res.status(400).json({ message: "Cart is empty" });
+
+//     /* -------------------- 🔥 Apply Promotions -------------------- */
+//     const itemsInput = validCartItems.map((i) => ({
+//       productId: String(i.product?._id || ""),
+//       qty: i.quantity || 0,
+//       selectedVariant: i.selectedVariant || null,
+//     }));
+
+//     const promoResult = await applyPromotions(itemsInput, {
+//       userContext: { isNewUser: user.isNewUser || false },
+//     });
+
+//     const { items = [], summary = {}, appliedPromotions = [] } = promoResult;
+
+//     const cartWithVariants = items.map((i) => {
+//       const originalItem = validCartItems.find(
+//         (v) => String(v.product?._id) === i.productId
+//       );
+
+//       return {
+//         ...i,
+//         selectedVariant: originalItem?.selectedVariant || null,
+//         product: originalItem?.product || null,
+//       };
+//     });
+
+//     /* -------------------- 🎟️ Coupon Discounts -------------------- */
+//     const allDiscountDocs = await Discount.find({ status: "Active" }).lean();
+//     const nonPromoItemsInput = cartWithVariants
+//       .filter((i) => !i.discounts || i.discounts.length === 0)
+//       .map((i) => ({ productId: i.productId, qty: i.qty }));
+
+//     const couponsChecked = await Promise.all(
+//       (allDiscountDocs || []).map(async (d) => {
+//         try {
+//           if (!nonPromoItemsInput.length)
+//             return {
+//               code: d.code,
+//               label: d.name,
+//               type: d.type,
+//               value: d.value,
+//               status: "Not applicable",
+//               message:
+//                 "All items already on offer – coupons not applicable 🎉",
+//             };
+
+//           await validateDiscountForCartInternal({
+//             code: d.code,
+//             cart: nonPromoItemsInput,
+//             userId: req.user._id,
+//           });
+
+//           return {
+//             code: d.code,
+//             label: d.name,
+//             type: d.type,
+//             value: d.value,
+//             status: "Applicable",
+//             message: `Apply code ${d.code} and save ${
+//               d.type === "Percentage" ? d.value + "%" : "₹" + d.value
+//             } on non-promotional items`,
+//           };
+//         } catch {
+//           return {
+//             code: d.code,
+//             label: d.name,
+//             type: d.type,
+//             value: d.value,
+//             status: "Not applicable",
+//             message: "Not valid for current cart",
+//           };
+//         }
+//       })
+//     );
+
+//     const applicableCoupons = couponsChecked.filter((c) => c.status === "Applicable");
+//     const inapplicableCoupons = couponsChecked.filter((c) => c.status !== "Applicable");
+
+//     let appliedCoupon = null;
+//     let discountFromCoupon = 0;
+
+//     if (req.query.discount && nonPromoItemsInput.length) {
+//       try {
+//         const result = await validateDiscountForCartInternal({
+//           code: req.query.discount.trim(),
+//           cart: nonPromoItemsInput,
+//           userId: req.user._id,
+//         });
+
+//         const COUPON_MAX_CAP = result?.discount?.maxCap || 500;
+//         discountFromCoupon = Math.min(result?.priced?.discountAmount || 0, COUPON_MAX_CAP);
+
+//         appliedCoupon = {
+//           code: result?.discount?.code || "",
+//           discount: discountFromCoupon,
+//         };
+//       } catch {
+//         appliedCoupon = null;
+//         discountFromCoupon = 0;
+//       }
+//     }
+
+//     /* -------------------- 💰 Apply Referral Points -------------------- */
+//     let pointsUsed = 0,
+//       pointsDiscount = 0,
+//       pointsMessage = "";
+
+//     const wallet = await getOrCreateWallet(req.user._id);
+//     if (req.query.pointsToUse) {
+//       pointsUsed = Number(req.query.pointsToUse);
+//       if (!isNaN(pointsUsed) && pointsUsed > 0 && wallet?.rewardPoints > 0) {
+//         if (pointsUsed > wallet.rewardPoints) pointsUsed = wallet.rewardPoints;
+//         pointsDiscount = pointsUsed * 0.1;
+//         pointsMessage = `🎉 You used ${pointsUsed} points from your wallet! Discount applied: ₹${pointsDiscount}`;
+//       }
+//     }
+
+//     /* -------------------- 🎁 Apply Gift Card -------------------- */
+//     let giftCardApplied = null,
+//       giftCardDiscount = 0;
+
+//     if (req.query.giftCardCode && req.query.giftCardPin) {
+//       const giftCard = await GiftCard.findOne({
+//         code: req.query.giftCardCode.trim(),
+//         pin: req.query.giftCardPin.trim(),
+//       });
+
+//       if (!giftCard) {
+//         giftCardApplied = { status: "Invalid", message: "❌ Invalid gift card code or PIN" };
+//       } else if (giftCard.expiryDate < new Date()) {
+//         giftCardApplied = { status: "Invalid", message: "⏰ Gift card has expired" };
+//       } else if (giftCard.balance <= 0) {
+//         giftCardApplied = { status: "Invalid", message: "⚠️ Gift card has no balance left" };
+//       } else {
+//         const amountRequested = Number(req.query.giftCardAmount);
+//         const payableBeforeGC = Math.max(
+//           0,
+//           (summary?.payable || 0) - discountFromCoupon - pointsDiscount
+//         );
+
+//         if (!amountRequested || amountRequested <= 0) {
+//           giftCardApplied = { status: "Invalid", message: "⚠️ Please enter a valid amount to redeem" };
+//         } else if (amountRequested > giftCard.balance) {
+//           giftCardApplied = {
+//             status: "Invalid",
+//             message: `⚠️ Insufficient balance. Your card has only ₹${giftCard.balance} left`,
+//           };
+//         } else if (amountRequested > payableBeforeGC) {
+//           giftCardApplied = {
+//             status: "Invalid",
+//             message: `⚠️ You tried to apply ₹${amountRequested}, but payable amount is only ₹${payableBeforeGC}`,
+//           };
+//         } else {
+//           giftCardDiscount = amountRequested;
+//           giftCardApplied = {
+//             status: "Applied",
+//             code: giftCard.code,
+//             appliedAmount: giftCardDiscount,
+//             remainingBalance: giftCard.balance - giftCardDiscount,
+//             message: `🎉 Successfully applied ₹${giftCardDiscount} from your gift card!`,
+//           };
+//         }
+//       }
+//     }
+
+//     /* -------------------- 📊 Final Totals -------------------- */
+//     const round2 = (n) => Math.round((n || 0) * 100) / 100;
+//     const grandTotal = round2(Math.max(0, (summary?.payable || 0) - discountFromCoupon - pointsDiscount - giftCardDiscount));
+
+//     /* -------------------- 🔹 Group variants under each product -------------------- */
+//    /* -------------------- 🔹 Group variants under each product with product details -------------------- */
+// const finalCart = Object.values(
+//   validCartItems.reduce((acc, item) => {
+//     const productId = item?.product?._id?.toString() || "unknown";
+//     if (!acc[productId]) {
+//       acc[productId] = {
+//         product: {
+//           _id: productId,
+//           name: item.product?.name || "",
+//           slug: item.product?.slug || "",
+//           image: item.product?.images?.[0] || "", // main product image
+//         },
+//         variants: [],
+//       };
+//     }
+
+//     acc[productId].variants.push({
+//       sku: item.selectedVariant?.sku || "",
+//       shadeName: item.selectedVariant?.shadeName || "",
+//       hex: item.selectedVariant?.hex || "",
+//       image: item.selectedVariant?.image || item.product?.images?.[0] || "",
+//       qty: item.quantity || 0,
+//     });
+
+//     return acc;
+//   }, {})
+// );
+
+//     /* -------------------- ✅ Response -------------------- */
+//     res.json({
+//       cart: finalCart,
+//       priceDetails: {
+//         bagMrp: round2(summary?.mrpTotal),
+//         bagDiscount: round2(summary?.savings),
+//         autoDiscount: round2(summary?.savings),
+//         couponDiscount: round2(discountFromCoupon),
+//         referralPointsDiscount: round2(pointsDiscount),
+//         giftCardDiscount: round2(giftCardDiscount),
+//         shipping: 0,
+//         payable: grandTotal,
+//       },
+//       appliedCoupon,
+//       appliedPromotions,
+//       applicableCoupons,
+//       inapplicableCoupons,
+//       pointsUsed,
+//       pointsDiscount,
+//       pointsMessage,
+//       giftCardApplied,
+//       grandTotal,
+//     });
+//   } catch (error) {
+//     console.error("getCartSummary error:", error);
+//     res.status(500).json({
+//       message: "Failed to get cart summary",
+//       error: error.message,
+//     });
+//   }
+// };
 
