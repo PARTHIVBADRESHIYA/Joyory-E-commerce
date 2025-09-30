@@ -306,6 +306,137 @@ const generateToken = (user) => {
 //     }
 // };
 
+// const userSignup = async (req, res) => {
+//     try {
+//         console.log("➡️ Incoming signup request:", req.body);
+
+//         const { name, email, password, phone, preferredOtpMethod, referralCode } = req.body;
+
+//         if (!name || !email || !password) {
+//             console.warn("⚠️ Missing required fields");
+//             return res.status(400).json({ message: 'name, email and password are required' });
+//         }
+
+//         const existing = await User.findOne({ email });
+//         if (existing) {
+//             console.warn("⚠️ Email already registered:", email);
+//             return res.status(400).json({ message: 'Email already registered' });
+//         }
+
+//         const method = (preferredOtpMethod && ['email', 'sms'].includes(preferredOtpMethod.toLowerCase()))
+//             ? preferredOtpMethod.toLowerCase()
+//             : 'email';
+
+//         const willUseSms = method === 'sms' && phone;
+//         const actualMethod = willUseSms ? 'sms' : 'email';
+
+//         console.log("📩 OTP method chosen:", actualMethod);
+
+//         const plainOtp = generateOTP();
+//         const hashedOtp = await bcrypt.hash(plainOtp, 10);
+//         const hashedPassword = await bcrypt.hash(password, 10);
+
+//         console.log("🔑 OTP generated:", plainOtp);
+
+//         const myReferralCode = await generateUniqueReferralCode();
+//         console.log("🎟️ Generated referral code:", myReferralCode);
+
+//         const user = new User({
+//             name,
+//             email,
+//             phone,
+//             password: hashedPassword,
+//             role: 'user',
+//             isManual: true,
+//             isVerified: false,
+//             preferredOtpMethod: actualMethod,
+//             otp: {
+//                 code: hashedOtp,
+//                 expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+//             },
+//             referralCode: myReferralCode
+//         });
+
+//         let referrer = null;
+//         if (referralCode) {
+//             console.log("🔍 Checking referral code:", referralCode);
+//             referrer = await User.findOne({ referralCode: referralCode.toUpperCase() });
+//             if (!referrer) {
+//                 console.warn("⚠️ Invalid referral code:", referralCode);
+//                 return res.status(400).json({ message: 'Invalid referral code' });
+//             }
+//             if (referrer.email === email) {
+//                 console.warn("⚠️ User tried to use their own referral code");
+//                 return res.status(400).json({ message: 'You cannot use your own referral code' });
+//             }
+//             user.referredBy = referrer._id;
+//             console.log("✅ Valid referrer found:", referrer.email);
+//         }
+
+//         await user.save();
+//         console.log("💾 User saved successfully:", user._id);
+
+//         if (referrer) {
+//             await Referral.create({
+//                 referrer: referrer._id,
+//                 referee: user._id,
+//                 status: 'pending',
+//                 rewardForReferrer: 200,
+//                 rewardForReferee: 200,
+//                 minOrderAmount: 100
+//             });
+//             console.log("🎯 Referral record created for:", referrer._id);
+//         }
+
+//         // 🟢 Debugging ZeptoMail or SMS
+//         try {
+//             if (actualMethod === 'sms') {
+//                 console.log("📲 Sending OTP via SMS to:", phone);
+//                 await sendSms(phone, `Your verification OTP is: ${plainOtp}`);
+//                 console.log("✅ SMS sent successfully");
+//             } else {
+//                 console.log("📧 Preparing to send OTP email...");
+//                 console.log("   SMTP_HOST:", process.env.SMTP_HOST);
+//                 console.log("   SMTP_PORT:", process.env.SMTP_PORT);
+//                 console.log("   SMTP_USER:", process.env.SMTP_USER);
+//                 console.log("   SMTP_FROM:", process.env.SMTP_FROM);
+
+//                 const result = await sendEmail(
+//                     email,
+//                     'Verify your account',
+//                     `<p>Your verification OTP is: <b>${plainOtp}</b></p>`
+//                 );
+
+//                 console.log("✅ Email send result:", result);
+//             }
+//         } catch (err) {
+//             console.error("❌ OTP send failed at transport level:", err);
+//             return res.status(500).json({
+//                 message: 'Signup succeeded but sending OTP failed. Please request OTP again.',
+//                 error: err.message,
+//                 stack: err.stack
+//             });
+//         }
+
+//         const responsePayload = {
+//             message: 'Signup successful. OTP sent.',
+//             otpSent: true,
+//             method: actualMethod,
+//             email: user.email,
+//             referralCode: user.referralCode,
+//             referralLink: `${process.env.APP_URL || 'https://yourdomain.com'}/signup?ref=${user.referralCode}`
+//         };
+
+//         console.log("✅ Signup completed. Response:", responsePayload);
+//         return res.status(201).json(responsePayload);
+
+//     } catch (err) {
+//         console.error("🔥 Signup error:", err);
+//         res.status(500).json({ message: 'Signup failed', error: err.message, stack: err.stack });
+//     }
+// };
+
+
 const userSignup = async (req, res) => {
     try {
         console.log("➡️ Incoming signup request:", req.body);
@@ -313,126 +444,92 @@ const userSignup = async (req, res) => {
         const { name, email, password, phone, preferredOtpMethod, referralCode } = req.body;
 
         if (!name || !email || !password) {
-            console.warn("⚠️ Missing required fields");
-            return res.status(400).json({ message: 'name, email and password are required' });
+            return res.status(400).json({ message: "name, email and password are required" });
         }
 
         const existing = await User.findOne({ email });
-        if (existing) {
-            console.warn("⚠️ Email already registered:", email);
-            return res.status(400).json({ message: 'Email already registered' });
-        }
+        if (existing) return res.status(400).json({ message: "Email already registered" });
 
-        const method = (preferredOtpMethod && ['email', 'sms'].includes(preferredOtpMethod.toLowerCase()))
+        const method = (preferredOtpMethod && ["email", "sms"].includes(preferredOtpMethod.toLowerCase()))
             ? preferredOtpMethod.toLowerCase()
-            : 'email';
+            : "email";
 
-        const willUseSms = method === 'sms' && phone;
-        const actualMethod = willUseSms ? 'sms' : 'email';
+        const actualMethod = method === "sms" && phone ? "sms" : "email";
 
-        console.log("📩 OTP method chosen:", actualMethod);
-
+        // Generate OTP & hash password
         const plainOtp = generateOTP();
         const hashedOtp = await bcrypt.hash(plainOtp, 10);
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        console.log("🔑 OTP generated:", plainOtp);
-
         const myReferralCode = await generateUniqueReferralCode();
-        console.log("🎟️ Generated referral code:", myReferralCode);
 
+        // Create user object
         const user = new User({
             name,
             email,
             phone,
             password: hashedPassword,
-            role: 'user',
+            role: "user",
             isManual: true,
             isVerified: false,
             preferredOtpMethod: actualMethod,
-            otp: {
-                code: hashedOtp,
-                expiresAt: new Date(Date.now() + 10 * 60 * 1000)
-            },
-            referralCode: myReferralCode
+            otp: { code: hashedOtp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) },
+            referralCode: myReferralCode,
         });
 
+        // Handle referral
         let referrer = null;
         if (referralCode) {
-            console.log("🔍 Checking referral code:", referralCode);
             referrer = await User.findOne({ referralCode: referralCode.toUpperCase() });
-            if (!referrer) {
-                console.warn("⚠️ Invalid referral code:", referralCode);
-                return res.status(400).json({ message: 'Invalid referral code' });
-            }
-            if (referrer.email === email) {
-                console.warn("⚠️ User tried to use their own referral code");
-                return res.status(400).json({ message: 'You cannot use your own referral code' });
-            }
+            if (!referrer) return res.status(400).json({ message: "Invalid referral code" });
+            if (referrer.email === email) return res.status(400).json({ message: "Cannot use own referral code" });
             user.referredBy = referrer._id;
-            console.log("✅ Valid referrer found:", referrer.email);
         }
 
         await user.save();
-        console.log("💾 User saved successfully:", user._id);
 
         if (referrer) {
             await Referral.create({
                 referrer: referrer._id,
                 referee: user._id,
-                status: 'pending',
+                status: "pending",
                 rewardForReferrer: 200,
                 rewardForReferee: 200,
-                minOrderAmount: 100
+                minOrderAmount: 100,
             });
-            console.log("🎯 Referral record created for:", referrer._id);
         }
 
-        // 🟢 Debugging ZeptoMail or SMS
+        // Send OTP via chosen method
         try {
-            if (actualMethod === 'sms') {
-                console.log("📲 Sending OTP via SMS to:", phone);
+            if (actualMethod === "sms") {
                 await sendSms(phone, `Your verification OTP is: ${plainOtp}`);
-                console.log("✅ SMS sent successfully");
             } else {
-                console.log("📧 Preparing to send OTP email...");
-                console.log("   SMTP_HOST:", process.env.SMTP_HOST);
-                console.log("   SMTP_PORT:", process.env.SMTP_PORT);
-                console.log("   SMTP_USER:", process.env.SMTP_USER);
-                console.log("   SMTP_FROM:", process.env.SMTP_FROM);
-
-                const result = await sendEmail(
+                await sendEmail(
                     email,
-                    'Verify your account',
+                    "Verify your account",
                     `<p>Your verification OTP is: <b>${plainOtp}</b></p>`
                 );
-
-                console.log("✅ Email send result:", result);
             }
         } catch (err) {
-            console.error("❌ OTP send failed at transport level:", err);
+            console.error("❌ OTP sending failed:", err);
             return res.status(500).json({
-                message: 'Signup succeeded but sending OTP failed. Please request OTP again.',
+                message: "Signup succeeded but sending OTP failed. Please request OTP again.",
                 error: err.message,
-                stack: err.stack
             });
         }
 
-        const responsePayload = {
-            message: 'Signup successful. OTP sent.',
+        return res.status(201).json({
+            message: "Signup successful. OTP sent.",
             otpSent: true,
             method: actualMethod,
             email: user.email,
             referralCode: user.referralCode,
-            referralLink: `${process.env.APP_URL || 'https://yourdomain.com'}/signup?ref=${user.referralCode}`
-        };
-
-        console.log("✅ Signup completed. Response:", responsePayload);
-        return res.status(201).json(responsePayload);
+            referralLink: `${process.env.APP_URL || "https://yourdomain.com"}/signup?ref=${user.referralCode}`,
+        });
 
     } catch (err) {
         console.error("🔥 Signup error:", err);
-        res.status(500).json({ message: 'Signup failed', error: err.message, stack: err.stack });
+        res.status(500).json({ message: "Signup failed", error: err.message });
     }
 };
 
@@ -884,3 +981,21 @@ export {
 //     resetPassword,
 //     trackProductView
 // };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
