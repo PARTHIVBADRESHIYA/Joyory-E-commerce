@@ -161,6 +161,7 @@ const userSignup = async (req, res) => {
         // send response with referral link
         return res.status(201).json({
             message: 'Signup successful. OTP sent.',
+            otpSent: true,  // 🔥 add this
             method: actualMethod,
             email: user.email,
             referralCode: user.referralCode,
