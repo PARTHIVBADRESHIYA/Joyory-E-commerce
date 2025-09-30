@@ -270,10 +270,8 @@ const userSignup = async (req, res) => {
         // send OTP
         try {
             if (actualMethod === 'sms') {
-                console.log("📲 Sending OTP via SMS to:", phone);
                 await sendSms(phone, `Your verification OTP is: ${plainOtp}`);
             } else {
-                console.log("📧 Sending OTP via Email to:", email);
                 await sendEmail(
                     email,
                     'Verify your account',
