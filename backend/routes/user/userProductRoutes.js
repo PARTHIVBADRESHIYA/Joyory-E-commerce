@@ -17,7 +17,6 @@ import {
     productDetailRateLimiter, 
 } from "../../middlewares/security/rateLimiter.js";
 
-import { cacheMiddleware } from "../../middlewares/cacheMiddleware.js";
 import {
     productQuerySchema,
     productDetailQuerySchema,
@@ -31,7 +30,7 @@ const router = express.Router();
 router.get(
     "/",
     productListRateLimiter,
-    cacheMiddleware,
+    
     validate(productQuerySchema),
     getAllFilteredProducts
 );
@@ -46,7 +45,7 @@ router.get("/top-categories", getTopCategories);
 router.get("/category/:slug/products", getProductsByCategory);
 
 // ✅ Products by skin type (use a distinct prefix to avoid conflicts)
-router.get("/skintype/:slug", cacheMiddleware, validate(productQuerySchema), getProductsBySkinType);
+router.get("/skintype/:slug",  validate(productQuerySchema), getProductsBySkinType);
 
 // ✅ Related product info
 router.get("/top-sellers/:id", getProductWithRelated);
