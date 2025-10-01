@@ -1,89 +1,89 @@
-import PaymentMethod from '../../../models/settings/payments/PaymentMethod.js';
-import Payment from '../../../models/settings/payments/Payment.js';
-import mongoose from 'mongoose';
+
+import PaymentMethod from "../../../models/settings/payments/PaymentMethod.js";
+
+// ➕ Create a new payment method
 export const createPaymentMethod = async (req, res) => {
     try {
-        const data = Array.isArray(req.body) ? req.body : [req.body];
+        const { name, key, type, description, config, isActive, order } = req.body;
 
-        const invalid = data.filter(item => !item.name || !item.type);
-        if (invalid.length) {
-            return res.status(400).json({ message: 'Each payment method must have a name and type' });
+        const existing = await PaymentMethod.findOne({ key });
+        if (existing) {
+            return res.status(400).json({ success: false, message: "Payment method with this key already exists" });
         }
 
-        // Prevent duplicates (check by name)
-        const existingNames = await PaymentMethod.find({ name: { $in: data.map(d => d.name) } });
-        const existingSet = new Set(existingNames.map(e => e.name));
+        const method = await PaymentMethod.create({
+            name,
+            key,
+            type,
+            description,
+            config,
+            isActive,
+            order,
+            createdBy: req.admin?._id, // only if you attach admin from auth middleware
+        });
 
-        const filtered = data.filter(d => !existingSet.has(d.name));
-
-        if (filtered.length === 0) {
-            return res.status(400).json({ message: 'All provided methods already exist' });
-        }
-
-        const newMethods = await PaymentMethod.insertMany(filtered);
-        res.status(201).json({ message: 'Payment methods added', methods: newMethods });
-
+        res.status(201).json({ success: true, method });
     } catch (err) {
-        res.status(500).json({ message: 'Failed to add payment methods', error: err.message });
+        console.error("createPaymentMethod error:", err);
+        res.status(500).json({ success: false, message: err.message });
     }
 };
 
-
-export const toggleMethodStatus = async (req, res) => {
-    try {
-        const method = await PaymentMethod.findById(req.params.id);
-        if (!method) return res.status(404).json({ message: 'Method not found' });
-        method.isActive = !method.isActive;
-        await method.save();
-        res.status(200).json({ message: 'Status toggled', isActive: method.isActive });
-    } catch (err) {
-        res.status(500).json({ message: 'Error toggling status', error: err.message });
-    }
-};
-
+// 📖 Get all payment methods (admin)
 export const getAllPaymentMethods = async (req, res) => {
     try {
-        const methods = await PaymentMethod.find().sort({ createdAt: -1 });
-        res.status(200).json(methods);
+        const methods = await PaymentMethod.find().sort({ order: 1, name: 1 });
+        res.json({ success: true, methods });
     } catch (err) {
-        res.status(500).json({ message: 'Error fetching methods', error: err.message });
+        console.error("getAllPaymentMethods error:", err);
+        res.status(500).json({ success: false, message: err.message });
     }
 };
 
-// 👤 For single method card (like "Credit Card" with toggle, stats)
-export const getMethodDetails = async (req, res) => {
+// ✏️ Update a payment method
+export const updatePaymentMethod = async (req, res) => {
     try {
         const { id } = req.params;
+        const updates = req.body;
 
-        // Validate ID format
-        if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(400).json({ message: "Invalid method ID" });
-        }
+        const method = await PaymentMethod.findByIdAndUpdate(id, updates, { new: true });
+        if (!method) return res.status(404).json({ success: false, message: "Payment method not found" });
 
-        const [method, stats] = await Promise.all([
-            PaymentMethod.findById(id),
-            Payment.aggregate([
-                { $match: { method: new mongoose.Types.ObjectId(id) } },
-                {
-                    $group: {
-                        _id: "$method",
-                        transactions: { $sum: 1 },
-                        revenue: { $sum: "$amount" }
-                    }
-                }
-            ])
-        ]);
-
-        if (!method) return res.status(404).json({ message: "Method not found" });
-
-        res.status(200).json({
-            method: method.name,
-            type: method.type,
-            isActive: method.isActive,
-            transactions: stats[0]?.transactions || 0,
-            revenue: stats[0]?.revenue || 0
-        });
+        res.json({ success: true, method });
     } catch (err) {
-        res.status(500).json({ message: "Failed to fetch method details", error: err.message });
+        console.error("updatePaymentMethod error:", err);
+        res.status(500).json({ success: false, message: err.message });
     }
 };
+
+// 🔀 Toggle active/inactive
+export const togglePaymentMethod = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const method = await PaymentMethod.findById(id);
+        if (!method) return res.status(404).json({ success: false, message: "Payment method not found" });
+
+        method.isActive = !method.isActive;
+        await method.save();
+
+        res.json({ success: true, method });
+    } catch (err) {
+        console.error("togglePaymentMethod error:", err);
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+// ❌ Delete
+export const deletePaymentMethod = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const method = await PaymentMethod.findByIdAndDelete(id);
+        if (!method) return res.status(404).json({ success: false, message: "Payment method not found" });
+
+        res.json({ success: true, message: "Payment method deleted" });
+    } catch (err) {
+        console.error("deletePaymentMethod error:", err);
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+

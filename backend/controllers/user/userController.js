@@ -439,8 +439,6 @@ const generateToken = (user) => {
 
 const userSignup = async (req, res) => {
     try {
-        console.log("➡️ Incoming signup request:", req.body);
-
         const { name, email, password, phone, preferredOtpMethod, referralCode } = req.body;
 
         if (!name || !email || !password) {

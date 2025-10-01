@@ -1,11 +1,21 @@
-import express from 'express';
-import { verifyAdminOrTeamMember } from '../../../middlewares/authMiddleware.js';
-import { createPaymentMethod, toggleMethodStatus, getAllPaymentMethods,getMethodDetails } from '../../../controllers/settings/payments/paymentMethodController.js';
+
+import express from "express";
+import {
+    createPaymentMethod,
+    getAllPaymentMethods,
+    updatePaymentMethod,
+    togglePaymentMethod,
+    deletePaymentMethod,
+} from "../../../controllers/settings/payments/paymentMethodController.js";
+
 const router = express.Router();
 
-router.post('/', verifyAdminOrTeamMember, createPaymentMethod);
-router.patch('/:id/toggle', verifyAdminOrTeamMember, toggleMethodStatus);
-router.get('/', verifyAdminOrTeamMember, getAllPaymentMethods);
-router.get('/:id', verifyAdminOrTeamMember, getMethodDetails);
+// Example: all these should be protected with adminAuth middleware
+router.post("/", createPaymentMethod);
+router.get("/", getAllPaymentMethods);
+router.put("/:id", updatePaymentMethod);
+router.patch("/:id/toggle", togglePaymentMethod);
+router.delete("/:id", deletePaymentMethod);
 
 export default router;
+

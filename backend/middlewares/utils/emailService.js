@@ -189,9 +189,9 @@ export const sendEmail = async (to, subject, html, attachments = []) => {
 
         if (attachments.length > 0) {
             payload.attachments = attachments.map(att => ({
-                name: att.filename,
-                content: att.content, // base64 string
-                mime_type: att.type,
+                name: att.filename || att.name,           // fallback
+                content: att.content,
+                mime_type: att.type || att.mime_type,     // fallback
             }));
         }
 
@@ -210,8 +210,6 @@ export const sendEmail = async (to, subject, html, attachments = []) => {
             console.error("❌ Email API failed:", data);
             throw new Error(data.message || "ZeptoMail API error");
         }
-
-        console.log("✅ Email sent via ZeptoMail REST API:", data);
         return data;
     } catch (error) {
         console.error("❌ Email sending failed:", error);
