@@ -174,48 +174,46 @@ const razorpay = new Razorpay({
 //     }
 // };
 
-// Create Razorpay order with PaymentMethod (improved, idempotent, secure)
+// Create Razorpay order with PaymentMethod (improved, idempotent, secure, UPI-ready)
 export const createRazorpayOrder = async (req, res) => {
     try {
-        const { orderId, paymentMethodKey } = req.body;
+        const { orderId, paymentMethodKey, upiId, provider } = req.body;
 
-        // 1) Basic validation
+        // 1️⃣ Basic validation
         if (!orderId || !paymentMethodKey) {
             return res.status(400).json({ success: false, message: "orderId and paymentMethodKey are required" });
         }
 
-        // 2) Fetch order (with user)
+        // 2️⃣ Fetch order (with user)
         const order = await Order.findById(orderId).populate("user");
         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
 
-        // 3) Auth: if request has req.user and it's not the owner (and not admin), block
-        //    (Assumes your auth middlewares set req.user or req.admin where appropriate)
+        // 3️⃣ Authorization check
         if (req.user && !req.admin) {
             if (order.user && order.user._id.toString() !== req.user._id.toString()) {
                 return res.status(403).json({ success: false, message: "Forbidden: you cannot create a payment for this order" });
             }
         }
 
-        // 4) Prevent duplicate / already paid orders
+        // 4️⃣ Already paid check
         if (order.paid) {
             return res.status(400).json({ success: false, message: "Order is already paid" });
         }
 
-        // 5) Validate order amount
+        // 5️⃣ Order amount validation
         if (!order.amount || order.amount <= 0) {
             return res.status(400).json({ success: false, message: "Invalid order amount" });
         }
 
-        // 6) Fetch payment method and ensure active
+        // 6️⃣ Fetch payment method
         const paymentMethod = await PaymentMethod.findOne({ key: paymentMethodKey, isActive: true });
         if (!paymentMethod) {
             return res.status(400).json({ success: false, message: "Payment method not available" });
         }
 
-        // 7) Offline (COD / wallet) handling using config rules
+        // 7️⃣ Offline payment handling (COD/wallet)
         if (paymentMethod.type === "offline") {
-            // Optional: enforce COD max amount if provided in config
-            const maxCodAmount = paymentMethod.config?.maxAmount; // numeric INR
+            const maxCodAmount = paymentMethod.config?.maxAmount;
             if (typeof maxCodAmount === "number" && order.amount > maxCodAmount) {
                 return res.status(400).json({ success: false, message: `COD not allowed for orders above ₹${maxCodAmount}` });
             }
@@ -237,7 +235,21 @@ export const createRazorpayOrder = async (req, res) => {
             });
         }
 
-        // 8) If we already created a Razorpay order previously and it's still pending -> return that (idempotency)
+        // 8️⃣ UPI-specific validation
+        if (paymentMethod.key === "upi") {
+            const vpaRegex = /^[\w.-]+@[\w]+$/;
+            if (!upiId || !vpaRegex.test(upiId)) {
+                return res.status(400).json({ success: false, message: "Invalid or missing UPI ID" });
+            }
+            if (!provider) {
+                return res.status(400).json({ success: false, message: "UPI provider is required (gpay/phonepe/paytm)" });
+            }
+
+            order.upiId = upiId;
+            order.upiProvider = provider;
+        }
+
+        // 9️⃣ Idempotency: return existing pending Razorpay order
         if (order.razorpayOrderId && order.paymentStatus === "pending") {
             return res.status(200).json({
                 success: true,
@@ -247,15 +259,14 @@ export const createRazorpayOrder = async (req, res) => {
                 currency: "INR",
                 orderId: order._id,
                 paymentMethod: order.paymentMethod || paymentMethod.key,
+                upiId: order.upiId || null,
             });
         }
 
-        // 9) Prepare Razorpay order creation parameters
-        const amountInPaise = Math.round(order.amount * 100); // INR -> paise
-        const payment_capture_flag = paymentMethod.config?.autoCapture ? 1 : 1; // default 1 (captured). Set to 0 if you want manual capture.
-        // (You can change default to 0 if you need auth-only flows.)
+        // 🔟 Create Razorpay order
+        const amountInPaise = Math.round(order.amount * 100);
+        const payment_capture_flag = paymentMethod.config?.autoCapture ? 1 : 1;
 
-        // 10) Create Razorpay order (safe try/catch)
         let razorpayOrder;
         try {
             razorpayOrder = await razorpay.orders.create({
@@ -266,24 +277,20 @@ export const createRazorpayOrder = async (req, res) => {
                 notes: {
                     orderId: order._id.toString(),
                     customer: order.user?.name || "Guest User",
+                    upi: order.upiId || null,
                 },
             });
-        } catch (razorErr) {
-            console.error("Razorpay order creation failed:", razorErr);
-            // 502-like response to upstream error
+        } catch (err) {
+            console.error("Razorpay order creation failed:", err);
             return res.status(502).json({
                 success: false,
                 message: "Failed to create payment order with gateway",
-                error: razorErr.message || "Razorpay error",
+                error: err.message || "Razorpay error",
             });
         }
 
-        // 11) Seller split & backfill (preserve original logic, but protect with try/catch to avoid failing payment creation)
-        try {
-            await splitOrderForPersistence(order);
-        } catch (splitErr) {
-            console.warn("Seller split/persistence warning (non-fatal):", splitErr.message || splitErr);
-        }
+        // 1️⃣1️⃣ Seller split/backfill (optional, your existing logic)
+        try { await splitOrderForPersistence(order); } catch (err) { console.warn(err); }
 
         try {
             const updatedProducts = [];
@@ -293,17 +300,13 @@ export const createRazorpayOrder = async (req, res) => {
                     if (prod?.seller) {
                         p.seller = prod.seller;
                         updatedProducts.push(p.productId.toString());
-                    } else {
-                        console.warn(`Seller missing for product ${p.productId} in order ${order._id}`);
                     }
                 }
             }
             if (updatedProducts.length) console.log("Backfilled seller for products:", updatedProducts);
-        } catch (backfillErr) {
-            console.warn("Seller backfill skipped:", backfillErr.message || backfillErr);
-        }
+        } catch (err) { console.warn(err); }
 
-        // 12) Update order with razorpay info and tracking
+        // 1️⃣2️⃣ Update order with Razorpay info
         order.razorpayOrderId = razorpayOrder.id;
         order.paymentStatus = "pending";
         order.orderStatus = "Awaiting Payment";
@@ -311,11 +314,10 @@ export const createRazorpayOrder = async (req, res) => {
         order.trackingHistory = order.trackingHistory || [];
         order.trackingHistory.push({ status: "Awaiting Payment", timestamp: new Date() });
 
-        // 13) Optional E-card (kept, non-fatal)
+        // 1️⃣3️⃣ Optional E-card (kept)
         try {
             const { occasion, festival } = await determineOccasions({ userId: order.user._id, userDoc: order.user });
             const message = craftMessage({ occasion, user: order.user, festival });
-
             if (message) {
                 const pdfBuffer = await buildEcardPdf({ title: "A Special Note from Joyory 🎉", name: order.user?.name || "Customer", message });
                 const uploadResult = await new Promise((resolve, reject) => {
@@ -325,44 +327,32 @@ export const createRazorpayOrder = async (req, res) => {
                     );
                     uploadStream.end(pdfBuffer);
                 });
-
-                await sendEmail(
-                    order.user.email,
-                    "🎁 Your Joyory E-Card",
-                    `<p>${message}</p><p>We’ve attached your special card as a PDF.</p>`,
-                    [
-                        {
-                            name: "ecard.pdf",
-                            content: pdfBuffer.toString("base64"),
-                            mime_type: "application/pdf",
-                        },
-                    ]
-                );
-
+                await sendEmail(order.user.email, "🎁 Your Joyory E-Card", `<p>${message}</p><p>PDF attached.</p>`, [{ name: "ecard.pdf", content: pdfBuffer.toString("base64"), mime_type: "application/pdf" }]);
                 order.ecard = { occasion, message, emailSentAt: new Date(), pdfUrl: uploadResult?.secure_url || null };
             }
-        } catch (ecardErr) {
-            console.warn("E-Card processing skipped (non-fatal):", ecardErr.message || ecardErr);
-        }
+        } catch (err) { console.warn("E-card skipped:", err); }
 
-        // 14) Persist order changes
+        // 1️⃣4️⃣ Save order
         await order.save();
 
-        // 15) Return success with razorpay order id (frontend can now call verify after payment)
+        // 1️⃣5️⃣ Return success response
         return res.status(200).json({
             success: true,
-            message: "Razorpay order created (E-card processed if applicable)",
+            message: "Razorpay order created successfully",
             razorpayOrderId: razorpayOrder.id,
             amount: order.amount,
             currency: "INR",
             orderId: order._id,
             paymentMethod: paymentMethod.key,
+            upiId: order.upiId || null, // send to frontend for prefill
         });
+
     } catch (err) {
         console.error("Fatal error creating Razorpay order:", err);
         return res.status(500).json({ success: false, message: "Failed to create Razorpay order", error: err.message });
     }
 };
+
 
 
 // // 🔹 Verify Razorpay payment with full existing logic + PaymentMethod
@@ -663,6 +653,14 @@ export const verifyRazorpayPayment = async (req, res) => {
         try {
             const { pdfBuffer, pdfUrl } = await generateInvoice(order, order.user);
             order.invoice = { number: `INV-${order._id}`, generatedAt: new Date(), pdfUrl };
+
+            // Store UPI details (optional, for logging)
+            if (rpPayment.method === "upi") {
+                order.upiId = rpPayment.vpa;          // the virtual payment address customer paid with
+                order.upiProvider = rpPayment.bank;   // UPI provider (e.g., 'HDFC', 'ICICI')
+            }
+
+
             await order.save();
 
             await sendEmail(
