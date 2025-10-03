@@ -1,5 +1,7 @@
 // middleware/paymentValidation.js
 
+import PaymentMethod from "../models/settings/payments/PaymentMethod.js";
+
 // --- Helper functions ---
 export const validateUPI = (upiId) => {
     const upiRegex = /^[\w.-]+@[\w]+$/;
@@ -90,36 +92,48 @@ export const adminPaymentValidation = (req, res, next) => {
 
 export const userPaymentValidation = async (req, res, next) => {
     try {
-        const { paymentMethodId, details } = req.body;
+        const { paymentMethodKey, details } = req.body;
 
-        if (!paymentMethodId) return res.status(400).json({ success: false, message: "Payment method ID is required" });
-        if (!details) return res.status(400).json({ success: false, message: "Payment details are required" });
+        // 1️⃣ Required field check
+        if (!paymentMethodKey) 
+            return res.status(400).json({ success: false, message: "Payment method key is required" });
 
-        // Fetch payment method from DB
-        const method = await PaymentMethod.findById(paymentMethodId);
-        if (!method || !method.isActive) return res.status(400).json({ success: false, message: "Payment method not available" });
+        // 2️⃣ Fetch payment method by key
+        const method = await PaymentMethod.findOne({ key: paymentMethodKey, isActive: true });
+        if (!method) 
+            return res.status(400).json({ success: false, message: "Payment method not available" });
 
-        // Validate details based on type from DB
-        let error = null;
-        switch (method.type) {
-            case "upi":
-                if (!details.upiId || !validateUPI(details.upiId)) error = "Invalid UPI ID";
-                break;
-            case "card":
-                if (!details.cardNumber || !validateCardNumber(details.cardNumber)) error = "Invalid card number";
-                else if (!details.expiry || !validateExpiry(details.expiry)) error = "Invalid or expired expiry date";
-                else if (!details.cvv || !validateCVV(details.cvv)) error = "Invalid CVV";
-                break;
-            case "wallet":
-                if (!details.walletId) error = "Wallet ID is required";
-                break;
-            default:
-                error = "Unsupported payment type";
+        // 3️⃣ Only validate details if required
+        // For offline methods or UPI QR, details may not be needed
+        if (["upi", "card", "wallet"].includes(method.type)) {
+            if (!details) 
+                return res.status(400).json({ success: false, message: "Payment details are required" });
+
+            let error = null;
+            switch (method.type) {
+                case "upi":
+                    if (!details.upiId || !validateUPI(details.upiId)) 
+                        error = "Invalid UPI ID";
+                    break;
+                case "card":
+                    if (!details.cardNumber || !validateCardNumber(details.cardNumber)) 
+                        error = "Invalid card number";
+                    else if (!details.expiry || !validateExpiry(details.expiry)) 
+                        error = "Invalid or expired expiry date";
+                    else if (!details.cvv || !validateCVV(details.cvv)) 
+                        error = "Invalid CVV";
+                    break;
+                case "wallet":
+                    if (!details.walletId) 
+                        error = "Wallet ID is required";
+                    break;
+            }
+
+            if (error) 
+                return res.status(400).json({ success: false, message: error });
         }
 
-        if (error) return res.status(400).json({ success: false, message: error });
-
-        // Attach method info to req for controller
+        // 4️⃣ Attach method info to req for controller
         req.paymentMethod = method;
 
         next();
