@@ -25,10 +25,6 @@ const razorpay = new Razorpay({
     key_secret: process.env.RAZORPAY_KEY_SECRET
 });
 
-// --------------------- DEBUG FUNCTION ---------------------
-const debugLog = (label, data) => {
-    console.log(`\n[DEBUG] ${label}:`, JSON.stringify(data, null, 2), '\n');
-};
 
 // ---------------- CREATE UPI QR ---------------------
 
@@ -178,6 +174,7 @@ export const createUpiQrForOrder = async (req, res) => {
 // };
 
 // Create Razorpay order with PaymentMethod (improved, idempotent, secure, UPI-ready)
+
 export const createRazorpayOrder = async (req, res) => {
     try {
         const { orderId, paymentMethodKey, upiId, provider } = req.body;
@@ -251,11 +248,16 @@ export const createRazorpayOrder = async (req, res) => {
 
             // If provider requires user UPI
             if (providerConfig.requireUserUpi) {
+                // change to (more defensive):
                 const vpaRegex = /^[\w.-]+@[\w]+$/;
-                if (!upiId || !vpaRegex.test(upiId)) {
-                    return res.status(400).json({ success: false, message: "Invalid or missing UPI ID" });
+                const normalizedVpa = typeof upiId === "string" ? upiId.trim() : "";
+                if (!normalizedVpa) {
+                    return res.status(400).json({ success: false, message: "Missing UPI ID", field: "upiId" });
                 }
-                order.upiId = upiId;
+                if (!vpaRegex.test(normalizedVpa)) {
+                    return res.status(400).json({ success: false, message: "Invalid UPI ID format", field: "upiId", example: "example@bank" });
+                }
+                order.upiId = normalizedVpa;
             }
 
             order.upiProvider = provider;
