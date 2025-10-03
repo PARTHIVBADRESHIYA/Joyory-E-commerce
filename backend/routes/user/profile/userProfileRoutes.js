@@ -20,7 +20,7 @@ router.delete('/avatar', protect, removeProfileImage);
 
 // address routes
 router.get('/address', protect, getUserAddresses);
-router.post('/address',validate(addressSchema), protect, addUserAddress);
+router.post('/address', protect, addUserAddress);
 router.patch('/address/:id', protect, updateUserAddress);
 router.delete('/address/:id', protect, deleteUserAddress);
 
