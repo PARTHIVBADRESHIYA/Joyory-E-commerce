@@ -460,6 +460,58 @@ export const verifyRazorpayPayment = async (req, res) => {
     }
 };
 
+
+
+export const razorpayCallback = async (req, res) => {
+    try {
+        const { payment_link_id, payment_id, orderId } = req.query;
+
+        if (!payment_id || !orderId) {
+            return res.redirect(`${process.env.FRONTEND_URL}/paymentfailed`);
+        }
+
+        // Fetch order from DB
+        const order = await Order.findById(orderId).populate("user").populate("products.productId");
+        if (!order) {
+            return res.redirect(`${process.env.FRONTEND_URL}/paymentfailed`);
+        }
+
+        // Fetch payment details from Razorpay
+        let rpPayment;
+        try {
+            rpPayment = await razorpay.payments.fetch(payment_id);
+        } catch (err) {
+            console.error("Failed to fetch payment from Razorpay:", err);
+            return res.redirect(`${process.env.FRONTEND_URL}/paymentfailed`);
+        }
+
+        // Check payment status
+        if (rpPayment.status !== "captured") {
+            console.warn("Payment not captured:", rpPayment.status);
+            return res.redirect(`${process.env.FRONTEND_URL}/paymentfailed`);
+        }
+
+        // Optional: verify order/payment mapping
+        const matchesOrder =
+            (order.razorpayOrderId && rpPayment.order_id && order.razorpayOrderId === rpPayment.order_id) ||
+            (order.paymentLink?.id && rpPayment.link_id && order.paymentLink.id === rpPayment.link_id) ||
+            (rpPayment.notes && rpPayment.notes.orderId && rpPayment.notes.orderId === order._id.toString());
+
+        if (!matchesOrder) {
+            console.warn("Order/payment mismatch");
+            return res.redirect(`${process.env.FRONTEND_URL}/paymentfailed`);
+        }
+
+        // ✅ Mark order paid & finalize payment
+        await finalizeOrderPayment(order, rpPayment);
+
+        // Redirect to frontend success page
+        return res.redirect(`${process.env.FRONTEND_URL}/ordersuccess?orderId=${orderId}`);
+    } catch (err) {
+        console.error("Razorpay Callback Error:", err);
+        return res.redirect(`${process.env.FRONTEND_URL}/paymentfailed`);
+    }
+};
 //working some
 
 // // // Create Razorpay order with PaymentMethod (improved, idempotent, secure, UPI-ready)
