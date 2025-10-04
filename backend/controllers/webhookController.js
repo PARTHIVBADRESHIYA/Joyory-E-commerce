@@ -138,110 +138,124 @@ export const razorpayWebhook = async (req, res) => {
         const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
         const signature = req.headers["x-razorpay-signature"];
 
-        const rawBody = req.body instanceof Buffer
-            ? req.body.toString()
-            : JSON.stringify(req.body);
+        // raw body (req.body is Buffer because we used express.raw middleware)
+        const rawBody = req.body instanceof Buffer ? req.body.toString() : JSON.stringify(req.body);
 
-        // 🔹 Verify Razorpay signature
+        // Verify signature (skip only in development if you intentionally set SKIP_SIGNATURE)
         if (!(process.env.NODE_ENV === "development" || process.env.SKIP_SIGNATURE === "true")) {
-            const expectedSignature = crypto
-                .createHmac("sha256", secret)
-                .update(rawBody)
-                .digest("hex");
-
+            const expectedSignature = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
             if (signature !== expectedSignature) {
-                console.error("❌ Invalid Razorpay Signature");
-                // ⚠️ Must still return 200 to Razorpay
+                console.error("❌ Invalid Razorpay Signature (webhook)");
+                // respond 200 to avoid retries but mark ignored
                 return res.status(200).json({ status: "ignored", reason: "invalid signature" });
             }
         }
 
         const eventPayload = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
         const event = eventPayload.event;
-
         console.log("✅ Razorpay Webhook Event:", event);
 
-        // ================= PAYMENT CAPTURED =================
+        // Handle payment captured (covers regular orders and some payment-link captures)
         if (event === "payment.captured") {
             const payment = eventPayload.payload.payment.entity;
-            const order = await Order.findOne({ razorpayOrderId: payment.order_id }).populate("user");
+
+            // find order either by razorpayOrderId (order_id), by payment.link_id (payment link), or by notes.orderId
+            const order = await Order.findOne({
+                $or: [
+                    { razorpayOrderId: payment.order_id },
+                    { "paymentLink.id": payment.link_id },
+                    { _id: payment.notes?.orderId },
+                    { "paymentLink.referenceId": payment.reference_id }, // defensive
+                ],
+            }).populate("user");
 
             if (!order) {
-                console.error("❌ Order not found for Razorpay orderId:", payment.order_id);
+                console.error("❌ Order not found for Razorpay payment:", payment.order_id, payment.link_id, payment.notes);
                 return res.status(200).json({ status: "ignored", reason: "order not found" });
             }
 
             if (!order.paid) {
-                order.paid = true;
-                order.paymentStatus = "success";
-                order.paymentMethod = order.paymentMethod === "COD" ? "COD" : "Prepaid";
-                order.transactionId = payment.id;
-                order.orderStatus = "Paid";
-                await order.save();
-
-                // ✅ Create Payment record
-                await Payment.create({
-                    order: order._id,
-                    method: payment.method || "Razorpay",
-                    status: "Completed",
-                    transactionId: payment.id,
-                    amount: payment.amount / 100,
-                    cardHolderName: payment.card?.name,
-                    cardNumber: payment.card?.last4,
-                    expiryDate: payment.card
-                        ? `${payment.card.expiry_month}/${payment.card.expiry_year}`
-                        : undefined,
-                    isActive: true,
-                });
-
-                // ✅ Create seller splitOrders
                 try {
-                    await splitOrderForPersistence(order);
-                    console.log(`📦 Split orders generated for sellers in Order ${order._id}`);
-                } catch (splitErr) {
-                    console.error("❌ Failed to split order for sellers:", splitErr);
+                    await finalizeOrderPayment(order, payment);
+                    console.log(`💰 Order ${order._id} marked Paid (webhook payment.captured)`);
+                } catch (err) {
+                    console.error("❌ Error during finalizeOrderPayment (webhook):", err);
                 }
+            }
 
-                // ✅ Notify user via socket
-                io.to(order.user._id.toString()).emit("orderUpdated", {
-                    orderId: order._id,
-                    status: "Paid",
-                    paymentId: payment.id,
-                });
+            // emit socket notify
+            try {
+                io.to(order.user._id.toString()).emit("orderUpdated", { orderId: order._id, status: "Paid", paymentId: payment.id });
+            } catch (err) { /* ignore */ }
+        }
 
-                console.log(`💰 Order ${order._id} marked Paid, payment saved, socket emitted`);
+        // Handle payment link events (e.g., payment_link.paid: you might get link entity with payments array)
+        if (event && event.startsWith("payment_link.")) {
+            const linkEntity = eventPayload.payload.payment_link?.entity;
+            if (!linkEntity) {
+                console.warn("payment_link event with no entity", eventPayload);
+                return res.status(200).json({ status: "ok" });
+            }
+
+            // update order(s) that reference this payment link
+            const order = await Order.findOne({ "paymentLink.id": linkEntity.id }).populate("user");
+            if (order) {
+                // update link meta on order
+                order.paymentLink = order.paymentLink || {};
+                order.paymentLink.status = linkEntity.status;
+                order.paymentLink.updatedAt = new Date();
+                await order.save();
+            }
+
+            // If payments array is present (customer paid), iterate and finalize
+            if (Array.isArray(linkEntity.payments) && linkEntity.payments.length) {
+                for (const p of linkEntity.payments) {
+                    try {
+                        // p might be simple id or object depending on payload; attempt to fetch payment details
+                        const paymentId = p.id || p;
+                        const rpPayment = await razorpay.payments.fetch(paymentId);
+                        // find corresponding order as above
+                        const linkedOrder = order || await Order.findOne({
+                            $or: [
+                                { razorpayOrderId: rpPayment.order_id },
+                                { "paymentLink.id": rpPayment.link_id },
+                                { _id: rpPayment.notes?.orderId },
+                            ],
+                        }).populate("user");
+
+                        if (linkedOrder && !linkedOrder.paid) {
+                            await finalizeOrderPayment(linkedOrder, rpPayment);
+                            console.log(`💳 Finalized payment for order ${linkedOrder._id} (payment_link event)`);
+                        }
+                    } catch (err) {
+                        console.error("❌ Error handling payment_link payment:", err);
+                    }
+                }
             }
         }
 
-        // ================= PAYMENT FAILED =================
+        // payment.failed -> mark order failed if we can map it
         if (event === "payment.failed") {
             const payment = eventPayload.payload.payment.entity;
-            const order = await Order.findOne({ razorpayOrderId: payment.order_id });
-
+            const order = await Order.findOne({ $or: [{ razorpayOrderId: payment.order_id }, { "paymentLink.id": payment.link_id }, { _id: payment.notes?.orderId }] });
             if (order) {
                 order.paymentStatus = "failed";
                 order.orderStatus = "Payment Failed";
                 await order.save();
-
-                io.to(order.user._id.toString()).emit("orderUpdated", {
-                    orderId: order._id,
-                    status: "Payment Failed",
-                });
-
-                console.log(`⚠️ Order ${order._id} marked Failed & user notified`);
+                try { io.to(order.user._id.toString()).emit("orderUpdated", { orderId: order._id, status: "Payment Failed" }); } catch (e) { }
+                console.log(`⚠️ Order ${order._id} marked Failed (webhook payment.failed)`);
             }
         }
 
-        // 🔹 Always return 200
+        // Always respond 200 quickly
         return res.status(200).json({ status: "ok" });
 
     } catch (err) {
         console.error("🔥 Razorpay Webhook Error:", err);
-        // ⚠️ Never send 500, always send 200
+        // Don't return 500 (Razorpay will retry); return 200 and log
         return res.status(200).json({ status: "error_logged" });
     }
 };
-
 
 /**
  * 🔹 Shiprocket Webhook
