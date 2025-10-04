@@ -260,28 +260,28 @@ export const createRazorpayOrder = async (req, res) => {
             }
 
             const amountInPaise = Math.round(order.amount * 100);
-            const expireBy = Math.floor(Date.now() / 1000) + (5 * 60); // 5 minutes from now
-
+            const expireBy = Math.floor(Date.now() / 1000) + (20 * 60); // 20 minutes from now
             const linkPayload = {
-    amount: amountInPaise,
-    currency: "INR",
-    reference_id: `order_${order._id}`,
-    description: `Payment for Order ${order._id}`,
-    customer: {
-        name: order.user?.name || "Customer",
-        contact: order.user?.phone || undefined,
-        email: order.user?.email || undefined,
-    },
-    notify: {
-        sms: !!order.user?.phone,
-        email: !!order.user?.email,
-    },
-    notes: { orderId: order._id.toString() },
-    expire_by: expireBy,
-    upi_link: true,  // ✅ only this is needed
-    callback_url: process.env.RAZORPAY_UPI_CALLBACK_URL || `${process.env.FRONTEND_URL}/payment/razorpay/callback`,
-    callback_method: "get",
-};
+                amount: amountInPaise,
+                currency: "INR",
+                reference_id: `order_${order._id}`,
+                description: `Payment for Order ${order._id}`,
+                customer: {
+                    name: order.user?.name || "Customer",
+                    contact: order.user?.phone || undefined,
+                    email: order.user?.email || undefined,
+                },
+                notify: {
+                    sms: !!order.user?.phone,
+                    email: !!order.user?.email,
+                },
+                notes: { orderId: order._id.toString(), provider },
+                expire_by: expireBy,   // ✅ min 15 mins
+                upi_link: true,        // ✅ tells Razorpay to generate UPI collect
+                callback_url: process.env.RAZORPAY_UPI_CALLBACK_URL || `${process.env.FRONTEND_URL}/payment/razorpay/callback`,
+                callback_method: "get",
+            };
+
 
 
             let paymentLink;
