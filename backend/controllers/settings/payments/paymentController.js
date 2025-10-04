@@ -13,12 +13,16 @@ import Referral from '../../../models/Referral.js'; // ✅ You need to import th
 import Razorpay from "razorpay";
 import crypto from "crypto";
 import axios from 'axios';
+import dotenv from "dotenv";
 
 import cloudinary from '../../../middlewares/utils/cloudinary.js';
 import { determineOccasions, craftMessage } from "../../../middlewares/services/ecardService.js";
 import { buildEcardPdf } from "../../../middlewares/services/ecardPdf.js";
 import { generateInvoice } from "../../../middlewares/services/invoiceService.js";
 import { splitOrderForPersistence } from '../../../middlewares/services/orderSplit.js'; // or correct path
+
+dotenv.config();
+
 
 const razorpay = new Razorpay({
     key_id: process.env.RAZORPAY_KEY_ID,
@@ -373,191 +377,191 @@ async function finalizeOrderPayment(order, rpPayment) {
 // };
 
 
-export const createRazorpayOrder = async (req, res) => {
-    try {
-        const { orderId, paymentMethodKey, upiId, provider } = req.body;
+// export const createRazorpayOrder = async (req, res) => {
+//     try {
+//         const { orderId, paymentMethodKey, upiId, provider } = req.body;
 
-        if (!orderId || !paymentMethodKey)
-            return res.status(400).json({ success: false, message: "orderId and paymentMethodKey are required" });
+//         if (!orderId || !paymentMethodKey)
+//             return res.status(400).json({ success: false, message: "orderId and paymentMethodKey are required" });
 
-        const order = await Order.findById(orderId).populate("user");
-        if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+//         const order = await Order.findById(orderId).populate("user");
+//         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
 
-        // Security: ensure user owns the order
-        if (req.user && !req.admin && order.user && order.user._id.toString() !== req.user._id.toString()) {
-            return res.status(403).json({ success: false, message: "Forbidden: you cannot create a payment for this order" });
-        }
+//         // Security: ensure user owns the order
+//         if (req.user && !req.admin && order.user && order.user._id.toString() !== req.user._id.toString()) {
+//             return res.status(403).json({ success: false, message: "Forbidden: you cannot create a payment for this order" });
+//         }
 
-        if (order.paid) return res.status(400).json({ success: false, message: "Order is already paid" });
-        if (!order.amount || order.amount <= 0) return res.status(400).json({ success: false, message: "Invalid order amount" });
+//         if (order.paid) return res.status(400).json({ success: false, message: "Order is already paid" });
+//         if (!order.amount || order.amount <= 0) return res.status(400).json({ success: false, message: "Invalid order amount" });
 
-        const paymentMethod = await PaymentMethod.findOne({ key: paymentMethodKey, isActive: true });
-        if (!paymentMethod) return res.status(400).json({ success: false, message: "Payment method not available" });
+//         const paymentMethod = await PaymentMethod.findOne({ key: paymentMethodKey, isActive: true });
+//         if (!paymentMethod) return res.status(400).json({ success: false, message: "Payment method not available" });
 
-        const amountInPaise = Math.round(order.amount * 100);
+//         const amountInPaise = Math.round(order.amount * 100);
 
-        // --- Offline Payment ---
-        if (paymentMethod.type === "offline") {
-            order.paymentMethod = paymentMethod.key;
-            order.paymentStatus = "pending";
-            order.orderStatus = "Awaiting Payment";
-            order.trackingHistory = order.trackingHistory || [];
-            order.trackingHistory.push({ status: "Order Placed", timestamp: new Date() });
-            order.trackingHistory.push({ status: "Awaiting Payment", timestamp: new Date() });
-            await order.save();
-            return res.status(200).json({ success: true, message: "Offline payment selected", orderId: order._id, paymentMethod: paymentMethod.key });
-        }
+//         // --- Offline Payment ---
+//         if (paymentMethod.type === "offline") {
+//             order.paymentMethod = paymentMethod.key;
+//             order.paymentStatus = "pending";
+//             order.orderStatus = "Awaiting Payment";
+//             order.trackingHistory = order.trackingHistory || [];
+//             order.trackingHistory.push({ status: "Order Placed", timestamp: new Date() });
+//             order.trackingHistory.push({ status: "Awaiting Payment", timestamp: new Date() });
+//             await order.save();
+//             return res.status(200).json({ success: true, message: "Offline payment selected", orderId: order._id, paymentMethod: paymentMethod.key });
+//         }
 
-        // --- UPI Payment ---
-        if (paymentMethod.key === "upi") {
-            if (!provider) return res.status(400).json({ success: false, message: "UPI provider is required" });
+//         // --- UPI Payment ---
+//         if (paymentMethod.key === "upi") {
+//             if (!provider) return res.status(400).json({ success: false, message: "UPI provider is required" });
 
-            const providerConfig = paymentMethod.config?.providers?.find(p => p.key === provider);
-            if (!providerConfig) return res.status(400).json({ success: false, message: "Invalid UPI provider" });
+//             const providerConfig = paymentMethod.config?.providers?.find(p => p.key === provider);
+//             if (!providerConfig) return res.status(400).json({ success: false, message: "Invalid UPI provider" });
 
-            if (providerConfig.requireUserUpi) {
-                const vpaRegex = /^[\w.-]+@[\w]+$/;
-                if (!upiId || !vpaRegex.test(upiId)) {
-                    return res.status(400).json({ success: false, message: "Invalid or missing UPI ID" });
-                }
-                order.upiId = upiId;
-            }
+//             if (providerConfig.requireUserUpi) {
+//                 const vpaRegex = /^[\w.-]+@[\w]+$/;
+//                 if (!upiId || !vpaRegex.test(upiId)) {
+//                     return res.status(400).json({ success: false, message: "Invalid or missing UPI ID" });
+//                 }
+//                 order.upiId = upiId;
+//             }
 
-            order.upiProvider = provider;
-            order.paymentMethod = "upi";
-            order.paymentStatus = "pending";
-            order.orderStatus = "Awaiting Payment";
-            order.trackingHistory = order.trackingHistory || [];
-            order.trackingHistory.push({ status: "Awaiting Payment", timestamp: new Date() });
+//             order.upiProvider = provider;
+//             order.paymentMethod = "upi";
+//             order.paymentStatus = "pending";
+//             order.orderStatus = "Awaiting Payment";
+//             order.trackingHistory = order.trackingHistory || [];
+//             order.trackingHistory.push({ status: "Awaiting Payment", timestamp: new Date() });
 
-            // --- UPI QR ---
-            if (provider === "qr") {
-                console.log("Creating UPI QR for order:", order._id);
-                const qr = await razorpay.qr.create({
-                    type: "upi_qr",
-                    name: `Payment for Order ${order._id}`,
-                    usage: "single_use",
-                    payment_amount: amountInPaise,
-                    currency: "INR",
-                    description: `Order: ${order._id}`,
-                    notes: { orderId: order._id.toString(), customer: order.user?.name || "Guest" },
-                });
+//             // --- UPI QR ---
+//             if (provider === "qr") {
+//                 console.log("Creating UPI QR for order:", order._id);
+//                 const qr = await razorpay.qr.create({
+//                     type: "upi_qr",
+//                     name: `Payment for Order ${order._id}`,
+//                     usage: "single_use",
+//                     payment_amount: amountInPaise,
+//                     currency: "INR",
+//                     description: `Order: ${order._id}`,
+//                     notes: { orderId: order._id.toString(), customer: order.user?.name || "Guest" },
+//                 });
 
-                order.qr = { qrId: qr.id, imageUrl: qr.image_url, createdAt: new Date() };
-                await order.save();
+//                 order.qr = { qrId: qr.id, imageUrl: qr.image_url, createdAt: new Date() };
+//                 await order.save();
 
-                return res.status(200).json({
-                    success: true,
-                    message: "UPI QR created",
-                    qrId: qr.id,
-                    qrImageUrl: qr.image_url,
-                    amount: order.amount,
-                    orderId: order._id,
-                });
-            }
+//                 return res.status(200).json({
+//                     success: true,
+//                     message: "UPI QR created",
+//                     qrId: qr.id,
+//                     qrImageUrl: qr.image_url,
+//                     amount: order.amount,
+//                     orderId: order._id,
+//                 });
+//             }
 
-            // --- UPI Collect (Payment Link) ---
-            console.log("Creating UPI Payment Link for order:", order._id);
+//             // --- UPI Collect (Payment Link) ---
+//             console.log("Creating UPI Payment Link for order:", order._id);
 
-            // Use existing link if still pending
-            if (order.paymentLink?.id && order.paymentStatus === "pending") {
-                return res.status(200).json({
-                    success: true,
-                    message: "Existing payment link",
-                    paymentLinkId: order.paymentLink.id,
-                    shortUrl: order.paymentLink.shortUrl,
-                    expireAt: order.paymentLink.expireBy,
-                    orderId: order._id,
-                });
-            }
+//             // Use existing link if still pending
+//             if (order.paymentLink?.id && order.paymentStatus === "pending") {
+//                 return res.status(200).json({
+//                     success: true,
+//                     message: "Existing payment link",
+//                     paymentLinkId: order.paymentLink.id,
+//                     shortUrl: order.paymentLink.shortUrl,
+//                     expireAt: order.paymentLink.expireBy,
+//                     orderId: order._id,
+//                 });
+//             }
 
-            const expireBy = Math.floor(Date.now() / 1000) + 20 * 60; // 20 minutes
-            const linkPayload = {
-                amount: amountInPaise,
-                currency: "INR",
-                reference_id: `order_${order._id}`,
-                description: `Payment for Order ${order._id}`,
-                customer: {
-                    name: order.user?.name || "Customer",
-                    contact: order.user?.phone || null,
-                    email: order.user?.email || null,
-                },
-                notify: { sms: !!order.user?.phone, email: !!order.user?.email },
-                notes: { orderId: order._id.toString(), provider },
-                expire_by: expireBy,
-                upi_link: true,
-                callback_url: process.env.RAZORPAY_UPI_CALLBACK_URL, // ✅ use correct env variable
-                callback_method: "get",
-            };
+//             const expireBy = Math.floor(Date.now() / 1000) + 20 * 60; // 20 minutes
+//             const linkPayload = {
+//                 amount: amountInPaise,
+//                 currency: "INR",
+//                 reference_id: `order_${order._id}`,
+//                 description: `Payment for Order ${order._id}`,
+//                 customer: {
+//                     name: order.user?.name || "Customer",
+//                     contact: order.user?.phone || null,
+//                     email: order.user?.email || null,
+//                 },
+//                 notify: { sms: !!order.user?.phone, email: !!order.user?.email },
+//                 notes: { orderId: order._id.toString(), provider },
+//                 expire_by: expireBy,
+//                 upi_link: true,
+//                 callback_url: process.env.RAZORPAY_UPI_CALLBACK_URL, // ✅ use correct env variable
+//                 callback_method: "get",
+//             };
 
-            console.log("UPI link payload:", linkPayload);
+//             console.log("UPI link payload:", linkPayload);
 
-            const paymentLink = await razorpay.paymentLink.create(linkPayload);
-            console.log("Razorpay payment link response:", paymentLink);
+//             const paymentLink = await razorpay.paymentLink.create(linkPayload);
+//             console.log("Razorpay payment link response:", paymentLink);
 
-            order.paymentLink = {
-                id: paymentLink.id,
-                shortUrl: paymentLink.short_url,
-                expireBy: paymentLink.expire_by,
-                status: paymentLink.status,
-                createdAt: new Date(),
-            };
-            await order.save();
+//             order.paymentLink = {
+//                 id: paymentLink.id,
+//                 shortUrl: paymentLink.short_url,
+//                 expireBy: paymentLink.expire_by,
+//                 status: paymentLink.status,
+//                 createdAt: new Date(),
+//             };
+//             await order.save();
 
-            return res.status(200).json({
-                success: true,
-                message: "UPI collect link created",
-                paymentLinkId: paymentLink.id,
-                shortUrl: paymentLink.short_url,
-                expireAt: paymentLink.expire_by,
-                orderId: order._id,
-            });
-        }
+//             return res.status(200).json({
+//                 success: true,
+//                 message: "UPI collect link created",
+//                 paymentLinkId: paymentLink.id,
+//                 shortUrl: paymentLink.short_url,
+//                 expireAt: paymentLink.expire_by,
+//                 orderId: order._id,
+//             });
+//         }
 
-        // --- Card / Default Razorpay Order ---
-        if (order.razorpayOrderId && order.paymentStatus === "pending") {
-            return res.status(200).json({
-                success: true,
-                message: "Razorpay order already exists",
-                razorpayOrderId: order.razorpayOrderId,
-                amount: order.amount,
-                orderId: order._id,
-                paymentMethod: order.paymentMethod || paymentMethod.key,
-                upiId: order.upiId || null,
-            });
-        }
+//         // --- Card / Default Razorpay Order ---
+//         if (order.razorpayOrderId && order.paymentStatus === "pending") {
+//             return res.status(200).json({
+//                 success: true,
+//                 message: "Razorpay order already exists",
+//                 razorpayOrderId: order.razorpayOrderId,
+//                 amount: order.amount,
+//                 orderId: order._id,
+//                 paymentMethod: order.paymentMethod || paymentMethod.key,
+//                 upiId: order.upiId || null,
+//             });
+//         }
 
-        const razorpayOrder = await razorpay.orders.create({
-            amount: amountInPaise,
-            currency: "INR",
-            receipt: order._id.toString(),
-            payment_capture: 1,
-            notes: { orderId: order._id.toString(), customer: order.user?.name || "Guest", upi: order.upiId || null },
-        });
+//         const razorpayOrder = await razorpay.orders.create({
+//             amount: amountInPaise,
+//             currency: "INR",
+//             receipt: order._id.toString(),
+//             payment_capture: 1,
+//             notes: { orderId: order._id.toString(), customer: order.user?.name || "Guest", upi: order.upiId || null },
+//         });
 
-        order.razorpayOrderId = razorpayOrder.id;
-        order.paymentStatus = "pending";
-        order.orderStatus = "Awaiting Payment";
-        order.paymentMethod = paymentMethod.key;
-        order.trackingHistory = order.trackingHistory || [];
-        order.trackingHistory.push({ status: "Awaiting Payment", timestamp: new Date() });
-        await order.save();
+//         order.razorpayOrderId = razorpayOrder.id;
+//         order.paymentStatus = "pending";
+//         order.orderStatus = "Awaiting Payment";
+//         order.paymentMethod = paymentMethod.key;
+//         order.trackingHistory = order.trackingHistory || [];
+//         order.trackingHistory.push({ status: "Awaiting Payment", timestamp: new Date() });
+//         await order.save();
 
-        return res.status(200).json({
-            success: true,
-            message: "Razorpay order created",
-            razorpayOrderId: razorpayOrder.id,
-            amount: order.amount,
-            orderId: order._id,
-            paymentMethod: paymentMethod.key,
-        });
+//         return res.status(200).json({
+//             success: true,
+//             message: "Razorpay order created",
+//             razorpayOrderId: razorpayOrder.id,
+//             amount: order.amount,
+//             orderId: order._id,
+//             paymentMethod: paymentMethod.key,
+//         });
 
-    } catch (err) {
-        console.error("Error creating Razorpay order:", err);
-        // Log full error for debugging
-        return res.status(500).json({ success: false, message: "Failed to create Razorpay order", error: err.toString() });
-    }
-};
+//     } catch (err) {
+//         console.error("Error creating Razorpay order:", err);
+//         // Log full error for debugging
+//         return res.status(500).json({ success: false, message: "Failed to create Razorpay order", error: err.toString() });
+//     }
+// };
 
 
 // export const createRazorpayOrder = async (req, res) => {
@@ -714,6 +718,121 @@ export const createRazorpayOrder = async (req, res) => {
 //         return res.status(500).json({ success: false, message: "Failed to create Razorpay order", error: err.message });
 //     }
 // };
+
+export const createRazorpayOrder = async (req, res) => {
+    try {
+        const { orderId, paymentMethodKey, upiId, provider } = req.body;
+        console.log("🧾 Incoming createRazorpayOrder:", req.body);
+
+        if (!orderId || !paymentMethodKey)
+            return res.status(400).json({ success: false, message: "orderId and paymentMethodKey are required" });
+
+        const order = await Order.findById(orderId).populate("user");
+        if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+        if (req.user && !req.admin && order.user && order.user._id.toString() !== req.user._id.toString())
+            return res.status(403).json({ success: false, message: "Forbidden: you cannot create a payment for this order" });
+
+        if (order.paid) return res.status(400).json({ success: false, message: "Order is already paid" });
+        if (!order.amount || order.amount <= 0) return res.status(400).json({ success: false, message: "Invalid order amount" });
+
+        const paymentMethod = await PaymentMethod.findOne({ key: paymentMethodKey, isActive: true });
+        if (!paymentMethod) return res.status(400).json({ success: false, message: "Payment method not available" });
+
+        const amountInPaise = Math.round(order.amount * 100);
+        console.log("💰 Amount in paise:", amountInPaise);
+
+        // --- UPI ---
+        if (paymentMethod.key === "upi") {
+            console.log("💳 UPI payment flow started...");
+
+            const vpaRegex = /^[\w.\-_]{2,256}@[a-zA-Z]{2,64}$/;
+            if (!upiId || !vpaRegex.test(upiId))
+                return res.status(400).json({ success: false, message: "Invalid UPI ID format" });
+
+            console.log("⚙️ Creating direct UPI collect request for order:", order._id);
+            console.log("🔑 Razorpay Auth Check:", {
+                keyId: process.env.RAZORPAY_KEY_ID,
+                keySecretLoaded: !!process.env.RAZORPAY_KEY_SECRET,
+            });
+
+            const auth = Buffer.from(
+                `${process.env.RAZORPAY_KEY_ID}:${process.env.RAZORPAY_KEY_SECRET}`
+            ).toString("base64");
+
+            try {
+                const upiResponse = await axios.post(
+                    "https://api.razorpay.com/v1/payments",
+                    {
+                        amount: amountInPaise,
+                        currency: "INR",
+                        method: "upi",
+                        vpa: upiId,
+                        email: order.user?.email || undefined,
+                        contact: order.user?.phone || undefined,
+                        notes: { orderId: order._id.toString(), provider },
+                    },
+                    {
+                        headers: {
+                            Authorization: `Basic ${auth}`,
+                            "Content-Type": "application/json",
+                        },
+                    }
+                );
+
+                console.log("✅ UPI Collect Success:", upiResponse.data);
+
+                order.razorpayPaymentId = upiResponse.data.id;
+                order.paymentStatus = "pending";
+                await order.save();
+
+                return res.status(200).json({
+                    success: true,
+                    message: "UPI collect request sent successfully",
+                    paymentId: upiResponse.data.id,
+                    orderId: order._id,
+                    amount: order.amount,
+                });
+            } catch (err) {
+                console.error("❌ Razorpay UPI Collect API Error:", err.response?.data || err.message);
+
+                // --- fallback to standard Razorpay Order ---
+                console.log("⚠️ Falling back to Razorpay Order API...");
+
+                const razorpayOrder = await razorpay.orders.create({
+                    amount: amountInPaise,
+                    currency: "INR",
+                    receipt: order._id.toString(),
+                    payment_capture: 1,
+                    notes: { orderId: order._id.toString(), customer: order.user?.name || "Guest", upi: upiId },
+                });
+
+                order.razorpayOrderId = razorpayOrder.id;
+                order.paymentStatus = "pending";
+                order.orderStatus = "Awaiting Payment";
+                order.paymentMethod = "upi";
+                await order.save();
+
+                return res.status(200).json({
+                    success: true,
+                    message: "Fallback: Razorpay order created instead of UPI Collect",
+                    razorpayOrderId: razorpayOrder.id,
+                    amount: order.amount,
+                    orderId: order._id,
+                    paymentMethod: "upi",
+                });
+            }
+        }
+
+    } catch (err) {
+        console.error("💥 Unhandled error in createRazorpayOrder:", err.response?.data || err);
+        res.status(500).json({
+            success: false,
+            message: "Failed to create Razorpay order",
+            error: err.response?.data || err.message,
+        });
+    }
+};
 
 /**
  * verifyRazorpayPayment - supports both checkout (signature) and payment-link flows
