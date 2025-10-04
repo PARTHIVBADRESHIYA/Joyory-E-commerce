@@ -528,8 +528,6 @@ export const createRazorpayOrder = async (req, res) => {
     }
 };
 
-
-
 /**
  * verifyRazorpayPayment - supports both checkout (signature) and payment-link flows
  * - If razorpay_signature present => verify timing-safe
