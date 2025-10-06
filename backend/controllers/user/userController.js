@@ -436,7 +436,6 @@ const generateToken = (user) => {
 //     }
 // };
 
-
 const userSignup = async (req, res) => {
     try {
         const { name, email, password, phone, preferredOtpMethod, referralCode } = req.body;
