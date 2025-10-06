@@ -32,94 +32,9 @@ export const buildOptions = (product) => {
     };
 };
 
-// const toObjectId = (id) => {
-//     if (!id) return null;
-//     return mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null;
-// };
-
-// // ✅ Normalize query params into proper filter arrays & numbers
-// export const normalizeFilters = (query) => ({
-//     search: query.search || undefined,
-//     brandIds: query.brandIds ? query.brandIds.split(",") : [],
-//     skinTypes: query.skinTypes ? query.skinTypes.split(",") : [],
-//     skinConcerns: query.skinConcerns ? query.skinConcerns.split(",") : [],
-//     shades: query.shades ? query.shades.split(",") : [],
-//     formulations: query.formulations ? query.formulations.split(",") : [],
-//     finishes: query.finishes ? query.finishes.split(",") : [],
-//     ingredients: query.ingredients ? query.ingredients.split(",") : [],
-//     freeFrom: query.freeFrom ? query.freeFrom.split(",") : [],
-//     tags: query.tags ? query.tags.split(",") : [],
-//     colorFamilies: query.colorFamilies ? query.colorFamilies.split(",") : [],
-//     gender: query.gender ? query.gender.split(",") : [],
-//     ageGroup: query.ageGroup ? query.ageGroup.split(",") : [],
-//     occasion: query.occasion ? query.occasion.split(",") : [],
-//     minPrice: query.minPrice ? Number(query.minPrice) : undefined,
-//     maxPrice: query.maxPrice ? Number(query.maxPrice) : undefined,
-//     discountMin: query.discountMin ? Number(query.discountMin) : undefined,
-//     ratingMin: query.ratingMin ? Number(query.ratingMin) : undefined,
-// });
-
-// // ✅ Apply dynamic filters for MongoDB
-// export const applyDynamicFilters = (baseFilter, filters) => {
-//     const f = { ...baseFilter };
-
-//     // Brand IDs
-//     if (filters.brandIds?.length) {
-//         const brandIds = filters.brandIds.map(id => toObjectId(id)).filter(Boolean);
-//         if (brandIds.length) f.brand = { $in: brandIds };
-//     }
-
-//     // Price range
-//     if (filters.minPrice || filters.maxPrice) {
-//         f.price = {};
-//         if (filters.minPrice) f.price.$gte = filters.minPrice;
-//         if (filters.maxPrice) f.price.$lte = filters.maxPrice;
-//     }
-
-//     // Discount & rating
-//     if (filters.discountMin) f.discountPercent = { $gte: filters.discountMin };
-//     if (filters.ratingMin) f.avgRating = { $gte: filters.ratingMin };
-
-//     // Attributes stored as ObjectIds
-//     const objectIdFields = [
-//         { key: "skinTypes", values: filters.skinTypes },
-//         { key: "skinConcerns", values: filters.skinConcerns },
-//     ];
-//     objectIdFields.forEach(({ key, values }) => {
-//         if (values?.length) {
-//             const objectIds = values.map(v => toObjectId(v)).filter(Boolean);
-//             if (objectIds.length) f[key] = { $in: objectIds };
-//         }
-//     });
-
-//     // Attributes stored as strings
-//     const stringFields = [
-//         { key: "shade", values: filters.shades },
-//         { key: "formulation", values: filters.formulations },
-//         { key: "finish", values: filters.finishes },
-//         { key: "ingredients", values: filters.ingredients },
-//         { key: "freeFrom", values: filters.freeFrom },
-//         { key: "tags", values: filters.tags },
-//         { key: "colorFamily", values: filters.colorFamilies },
-//     ];
-//     stringFields.forEach(({ key, values }) => {
-//         if (values?.length) f[key] = { $in: values.map(v => new RegExp(`^${v}$`, "i")) };
-//     });
-
-//     // Multi-select string fields
-//     if (filters.gender?.length) f.gender = { $in: filters.gender.map(v => new RegExp(`^${v}$`, "i")) };
-//     if (filters.ageGroup?.length) f.ageGroup = { $in: filters.ageGroup.map(v => new RegExp(`^${v}$`, "i")) };
-//     if (filters.occasion?.length) f.occasion = { $in: filters.occasion.map(v => new RegExp(`^${v}$`, "i")) };
-
-//     // Full-text search
-//     if (filters.search) f.$text = { $search: filters.search };
-
-//     return f;
-// };
-
-
 export const getFilterMetadata = async (req, res) => {
     try {
+        // 🔹 Fetch all master data
         const [brands, categories, skinTypes, formulations] = await Promise.all([
             Brand.find({}, "name").lean(),
             Category.find({}, "name").lean(),
@@ -127,25 +42,32 @@ export const getFilterMetadata = async (req, res) => {
             Formulation.find({}, "name").lean()
         ]);
 
-        // Group product count by brand/category
-        const brandCounts = await Product.aggregate([
+        // 🔹 Normalize filters from query (optional filters from frontend)
+        const filters = normalizeFilters(req.query);
+
+        // 🔹 Count products per brand using dynamic filters
+        const brandCountsAgg = await Product.aggregate([
+            { $match: applyDynamicFilters(filters) },
             { $group: { _id: "$brand", count: { $sum: 1 } } }
         ]);
 
-        const categoryCounts = await Product.aggregate([
+        // 🔹 Count products per category using dynamic filters
+        const categoryCountsAgg = await Product.aggregate([
+            { $match: applyDynamicFilters(filters) },
             { $group: { _id: "$category", count: { $sum: 1 } } }
         ]);
 
-        const countMap = (arr) => Object.fromEntries(arr.map(i => [i._id?.toString(), i.count]));
+        const countMap = arr => Object.fromEntries(arr.map(i => [i._id?.toString(), i.count]));
 
+        // 🔹 Respond with counts and master data
         res.json({
             brands: brands.map(b => ({
                 ...b,
-                count: countMap(brandCounts)[b._id?.toString()] || 0
+                count: countMap(brandCountsAgg)[b._id?.toString()] || 0
             })),
             categories: categories.map(c => ({
                 ...c,
-                count: countMap(categoryCounts)[c._id?.toString()] || 0
+                count: countMap(categoryCountsAgg)[c._id?.toString()] || 0
             })),
             skinTypes,
             formulations,
@@ -158,69 +80,13 @@ export const getFilterMetadata = async (req, res) => {
             ]
         });
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: "Failed to load filters" });
+        console.error("❌ getFilterMetadata error:", err);
+        res.status(500).json({ message: "Failed to load filters", error: err.message });
     }
 };
 
 const toObjectId = (id) => mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null;
 
-// export const normalizeFilters = (query) => ({
-//     search: query.search || undefined,
-//     brandIds: query.brandIds ? query.brandIds.split(",") : [],
-//     categoryIds: query.categoryIds ? query.categoryIds.split(",") : [],
-//     skinTypes: query.skinTypes ? query.skinTypes.split(",") : [],
-//     formulations: query.formulations ? query.formulations.split(",") : [],
-//     finishes: query.finishes ? query.finishes.split(",") : [],
-//     minPrice: query.minPrice ? Number(query.minPrice) : undefined,
-//     maxPrice: query.maxPrice ? Number(query.maxPrice) : undefined,
-//     discountMin: query.discountMin ? Number(query.discountMin) : undefined,
-//     ratingMin: query.ratingMin ? Number(query.ratingMin) : undefined,
-// });
-
-// export const applyDynamicFilters = (filters = {}) => {
-//     const f = { isPublished: true };
-
-//     // 🔹 Brand filter
-//     if (filters.brandIds?.length) {
-//         const brandIds = filters.brandIds.map(toObjectId).filter(Boolean);
-//         f.brand = { $in: brandIds };
-//     }
-
-//     if (filters.categoryIds?.length) {
-//         const categoryIds = filters.categoryIds.map(id => toObjectId(id)).filter(Boolean);
-//         if (categoryIds.length) f.category = { $in: categoryIds };
-//     }
-
-
-//     // 🔹 Price Range filter
-//     if (filters.minPrice || filters.maxPrice) {
-//         f.minPrice = {};
-//         if (filters.minPrice) f.minPrice.$gte = filters.minPrice;
-//         if (filters.maxPrice) f.minPrice.$lte = filters.maxPrice;
-//     }
-
-//     // 🔹 Skin type, formulation, finish filters
-//     ["skinTypes", "formulations"].forEach((key) => {
-//         if (filters[key]?.length) {
-//             const ids = filters[key].map(toObjectId).filter(Boolean);
-//             f[key] = { $in: ids };
-//         }
-//     });
-
-//     if (filters.finishes?.length) {
-//         f.finish = { $in: filters.finishes.map(v => new RegExp(`^${v}$`, "i")) };
-//     }
-
-//     // 🔹 Discount & Rating
-//     if (filters.discountMin) f.discountPercent = { $gte: filters.discountMin };
-//     if (filters.ratingMin) f.avgRating = { $gte: filters.ratingMin };
-
-//     // 🔹 Search text
-//     if (filters.search) f.$text = { $search: filters.search };
-
-//     return f;
-// };
 export const normalizeFilters = (query) => ({
     search: query.search || undefined,
     brandIds: query.brandIds ? query.brandIds.split(",") : [],
@@ -233,51 +99,6 @@ export const normalizeFilters = (query) => ({
     discountMin: query.discountMin ? Number(query.discountMin) : undefined,
     ratingMin: query.ratingMin ? Number(query.ratingMin) : undefined,
 });
-
-// export const applyDynamicFilters = (filters = {}) => {
-//     const f = { isPublished: true };
-
-//     // 🔹 Brand filter
-//     if (filters.brandIds?.length) {
-//         const brandIds = filters.brandIds.map(toObjectId).filter(Boolean);
-//         f.brand = { $in: brandIds };
-//     }
-
-//     // 🔹 Category filter
-//     if (filters.categoryIds?.length) {
-//         const categoryIds = filters.categoryIds.map(toObjectId).filter(Boolean);
-//         if (categoryIds.length) f.category = { $in: categoryIds };
-//     }
-
-//     // 🔹 Price Range filter (fixed)
-//     if (filters.minPrice || filters.maxPrice) {
-//         f.price = {};
-//         if (filters.minPrice) f.price.$gte = filters.minPrice;
-//         if (filters.maxPrice) f.price.$lte = filters.maxPrice;
-//     }
-
-//     // 🔹 Skin type & formulation filters
-//     ["skinTypes", "formulations"].forEach((key) => {
-//         if (filters[key]?.length) {
-//             const ids = filters[key].map(toObjectId).filter(Boolean);
-//             f[key] = { $in: ids };
-//         }
-//     });
-
-//     // 🔹 Finish filter
-//     if (filters.finishes?.length) {
-//         f.finish = { $in: filters.finishes.map(v => new RegExp(`^${v}$`, "i")) };
-//     }
-
-//     // 🔹 Discount & Rating
-//     if (filters.discountMin) f.discountPercent = { $gte: filters.discountMin };
-//     if (filters.ratingMin) f.avgRating = { $gte: filters.ratingMin };
-
-//     // 🔹 Text search
-//     if (filters.search) f.$text = { $search: filters.search };
-
-//     return f;
-// };
 
 export const applyDynamicFilters = (filters = {}) => {
     const f = { isPublished: true };
