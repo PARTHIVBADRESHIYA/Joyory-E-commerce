@@ -6,6 +6,7 @@ import Review from '../../models/Review.js';
 import Order from '../../models/Order.js';
 import Brand from '../../models/Brand.js';
 import SkinType from '../../models/SkinType.js';
+import Formulation from "../../models/shade/Formulation.js";
 import Category from '../../models/Category.js';
 import { getDescendantCategoryIds, getCategoryFallbackChain } from '../../middlewares/utils/categoryUtils.js';
 import { getRecommendations } from '../../middlewares/utils/recommendationService.js';
@@ -31,50 +32,301 @@ export const buildOptions = (product) => {
     };
 };
 
-// ✅ Normalize query filters
+// const toObjectId = (id) => {
+//     if (!id) return null;
+//     return mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null;
+// };
+
+// // ✅ Normalize query params into proper filter arrays & numbers
+// export const normalizeFilters = (query) => ({
+//     search: query.search || undefined,
+//     brandIds: query.brandIds ? query.brandIds.split(",") : [],
+//     skinTypes: query.skinTypes ? query.skinTypes.split(",") : [],
+//     skinConcerns: query.skinConcerns ? query.skinConcerns.split(",") : [],
+//     shades: query.shades ? query.shades.split(",") : [],
+//     formulations: query.formulations ? query.formulations.split(",") : [],
+//     finishes: query.finishes ? query.finishes.split(",") : [],
+//     ingredients: query.ingredients ? query.ingredients.split(",") : [],
+//     freeFrom: query.freeFrom ? query.freeFrom.split(",") : [],
+//     tags: query.tags ? query.tags.split(",") : [],
+//     colorFamilies: query.colorFamilies ? query.colorFamilies.split(",") : [],
+//     gender: query.gender ? query.gender.split(",") : [],
+//     ageGroup: query.ageGroup ? query.ageGroup.split(",") : [],
+//     occasion: query.occasion ? query.occasion.split(",") : [],
+//     minPrice: query.minPrice ? Number(query.minPrice) : undefined,
+//     maxPrice: query.maxPrice ? Number(query.maxPrice) : undefined,
+//     discountMin: query.discountMin ? Number(query.discountMin) : undefined,
+//     ratingMin: query.ratingMin ? Number(query.ratingMin) : undefined,
+// });
+
+// // ✅ Apply dynamic filters for MongoDB
+// export const applyDynamicFilters = (baseFilter, filters) => {
+//     const f = { ...baseFilter };
+
+//     // Brand IDs
+//     if (filters.brandIds?.length) {
+//         const brandIds = filters.brandIds.map(id => toObjectId(id)).filter(Boolean);
+//         if (brandIds.length) f.brand = { $in: brandIds };
+//     }
+
+//     // Price range
+//     if (filters.minPrice || filters.maxPrice) {
+//         f.price = {};
+//         if (filters.minPrice) f.price.$gte = filters.minPrice;
+//         if (filters.maxPrice) f.price.$lte = filters.maxPrice;
+//     }
+
+//     // Discount & rating
+//     if (filters.discountMin) f.discountPercent = { $gte: filters.discountMin };
+//     if (filters.ratingMin) f.avgRating = { $gte: filters.ratingMin };
+
+//     // Attributes stored as ObjectIds
+//     const objectIdFields = [
+//         { key: "skinTypes", values: filters.skinTypes },
+//         { key: "skinConcerns", values: filters.skinConcerns },
+//     ];
+//     objectIdFields.forEach(({ key, values }) => {
+//         if (values?.length) {
+//             const objectIds = values.map(v => toObjectId(v)).filter(Boolean);
+//             if (objectIds.length) f[key] = { $in: objectIds };
+//         }
+//     });
+
+//     // Attributes stored as strings
+//     const stringFields = [
+//         { key: "shade", values: filters.shades },
+//         { key: "formulation", values: filters.formulations },
+//         { key: "finish", values: filters.finishes },
+//         { key: "ingredients", values: filters.ingredients },
+//         { key: "freeFrom", values: filters.freeFrom },
+//         { key: "tags", values: filters.tags },
+//         { key: "colorFamily", values: filters.colorFamilies },
+//     ];
+//     stringFields.forEach(({ key, values }) => {
+//         if (values?.length) f[key] = { $in: values.map(v => new RegExp(`^${v}$`, "i")) };
+//     });
+
+//     // Multi-select string fields
+//     if (filters.gender?.length) f.gender = { $in: filters.gender.map(v => new RegExp(`^${v}$`, "i")) };
+//     if (filters.ageGroup?.length) f.ageGroup = { $in: filters.ageGroup.map(v => new RegExp(`^${v}$`, "i")) };
+//     if (filters.occasion?.length) f.occasion = { $in: filters.occasion.map(v => new RegExp(`^${v}$`, "i")) };
+
+//     // Full-text search
+//     if (filters.search) f.$text = { $search: filters.search };
+
+//     return f;
+// };
+
+
+export const getFilterMetadata = async (req, res) => {
+    try {
+        const [brands, categories, skinTypes, formulations] = await Promise.all([
+            Brand.find({}, "name").lean(),
+            Category.find({}, "name").lean(),
+            SkinType.find({}, "name").lean(),
+            Formulation.find({}, "name").lean()
+        ]);
+
+        // Group product count by brand/category
+        const brandCounts = await Product.aggregate([
+            { $group: { _id: "$brand", count: { $sum: 1 } } }
+        ]);
+
+        const categoryCounts = await Product.aggregate([
+            { $group: { _id: "$category", count: { $sum: 1 } } }
+        ]);
+
+        const countMap = (arr) => Object.fromEntries(arr.map(i => [i._id?.toString(), i.count]));
+
+        res.json({
+            brands: brands.map(b => ({
+                ...b,
+                count: countMap(brandCounts)[b._id?.toString()] || 0
+            })),
+            categories: categories.map(c => ({
+                ...c,
+                count: countMap(categoryCounts)[c._id?.toString()] || 0
+            })),
+            skinTypes,
+            formulations,
+            priceRanges: [
+                { label: "Rs. 0 - Rs. 499", min: 0, max: 499 },
+                { label: "Rs. 500 - Rs. 999", min: 500, max: 999 },
+                { label: "Rs. 1000 - Rs. 1999", min: 1000, max: 1999 },
+                { label: "Rs. 2000 - Rs. 3999", min: 2000, max: 3999 },
+                { label: "Rs. 4000 & Above", min: 4000, max: null }
+            ]
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Failed to load filters" });
+    }
+};
+
+const toObjectId = (id) => mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null;
+
+// export const normalizeFilters = (query) => ({
+//     search: query.search || undefined,
+//     brandIds: query.brandIds ? query.brandIds.split(",") : [],
+//     categoryIds: query.categoryIds ? query.categoryIds.split(",") : [],
+//     skinTypes: query.skinTypes ? query.skinTypes.split(",") : [],
+//     formulations: query.formulations ? query.formulations.split(",") : [],
+//     finishes: query.finishes ? query.finishes.split(",") : [],
+//     minPrice: query.minPrice ? Number(query.minPrice) : undefined,
+//     maxPrice: query.maxPrice ? Number(query.maxPrice) : undefined,
+//     discountMin: query.discountMin ? Number(query.discountMin) : undefined,
+//     ratingMin: query.ratingMin ? Number(query.ratingMin) : undefined,
+// });
+
+// export const applyDynamicFilters = (filters = {}) => {
+//     const f = { isPublished: true };
+
+//     // 🔹 Brand filter
+//     if (filters.brandIds?.length) {
+//         const brandIds = filters.brandIds.map(toObjectId).filter(Boolean);
+//         f.brand = { $in: brandIds };
+//     }
+
+//     if (filters.categoryIds?.length) {
+//         const categoryIds = filters.categoryIds.map(id => toObjectId(id)).filter(Boolean);
+//         if (categoryIds.length) f.category = { $in: categoryIds };
+//     }
+
+
+//     // 🔹 Price Range filter
+//     if (filters.minPrice || filters.maxPrice) {
+//         f.minPrice = {};
+//         if (filters.minPrice) f.minPrice.$gte = filters.minPrice;
+//         if (filters.maxPrice) f.minPrice.$lte = filters.maxPrice;
+//     }
+
+//     // 🔹 Skin type, formulation, finish filters
+//     ["skinTypes", "formulations"].forEach((key) => {
+//         if (filters[key]?.length) {
+//             const ids = filters[key].map(toObjectId).filter(Boolean);
+//             f[key] = { $in: ids };
+//         }
+//     });
+
+//     if (filters.finishes?.length) {
+//         f.finish = { $in: filters.finishes.map(v => new RegExp(`^${v}$`, "i")) };
+//     }
+
+//     // 🔹 Discount & Rating
+//     if (filters.discountMin) f.discountPercent = { $gte: filters.discountMin };
+//     if (filters.ratingMin) f.avgRating = { $gte: filters.ratingMin };
+
+//     // 🔹 Search text
+//     if (filters.search) f.$text = { $search: filters.search };
+
+//     return f;
+// };
 export const normalizeFilters = (query) => ({
+    search: query.search || undefined,
     brandIds: query.brandIds ? query.brandIds.split(",") : [],
+    categoryIds: query.categoryIds ? query.categoryIds.split(",") : [],
     skinTypes: query.skinTypes ? query.skinTypes.split(",") : [],
-    skinConcerns: query.skinConcerns ? query.skinConcerns.split(",") : [],
-    shades: query.shades ? query.shades.split(",") : [],
     formulations: query.formulations ? query.formulations.split(",") : [],
     finishes: query.finishes ? query.finishes.split(",") : [],
-    ingredients: query.ingredients ? query.ingredients.split(",") : [],
-    freeFrom: query.freeFrom ? query.freeFrom.split(",") : [],
-    tags: query.tags ? query.tags.split(",") : [],
-    colorFamilies: query.colorFamilies ? query.colorFamilies.split(",") : [],
-    gender: query.gender,
-    ageGroup: query.ageGroup,
-    occasion: query.occasion,
     minPrice: query.minPrice ? Number(query.minPrice) : undefined,
     maxPrice: query.maxPrice ? Number(query.maxPrice) : undefined,
     discountMin: query.discountMin ? Number(query.discountMin) : undefined,
     ratingMin: query.ratingMin ? Number(query.ratingMin) : undefined,
 });
 
-// ✅ Apply only filtering logic from fetchProducts
-export const applyDynamicFilters = (baseFilter, filters) => {
-    const f = { ...baseFilter };
-    if (filters.brandIds?.length) f.brand = { $in: filters.brandIds };
-    if (filters.minPrice || filters.maxPrice) {
-        f.price = {};
-        if (filters.minPrice) f.price.$gte = filters.minPrice;
-        if (filters.maxPrice) f.price.$lte = filters.maxPrice;
+// export const applyDynamicFilters = (filters = {}) => {
+//     const f = { isPublished: true };
+
+//     // 🔹 Brand filter
+//     if (filters.brandIds?.length) {
+//         const brandIds = filters.brandIds.map(toObjectId).filter(Boolean);
+//         f.brand = { $in: brandIds };
+//     }
+
+//     // 🔹 Category filter
+//     if (filters.categoryIds?.length) {
+//         const categoryIds = filters.categoryIds.map(toObjectId).filter(Boolean);
+//         if (categoryIds.length) f.category = { $in: categoryIds };
+//     }
+
+//     // 🔹 Price Range filter (fixed)
+//     if (filters.minPrice || filters.maxPrice) {
+//         f.price = {};
+//         if (filters.minPrice) f.price.$gte = filters.minPrice;
+//         if (filters.maxPrice) f.price.$lte = filters.maxPrice;
+//     }
+
+//     // 🔹 Skin type & formulation filters
+//     ["skinTypes", "formulations"].forEach((key) => {
+//         if (filters[key]?.length) {
+//             const ids = filters[key].map(toObjectId).filter(Boolean);
+//             f[key] = { $in: ids };
+//         }
+//     });
+
+//     // 🔹 Finish filter
+//     if (filters.finishes?.length) {
+//         f.finish = { $in: filters.finishes.map(v => new RegExp(`^${v}$`, "i")) };
+//     }
+
+//     // 🔹 Discount & Rating
+//     if (filters.discountMin) f.discountPercent = { $gte: filters.discountMin };
+//     if (filters.ratingMin) f.avgRating = { $gte: filters.ratingMin };
+
+//     // 🔹 Text search
+//     if (filters.search) f.$text = { $search: filters.search };
+
+//     return f;
+// };
+
+export const applyDynamicFilters = (filters = {}) => {
+    const f = { isPublished: true };
+
+    // 🔹 Brand filter
+    if (filters.brandIds?.length) {
+        const brandIds = filters.brandIds.map(toObjectId).filter(Boolean);
+        f.brand = { $in: brandIds };
     }
+
+    // 🔹 Category filter
+    if (filters.categoryIds?.length) {
+        const categoryIds = filters.categoryIds.map(toObjectId).filter(Boolean);
+        if (categoryIds.length) f.category = { $in: categoryIds };
+    }
+
+    // 🔹 Price Range filter (supports variants)
+    if (filters.minPrice || filters.maxPrice) {
+        const priceFilter = {};
+        if (filters.minPrice) priceFilter.$gte = filters.minPrice;
+        if (filters.maxPrice) priceFilter.$lte = filters.maxPrice;
+
+        // If product has variants, check their prices too
+        f.$or = [
+            { price: priceFilter }, // product.price
+            { "variants.price": priceFilter } // variants.price
+        ];
+    }
+
+    // 🔹 Skin type & formulation filters
+    ["skinTypes", "formulations"].forEach((key) => {
+        if (filters[key]?.length) {
+            const ids = filters[key].map(toObjectId).filter(Boolean);
+            f[key] = { $in: ids };
+        }
+    });
+
+    // 🔹 Finish filter
+    if (filters.finishes?.length) {
+        f.finish = { $in: filters.finishes.map(v => new RegExp(`^${v}$`, "i")) };
+    }
+
+    // 🔹 Discount & Rating
     if (filters.discountMin) f.discountPercent = { $gte: filters.discountMin };
-    if (filters.ratingMin) f.rating = { $gte: filters.ratingMin };
-    if (filters.skinTypes?.length) f.skinType = { $in: filters.skinTypes };
-    if (filters.skinConcerns?.length) f.skinConcern = { $in: filters.skinConcerns };
-    if (filters.shades?.length) f.shade = { $in: filters.shades };
-    if (filters.formulations?.length) f.formulation = { $in: filters.formulations };
-    if (filters.finishes?.length) f.finish = { $in: filters.finishes };
-    if (filters.ingredients?.length) f.ingredients = { $in: filters.ingredients };
-    if (filters.freeFrom?.length) f.freeFrom = { $in: filters.freeFrom };
-    if (filters.gender) f.gender = filters.gender;
-    if (filters.ageGroup) f.ageGroup = filters.ageGroup;
-    if (filters.occasion) f.occasion = filters.occasion;
-    if (filters.tags?.length) f.tags = { $in: filters.tags };
-    if (filters.colorFamilies?.length) f.colorFamily = { $in: filters.colorFamilies };
+    if (filters.ratingMin) f.avgRating = { $gte: filters.ratingMin };
+
+    // 🔹 Text search
+    if (filters.search) f.$text = { $search: filters.search };
+
     return f;
 };
 
@@ -84,7 +336,6 @@ export const normalizeImages = (images = []) => {
     );
 };
 
-// ✅ Filtered products with recommendations (trending)
 export const getAllFilteredProducts = async (req, res) => {
     try {
         const {
@@ -215,140 +466,246 @@ export const getAllFilteredProducts = async (req, res) => {
     }
 };
 
-export const getProductsByCategory = async (req, res) => {
-    try {
-        const slug = req.params.slug.toLowerCase();
-        let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
-        page = Number(page) || 1;
-        limit = Number(limit) || 12;
+// export const getProductsByCategory = async (req, res) => {
+//     try {
+//         const slug = req.params.slug.toLowerCase();
+//         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
+//         page = Number(page) || 1;
+//         limit = Number(limit) || 12;
 
-        // 🔹 Fetch category
-        let category = mongoose.Types.ObjectId.isValid(slug)
-            ? await Category.findById(slug).select("name slug bannerImage thumbnailImage ancestors").lean()
-            : await Category.findOne({ slug }).select("name slug bannerImage thumbnailImage ancestors").lean();
-        if (!category) return res.status(404).json({ message: "Category not found" });
+//         // 🔹 Fetch category
+//         let category = mongoose.Types.ObjectId.isValid(slug)
+//             ? await Category.findById(slug).select("name slug bannerImage thumbnailImage ancestors").lean()
+//             : await Category.findOne({ slug }).select("name slug bannerImage thumbnailImage ancestors").lean();
+//         if (!category) return res.status(404).json({ message: "Category not found" });
 
-        // 🔹 Track user
-        if (req.user?.id) {
-            await User.findByIdAndUpdate(req.user.id, { $pull: { recentCategories: category._id } });
-            await User.findByIdAndUpdate(req.user.id, {
-                $push: { recentCategories: { $each: [category._id], $position: 0, $slice: 20 } }
-            });
-        }
+//         // 🔹 Track user
+//         if (req.user?.id) {
+//             await User.findByIdAndUpdate(req.user.id, { $pull: { recentCategories: category._id } });
+//             await User.findByIdAndUpdate(req.user.id, {
+//                 $push: { recentCategories: { $each: [category._id], $position: 0, $slice: 20 } }
+//             });
+//         }
 
-        // 🔹 Descendant categories
-        const descendantIds = (await getDescendantCategoryIds(category._id))
-            .filter(id => mongoose.Types.ObjectId.isValid(id))
-            .map(id => new mongoose.Types.ObjectId(id));
-        descendantIds.push(category._id);
+//         // 🔹 Descendant categories
+//         const descendantIds = (await getDescendantCategoryIds(category._id))
+//             .filter(id => mongoose.Types.ObjectId.isValid(id))
+//             .map(id => new mongoose.Types.ObjectId(id));
+//         descendantIds.push(category._id);
 
-        const baseCategoryFilter = {
-            $or: [
-                { category: { $in: descendantIds } },
-                { categories: { $in: descendantIds } },
-            ]
-        };
+//         const baseCategoryFilter = {
+//             $or: [
+//                 { category: { $in: descendantIds } },
+//                 { categories: { $in: descendantIds } },
+//             ]
+//         };
 
-        const filters = normalizeFilters(queryFilters);
-        const finalFilter = applyDynamicFilters(baseCategoryFilter, filters);
-        finalFilter.isPublished = true;
+//         const filters = normalizeFilters(queryFilters);
+//         const finalFilter = applyDynamicFilters(baseCategoryFilter, filters);
+//         finalFilter.isPublished = true;
 
-        const sortOptions = {
-            recent: { createdAt: -1 },
-            priceLowToHigh: { price: 1 },
-            priceHighToLow: { price: -1 },
-            rating: { avgRating: -1 }
-        };
+//         const sortOptions = {
+//             recent: { createdAt: -1 },
+//             priceLowToHigh: { price: 1 },
+//             priceHighToLow: { price: -1 },
+//             rating: { avgRating: -1 }
+//         };
 
-        // 🔹 Fetch products
-        const total = await Product.countDocuments(finalFilter);
-        const products = await Product.find(finalFilter)
-            .sort(sortOptions[sort] || { createdAt: -1 })
-            .skip((page - 1) * limit)
-            .limit(limit)
-            .lean();
+//         // 🔹 Fetch products
+//         const total = await Product.countDocuments(finalFilter);
+//         const products = await Product.find(finalFilter)
+//             .sort(sortOptions[sort] || { createdAt: -1 })
+//             .skip((page - 1) * limit)
+//             .limit(limit)
+//             .lean();
 
-        // 🔹 Fetch active promotions for discounted price
-        const now = new Date();
-        const promotions = await Promotion.find({
-            status: "active",
-            startDate: { $lte: now },
-            endDate: { $gte: now }
-        }).lean();
+//         // 🔹 Fetch active promotions for discounted price
+//         const now = new Date();
+//         const promotions = await Promotion.find({
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now }
+//         }).lean();
 
-        // 🔹 Enrich products with stock/status/options + discounted price
-        const productsWithStock = products.map(p => enrichProductWithStockAndOptions(p, promotions));
+//         // 🔹 Enrich products with stock/status/options + discounted price
+//         const productsWithStock = products.map(p => enrichProductWithStockAndOptions(p, promotions));
 
-        const cards = await Promise.all(productsWithStock.map(p => formatProductCard(p)));
+//         const cards = await Promise.all(productsWithStock.map(p => formatProductCard(p)));
 
-        // 🔹 Breadcrumbs
-        let ancestors = [];
-        if (Array.isArray(category.ancestors) && category.ancestors.length) {
-            const ancestorDocs = await Category.find({ _id: { $in: category.ancestors } })
-                .select("name slug")
-                .lean();
-            ancestors = category.ancestors
-                .map(id => ancestorDocs.find(a => String(a._id) === String(id)))
-                .filter(Boolean);
-        }
+//         // 🔹 Breadcrumbs
+//         let ancestors = [];
+//         if (Array.isArray(category.ancestors) && category.ancestors.length) {
+//             const ancestorDocs = await Category.find({ _id: { $in: category.ancestors } })
+//                 .select("name slug")
+//                 .lean();
+//             ancestors = category.ancestors
+//                 .map(id => ancestorDocs.find(a => String(a._id) === String(id)))
+//                 .filter(Boolean);
+//         }
 
-        // 🔹 Recommendations
-        const firstProduct = products[0] || await Product.findOne({ category: category._id }).lean();
-        let [topSelling, moreLikeThis, trending] = await Promise.all([
-            getRecommendations({ mode: "topSelling", categorySlug: category.slug, limit: 6 }),
-            firstProduct ? getRecommendations({ mode: "moreLikeThis", productId: firstProduct._id, limit: 6 }) : Promise.resolve({ products: [] }),
-            getRecommendations({ mode: "trending", limit: 6 })
-        ]);
+//         // 🔹 Recommendations
+//         const firstProduct = products[0] || await Product.findOne({ category: category._id }).lean();
+//         let [topSelling, moreLikeThis, trending] = await Promise.all([
+//             getRecommendations({ mode: "topSelling", categorySlug: category.slug, limit: 6 }),
+//             firstProduct ? getRecommendations({ mode: "moreLikeThis", productId: firstProduct._id, limit: 6 }) : Promise.resolve({ products: [] }),
+//             getRecommendations({ mode: "trending", limit: 6 })
+//         ]);
 
-        const handleVariantsForRecs = recProducts => (recProducts || []).map(p => enrichProductWithStockAndOptions(p, promotions));
+//         const handleVariantsForRecs = recProducts => (recProducts || []).map(p => enrichProductWithStockAndOptions(p, promotions));
 
-        topSelling = handleVariantsForRecs(topSelling.products);
-        moreLikeThis = handleVariantsForRecs(moreLikeThis.products);
-        trending = handleVariantsForRecs(trending.products);
+//         topSelling = handleVariantsForRecs(topSelling.products);
+//         moreLikeThis = handleVariantsForRecs(moreLikeThis.products);
+//         trending = handleVariantsForRecs(trending.products);
 
-        const usedIds = new Set();
-        const filterUnique = rec => rec.filter(p => {
-            const id = p._id.toString();
-            if (usedIds.has(id)) return false;
-            usedIds.add(id);
-            return true;
-        });
+//         const usedIds = new Set();
+//         const filterUnique = rec => rec.filter(p => {
+//             const id = p._id.toString();
+//             if (usedIds.has(id)) return false;
+//             usedIds.add(id);
+//             return true;
+//         });
 
-        let message = null;
-        if (total === 0) {
-            if (queryFilters.search) {
-                message = `No products found matching “${queryFilters.search}” in this category.`;
-            } else if (filters.minPrice || filters.maxPrice || filters.brandIds?.length) {
-                message = `No products found with the selected filters in this category.`;
-            } else {
-                message = `No products available in ${category.name} at the moment.`;
+//         let message = null;
+//         if (total === 0) {
+//             if (queryFilters.search) {
+//                 message = `No products found matching “${queryFilters.search}” in this category.`;
+//             } else if (filters.minPrice || filters.maxPrice || filters.brandIds?.length) {
+//                 message = `No products found with the selected filters in this category.`;
+//             } else {
+//                 message = `No products available in ${category.name} at the moment.`;
+//             }
+//         }
+
+//         return res.status(200).json({
+//             category,
+//             breadcrumb: ancestors,
+//             products: cards,
+//             pagination: {
+//                 page,
+//                 limit,
+//                 total,
+//                 totalPages: Math.ceil(total / limit),
+//                 hasMore: page < Math.ceil(total / limit)
+//             },
+//             message,
+//             recommendations: {
+//                 topSelling: filterUnique(topSelling),
+//                 moreLikeThis: filterUnique(moreLikeThis),
+//                 trending: filterUnique(trending)
+//             },
+//         });
+
+//     } catch (err) {
+//         console.error("❌ getProductsByCategory error:", err);
+//         return res.status(500).json({ message: "Server error", error: err.message });
+//     }
+// };
+    export const getProductsByCategory = async (req, res) => {
+        try {
+            const slug = req.params.slug.toLowerCase();
+            let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
+            page = Number(page) || 1;
+            limit = Number(limit) || 12;
+
+            // 🔹 Fetch category
+            let category = mongoose.Types.ObjectId.isValid(slug)
+                ? await Category.findById(slug).select("name slug bannerImage thumbnailImage ancestors").lean()
+                : await Category.findOne({ slug }).select("name slug bannerImage thumbnailImage ancestors").lean();
+            if (!category) return res.status(404).json({ message: "Category not found" });
+
+            // 🔹 Track user
+            if (req.user?.id) {
+                await User.findByIdAndUpdate(req.user.id, { $pull: { recentCategories: category._id } });
+                await User.findByIdAndUpdate(req.user.id, {
+                    $push: { recentCategories: { $each: [category._id], $position: 0, $slice: 20 } }
+                });
             }
+
+            // 🔹 Descendant categories
+            const descendantIds = (await getDescendantCategoryIds(category._id))
+                .filter(id => mongoose.Types.ObjectId.isValid(id))
+                .map(id => new mongoose.Types.ObjectId(id));
+            descendantIds.push(category._id);
+
+            // 🔹 Normalize filters
+            const filters = normalizeFilters(queryFilters);
+
+            // ✅ Include descendant category IDs
+            filters.categoryIds = descendantIds.map(id => id.toString());
+
+            // 🔹 Apply filters
+            const finalFilter = applyDynamicFilters(filters);
+            finalFilter.isPublished = true;
+
+            const sortOptions = {
+                recent: { createdAt: -1 },
+                priceLowToHigh: { price: 1 },
+                priceHighToLow: { price: -1 },
+                rating: { avgRating: -1 }
+            };
+
+            // 🔹 Fetch products
+            const total = await Product.countDocuments(finalFilter);
+            const products = await Product.find(finalFilter)
+                .sort(sortOptions[sort] || { createdAt: -1 })
+                .skip((page - 1) * limit)
+                .limit(limit)
+                .lean();
+
+            // 🔹 Active promotions
+            const now = new Date();
+            const promotions = await Promotion.find({
+                status: "active",
+                startDate: { $lte: now },
+                endDate: { $gte: now }
+            }).lean();
+
+            // 🔹 Enrich products
+            const productsWithStock = products.map(p => enrichProductWithStockAndOptions(p, promotions));
+            const cards = await Promise.all(productsWithStock.map(p => formatProductCard(p)));
+
+            // 🔹 Breadcrumbs
+            let ancestors = [];
+            if (Array.isArray(category.ancestors) && category.ancestors.length) {
+                const ancestorDocs = await Category.find({ _id: { $in: category.ancestors } })
+                    .select("name slug")
+                    .lean();
+                ancestors = category.ancestors
+                    .map(id => ancestorDocs.find(a => String(a._id) === String(id)))
+                    .filter(Boolean);
+            }
+
+            // 🔹 Friendly messages
+            let message = null;
+            if (total === 0) {
+                if (queryFilters.search) {
+                    message = `No products found matching “${queryFilters.search}” in this category.`;
+                } else if (filters.minPrice || filters.maxPrice || filters.brandIds?.length || filters.skinTypes?.length) {
+                    message = `No products found with the selected filters in this category.`;
+                } else {
+                    message = `No products available in ${category.name} at the moment.`;
+                }
+            }
+
+            return res.status(200).json({
+                category,
+                breadcrumb: ancestors,
+                products: cards,
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    totalPages: Math.ceil(total / limit),
+                    hasMore: page < Math.ceil(total / limit)
+                },
+                message
+            });
+
+        } catch (err) {
+            console.error("❌ getProductsByCategory error:", err);
+            return res.status(500).json({ message: "Server error", error: err.message });
         }
-
-        return res.status(200).json({
-            category,
-            breadcrumb: ancestors,
-            products: cards,
-            pagination: {
-                page,
-                limit,
-                total,
-                totalPages: Math.ceil(total / limit),
-                hasMore: page < Math.ceil(total / limit)
-            },
-            message,
-            recommendations: {
-                topSelling: filterUnique(topSelling),
-                moreLikeThis: filterUnique(moreLikeThis),
-                trending: filterUnique(trending)
-            },
-        });
-
-    } catch (err) {
-        console.error("❌ getProductsByCategory error:", err);
-        return res.status(500).json({ message: "Server error", error: err.message });
-    }
-};
+    };
 
 export const getSingleProduct = async (req, res) => {
     try {
@@ -844,22 +1201,30 @@ export const getProductsBySkinType = async (req, res) => {
 
         // 🔹 Related categories (Makeup + Skincare)
         const categories = await Category.find({ slug: { $in: ["makeup", "skincare"] } })
-            .select("_id slug")
+            .select("_id slug ancestors")
             .lean();
         const categoryIds = categories.map(c => c._id);
 
-        // 🔹 Base filter for skin type
-        const baseFilter = {
-            skinTypes: skinType._id,
-            isDeleted: { $ne: true },
-            category: { $in: categoryIds },
-            isPublished: true
-        };
+        // 🔹 Descendant categories
+        const descendantIds = [];
+        for (const catId of categoryIds) {
+            const descendants = await getDescendantCategoryIds(catId);
+            descendantIds.push(...descendants.filter(id => mongoose.Types.ObjectId.isValid(id)).map(id => new mongoose.Types.ObjectId(id)));
+        }
+        descendantIds.push(...categoryIds);
+
+        // 🔹 Normalize filters
+        const filters = normalizeFilters(queryFilters);
+
+        // ✅ Include skinType & descendant categories
+        filters.skinTypes = [skinType._id.toString()];
+        filters.categoryIds = descendantIds.map(id => id.toString());
 
         // 🔹 Apply dynamic filters
-        const filters = normalizeFilters(queryFilters);
-        const finalFilter = applyDynamicFilters(baseFilter, filters);
+        const finalFilter = applyDynamicFilters(filters);
+        finalFilter.isPublished = true;
 
+        // 🔹 Sort options
         const sortOptions = {
             recent: { createdAt: -1 },
             priceLowToHigh: { price: 1 },
@@ -885,42 +1250,26 @@ export const getProductsBySkinType = async (req, res) => {
 
         // 🔹 Enrich products (variants + stock + price + discount)
         const productsWithStock = products.map(p => enrichProductWithStockAndOptions(p, promotions));
-
         const formattedProducts = await Promise.all(productsWithStock.map(p => formatProductCard(p)));
 
-        // 🔹 Recommendations
-        const firstProduct = products[0] || await Product.findOne({ category: { $in: categoryIds } }).lean();
-        let [topSelling, moreLikeThis, randomProducts] = await Promise.all([
-            getRecommendations({ mode: "topSelling", categorySlug: null, categoryIds, limit: 5 }),
-            firstProduct ? getRecommendations({ mode: "moreLikeThis", productId: firstProduct._id, limit: 5 }) : Promise.resolve({ products: [] }),
-            Product.aggregate([
-                { $match: { category: { $in: categoryIds }, isDeleted: { $ne: true }, isPublished: true } },
-                { $sample: { size: 5 } }
-            ])
-        ]);
+        // 🔹 Breadcrumbs
+        let ancestors = [];
+        if (categories.length) {
+            const ancestorDocs = await Category.find({ _id: { $in: categories.flatMap(c => c.ancestors || []) } })
+                .select("name slug")
+                .lean();
+            ancestors = categories.flatMap(c => (c.ancestors || []).map(id => ancestorDocs.find(a => String(a._id) === String(id)))).filter(Boolean);
+        }
 
-        const handleVariantsForRecs = recProducts => (recProducts || []).map(p => enrichProductWithStockAndOptions(p, promotions));
 
-        topSelling = handleVariantsForRecs(topSelling.products);
-        moreLikeThis = handleVariantsForRecs(moreLikeThis.products);
-        randomProducts = handleVariantsForRecs(randomProducts);
-
-        // 🔹 Remove duplicate recommendations
-        const usedIds = new Set();
-        const filterUnique = rec => rec.filter(p => {
-            const id = p._id.toString();
-            if (usedIds.has(id)) return false;
-            usedIds.add(id);
-            return true;
-        });
 
         // 🔹 Friendly message
         let message = null;
         if (total === 0) {
             if (queryFilters.search) {
-                message = `No products found matching “${queryFilters.search}” in this skin type.`;
-            } else if (filters.minPrice || filters.maxPrice || filters.brandIds?.length) {
-                message = `No products found with the selected filters in this skin type.`;
+                message = `No products found matching “${queryFilters.search}” for this skin type.`;
+            } else if (filters.minPrice || filters.maxPrice || filters.brandIds?.length || filters.skinTypes?.length) {
+                message = `No products found with the selected filters for this skin type.`;
             } else {
                 message = `No products available for ${skinType.name} at the moment.`;
             }
@@ -930,6 +1279,7 @@ export const getProductsBySkinType = async (req, res) => {
             success: true,
             skinType: skinType.name,
             products: formattedProducts,
+            breadcrumb: ancestors,
             pagination: {
                 page,
                 limit,
@@ -937,12 +1287,7 @@ export const getProductsBySkinType = async (req, res) => {
                 totalPages: Math.ceil(total / limit),
                 hasMore: page < Math.ceil(total / limit)
             },
-            message,
-            recommendations: {
-                topSelling: filterUnique(topSelling),
-                moreLikeThis: filterUnique(moreLikeThis),
-                random: filterUnique(randomProducts)
-            }
+            message
         });
 
     } catch (err) {
@@ -992,3 +1337,4 @@ export const getProductDetail = async (req, res) => {
         res.status(500).json({ success: false, message: "Server error" });
     }
 };
+
