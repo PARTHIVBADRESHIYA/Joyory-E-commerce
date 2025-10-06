@@ -338,6 +338,10 @@ import { normalizeFilters, applyDynamicFilters } from "../../controllers/user/us
 
 
 
+// /**
+//  * GET /api/brands
+//  * Returns all active brands with product counts
+//  */
 export const getAllBrands = async (req, res) => {
     try {
         const brands = await Brand.find({ isActive: true })
@@ -345,13 +349,20 @@ export const getAllBrands = async (req, res) => {
             .sort({ name: 1 })
             .lean();
 
-        // Count products per brand (only published)
         const counts = await Product.aggregate([
-            { $match: { isPublished: true } },
+            {
+                $match: {
+                    brand: { $in: brands.map(b => b._id) },
+                    isPublished: true
+                }
+            },
             { $group: { _id: "$brand", count: { $sum: 1 } } }
         ]);
+
         const countMap = {};
-        counts.forEach(c => { countMap[c._id.toString()] = c.count; });
+        counts.forEach(c => {
+            countMap[c._id.toString()] = c.count;
+        });
 
         const enriched = brands.map(b => ({
             ...b,
