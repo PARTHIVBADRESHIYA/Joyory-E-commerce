@@ -403,6 +403,7 @@ const productSchema = new mongoose.Schema({
     formulation: { type: mongoose.Schema.Types.ObjectId, ref: "Formulation", index: true },
     finish: { type: String, index: true },
     ingredients: [String],
+    seller: { type: mongoose.Schema.Types.ObjectId, ref: 'Seller', index: true },
 
     variants: [variantSchema],
     avgRating: { type: Number, default: 0 },
@@ -435,5 +436,6 @@ productSchema.index({ brand: 1 });
 productSchema.index({ category: 1 });
 productSchema.index({ price: 1 });
 productSchema.index({ avgRating: -1 });
+productSchema.index({ seller: 1, category: 1 });
 
 export default mongoose.model('Product', productSchema);

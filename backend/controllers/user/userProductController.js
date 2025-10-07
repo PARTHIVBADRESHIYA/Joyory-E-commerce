@@ -11,6 +11,8 @@ import Category from '../../models/Category.js';
 import { getDescendantCategoryIds, getCategoryFallbackChain } from '../../middlewares/utils/categoryUtils.js';
 import { getRecommendations } from '../../middlewares/utils/recommendationService.js';
 import { formatProductCard } from '../../middlewares/utils/recommendationService.js';
+import { calculateVariantPrices } from "../../middlewares/services/promotionHelper.js";
+
 import { enrichProductWithStockAndOptions } from "../../middlewares/services/productHelpers.js";
 import { applyFlatDiscount, asMoney, productMatchesPromo } from '../../controllers/user/userPromotionController.js'; // reuse helpers
 import { fetchProducts } from "../../middlewares/services/productQueryBuilder.js";
@@ -528,6 +530,128 @@ export const getAllFilteredProducts = async (req, res) => {
         }
     };
 
+// export const getSingleProduct = async (req, res) => {
+//     try {
+//         const productId = req.params.id;
+//         if (!mongoose.Types.ObjectId.isValid(productId)) {
+//             return res.status(400).json({ message: "Invalid product id" });
+//         }
+
+//         // 1) Load product + increment views
+//         const product = await Product.findOneAndUpdate(
+//             { _id: productId, isPublished: true },
+//             { $inc: { views: 1 } },
+//             { new: true, lean: true }
+//         );
+//         if (!product) return res.status(404).json({ message: "Product not found" });
+
+//         // 2) Save to user's recent history
+//         if (req.user?.id) {
+//             const categoryValue = mongoose.Types.ObjectId.isValid(product.category)
+//                 ? product.category
+//                 : product.category?.slug || String(product.category || "");
+
+//             await User.bulkWrite([
+//                 {
+//                     updateOne: {
+//                         filter: { _id: req.user.id },
+//                         update: { $pull: { recentProducts: product._id, recentCategories: categoryValue } }
+//                     }
+//                 },
+//                 {
+//                     updateOne: {
+//                         filter: { _id: req.user.id },
+//                         update: {
+//                             $push: {
+//                                 recentProducts: { $each: [product._id], $position: 0, $slice: 20 },
+//                                 recentCategories: { $each: [categoryValue], $position: 0, $slice: 20 }
+//                             }
+//                         }
+//                     }
+//                 }
+//             ]);
+//         }
+
+//         // 3) Category & Brand info
+//         const categoryObj = mongoose.Types.ObjectId.isValid(product.category)
+//             ? await Category.findById(product.category).select("name slug parent").lean()
+//             : null;
+
+//         const brandObj = mongoose.Types.ObjectId.isValid(product.brand)
+//             ? await Brand.findById(product.brand).select("name").lean()
+//             : null;
+
+//         // 4) Ratings
+//         const [{ avg = 0, count = 0 } = {}] = await Review.aggregate([
+//             { $match: { productId: product._id, status: "Active" } },
+//             { $group: { _id: "$productId", avg: { $avg: "$rating" }, count: { $sum: 1 } } }
+//         ]);
+//         const avgRating = Math.round((avg || 0) * 10) / 10;
+
+//         // 5) Active promotions
+//         const now = new Date();
+//         const promotions = await Promotion.find({
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now }
+//         }).lean();
+
+//         // 6) Enrich product with variants/stock/options/discounts
+//         const enrichedProduct = enrichProductWithStockAndOptions(product, promotions);
+
+//         // 7) Enrich variants with price and discount as string
+//         enrichedProduct.variants = (enrichedProduct.variants || []).map((v) => {
+//             const original = Number(v.originalPrice ?? enrichedProduct.price ?? 0);
+//             const discounted = Number(v.discountedPrice ?? v.displayPrice ?? original);
+//             const discountPercent = original > 0
+//                 ? Math.round(((original - discounted) / original) * 100)
+//                 : 0;
+
+//             return {
+//                 ...v,
+//                 displayPrice: discounted,
+//                 originalPrice: original,
+//                 discountPercent: discountPercent > 0 ? `${discountPercent}%` : "0%",
+//             };
+//         });
+
+//         // 8) Recommendations
+//         const [moreLikeThis, boughtTogether, alsoViewed] = await Promise.all([
+//             getRecommendations({ mode: "moreLikeThis", productId, userId: req.user?.id }),
+//             getRecommendations({ mode: "boughtTogether", productId, userId: req.user?.id }),
+//             getRecommendations({ mode: "alsoViewed", productId, userId: req.user?.id })
+//         ]);
+
+//         res.status(200).json({
+//             _id: enrichedProduct._id,
+//             name: enrichedProduct.name,
+//             brand: brandObj ? brandObj.name : enrichedProduct.brand,
+//             variant: enrichedProduct.variant,
+//             description: enrichedProduct.description || "",
+//             summary: enrichedProduct.summary || "",
+//             features: enrichedProduct.features || [],
+//             howToUse: enrichedProduct.howToUse || "",
+//             ingredients: enrichedProduct.ingredients || [],
+//             mrp: enrichedProduct.originalPrice,
+//             price: enrichedProduct.displayPrice,
+//             discountPercent: Math.max(0, enrichedProduct.discountPercent || 0),
+//             images: normalizeImages(enrichedProduct.images || []),
+//             category: categoryObj,
+//             shadeOptions: enrichedProduct.shadeOptions || [],
+//             colorOptions: enrichedProduct.colorOptions || [],
+//             variants: enrichedProduct.variants || [],
+//             status: enrichedProduct.status || null,
+//             message: enrichedProduct.message || null,
+//             avgRating,
+//             totalRatings: count || 0,
+//             recommendations: { moreLikeThis, boughtTogether, alsoViewed }
+//         });
+
+//     } catch (err) {
+//         console.error("❌ getSingleProduct error:", err);
+//         res.status(500).json({ message: "Server error", error: err.message });
+//     }
+// };
 export const getSingleProduct = async (req, res) => {
     try {
         const productId = req.params.id;
@@ -594,24 +718,15 @@ export const getSingleProduct = async (req, res) => {
             endDate: { $gte: now }
         }).lean();
 
-        // 6) Enrich product with variants/stock/options/discounts
+        // 6) Enrich product with variants/stock/options
         const enrichedProduct = enrichProductWithStockAndOptions(product, promotions);
 
-        // 7) Enrich variants with price and discount as string
-        enrichedProduct.variants = (enrichedProduct.variants || []).map((v) => {
-            const original = Number(v.originalPrice ?? enrichedProduct.price ?? 0);
-            const discounted = Number(v.discountedPrice ?? v.displayPrice ?? original);
-            const discountPercent = original > 0
-                ? Math.round(((original - discounted) / original) * 100)
-                : 0;
-
-            return {
-                ...v,
-                displayPrice: discounted,
-                originalPrice: original,
-                discountPercent: discountPercent > 0 ? `${discountPercent}%` : "0%",
-            };
-        });
+        // 7) 🔹 Prioritize promotion prices for variants
+        enrichedProduct.variants = calculateVariantPrices(
+            enrichedProduct.variants,
+            enrichedProduct,
+            promotions
+        );
 
         // 8) Recommendations
         const [moreLikeThis, boughtTogether, alsoViewed] = await Promise.all([
@@ -650,6 +765,7 @@ export const getSingleProduct = async (req, res) => {
         res.status(500).json({ message: "Server error", error: err.message });
     }
 };
+
 
 export const getTopSellingProducts = async (req, res) => {
     try {
