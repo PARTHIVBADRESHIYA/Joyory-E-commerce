@@ -18,7 +18,8 @@ router.post(
     verifyAdminOrTeamMember,
     uploadCategory.fields([
         { name: 'bannerImage', maxCount: 5 },
-        { name: 'thumbnailImage', maxCount: 5 }
+        { name: 'thumbnailImage', maxCount: 5 },
+        { name: 'image', maxCount: 1 }
     ]),
     addCategory
 );
@@ -32,7 +33,9 @@ router.put(
     verifyAdminOrTeamMember,
     uploadCategory.fields([
         { name: 'bannerImage', maxCount: 5 },
-        { name: 'thumbnailImage', maxCount: 5 }
+        { name: 'thumbnailImage', maxCount: 5 },
+        { name: 'image', maxCount: 1 }
+
     ]),
     updateCategory
 );
