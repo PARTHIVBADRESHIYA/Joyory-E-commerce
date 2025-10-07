@@ -300,19 +300,19 @@ export const getCartSummary = async (req, res) => {
       bagMrp - bagPayable + discountFromCoupon + pointsDiscount + giftCardDiscount
     );
 
-    /* -------------------- 🚚 Shipping -------------------- */
-    const SHIPPING_FEE = 70;
-    let shipping = SHIPPING_FEE;
-    let shippingDiscount = 0;
-    let shippingMessage = "";
+    // /* -------------------- 🚚 Shipping -------------------- */
+    // const SHIPPING_FEE = 70;
+    // let shipping = SHIPPING_FEE;
+    // let shippingDiscount = 0;
+    // let shippingMessage = "";
 
-    if (bagPayable >= 499) {
-      shippingDiscount = SHIPPING_FEE;
-      shipping = 0;
-      shippingMessage = `🎉 Yay! You’ve unlocked Free Shipping and saved ₹${SHIPPING_FEE}.`;
-    }
+    // if (bagPayable >= 499) {
+    //   shippingDiscount = SHIPPING_FEE;
+    //   shipping = 0;
+    //   shippingMessage = `🎉 Yay! You’ve unlocked Free Shipping and saved ₹${SHIPPING_FEE}.`;
+    // }
 
-    const grandTotal = round2(bagPayable - discountFromCoupon - pointsDiscount - giftCardDiscount + shipping);
+    const grandTotal = round2(bagPayable - discountFromCoupon - pointsDiscount - giftCardDiscount );
 
     /* -------------------- ✅ Response -------------------- */
     res.json({
@@ -325,11 +325,11 @@ export const getCartSummary = async (req, res) => {
         couponDiscount: round2(discountFromCoupon),
         referralPointsDiscount: round2(pointsDiscount),
         giftCardDiscount: round2(giftCardDiscount),
-        shippingFee: SHIPPING_FEE,
-        shippingDiscount,
-        shipping,
+        // shippingFee: SHIPPING_FEE,
+        // shippingDiscount,
+        // shipping,
         payable: grandTotal,
-        shippingMessage,
+        // shippingMessage,
         savingsMessage: totalSavings > 0 ? `🎉 You saved ₹${totalSavings} on this order!` : "",
       },
       appliedCoupon,
