@@ -614,6 +614,59 @@ export const fetchPromotionProductsHelper = async (params) => {
 };
 
 
+// export const calculateVariantPrices = (variants = [], product, promotions = []) => {
+
+//     return (variants.length ? variants : [{
+//         sku: product._id.toString(),
+//         shadeName: product.variant || "",
+//         images: product.images?.length ? product.images : [],
+//         stock: product.quantity ?? 0,
+//         price: product.price,
+//         discountedPrice: product.discountedPrice ?? product.price
+//     }]).map(v => {
+//         const basePrice = v.price ?? product.price;
+//         let finalDiscountedPrice = v.discountedPrice ?? basePrice;
+//         const priceFloor = product.buyingPrice ?? 0;
+
+//         promotions.forEach(promo => {
+//             if (promo.promotionType === "discount" && promo.discountValue > 0) {
+//                 let promoPrice;
+//                 if (promo.discountUnit === "percent") {
+//                     promoPrice = basePrice * (1 - promo.discountValue / 100);
+//                 } else {
+//                     promoPrice = basePrice - promo.discountValue;
+//                 }
+//                 promoPrice = Math.max(promoPrice, priceFloor);
+
+//                 // apply only if better than current discounted
+//                 if (promoPrice < finalDiscountedPrice) finalDiscountedPrice = promoPrice;
+//             }
+//         });
+
+//         // Stock status
+//         let status = "inStock";
+//         let message = "In-stock";
+//         if (v.stock <= 0) { status = "outOfStock"; message = "No stock available"; }
+//         else if (v.thresholdValue && v.stock <= v.thresholdValue) { status = "lowStock"; message = `Few left (${v.stock})`; }
+
+//         const discountPercent = basePrice > 0 ? Math.floor(((basePrice - finalDiscountedPrice) / basePrice) * 100) : 0;
+
+//         return {
+//             ...v,
+//             originalPrice: Math.round(basePrice),
+//             discountedPrice: Math.round(finalDiscountedPrice),
+//             displayPrice: Math.round(finalDiscountedPrice),
+//             discountAmount: Math.max(0, Math.round(basePrice - finalDiscountedPrice)),
+//             discountPercent,
+//             status,
+//             message
+//         };
+//     });
+// };
+
+
+
+// -------------------- CALCULATE VARIANT PRICES --------------------
 export const calculateVariantPrices = (variants = [], product, promotions = []) => {
     return (variants.length ? variants : [{
         sku: product._id.toString(),
@@ -636,13 +689,10 @@ export const calculateVariantPrices = (variants = [], product, promotions = []) 
                     promoPrice = basePrice - promo.discountValue;
                 }
                 promoPrice = Math.max(promoPrice, priceFloor);
-
-                // apply only if better than current discounted
                 if (promoPrice < finalDiscountedPrice) finalDiscountedPrice = promoPrice;
             }
         });
 
-        // Stock status
         let status = "inStock";
         let message = "In-stock";
         if (v.stock <= 0) { status = "outOfStock"; message = "No stock available"; }
@@ -658,7 +708,8 @@ export const calculateVariantPrices = (variants = [], product, promotions = []) 
             discountAmount: Math.max(0, Math.round(basePrice - finalDiscountedPrice)),
             discountPercent,
             status,
-            message
+            message,
+            images: v.images?.length ? v.images : (product.images?.length ? product.images : []), // ✅ fallback to product images
         };
     });
 };
