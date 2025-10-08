@@ -97,20 +97,26 @@ export const authenticateSeller = async (req, res, next) => {
 };
 
 export const optionalAuth = async (req, res, next) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        return next(); // no token → guest
-    }
-
-    const token = authHeader.split(" ")[1];
     try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        const user = await User.findById(decoded.id);
+        // Read JWT from cookie (e.g. "token" cookie)
+        const token = req.cookies?.token;
+        if (!token) {
+            return next(); // No cookie → guest
+        }
+
+        // Verify JWT
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        if (!decoded?.id) {
+            return next(); // Invalid payload → guest
+        }
+
+        // Find user in DB
+        const user = await User.findById(decoded.id).select("-password");
         if (user) {
-            req.user = user; // only attach if valid
+            req.user = user; // attach user to request
         }
     } catch (err) {
-        console.warn("⚠️ Invalid token, continuing as guest");
+        console.warn("⚠️ Invalid or expired cookie token, continuing as guest");
     }
     next();
 };
