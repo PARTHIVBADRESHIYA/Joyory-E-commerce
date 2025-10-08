@@ -8,10 +8,10 @@ import Promotion from "../../models/Promotion.js";
 import SkinType from "../../models/SkinType.js";
 
 // 🔹 helpers (same as category controller)
-import { getRecommendations } from '../../middlewares/utils/recommendationService.js';
-import { formatProductCard } from '../../middlewares/utils/recommendationService.js';
+import { formatProductCard, getPseudoVariant} from '../../middlewares/utils/recommendationService.js';
 import { enrichProductWithStockAndOptions } from "../../middlewares/services/productHelpers.js";
 import { normalizeFilters, applyDynamicFilters } from "../../controllers/user/userProductController.js";
+import { calculateVariantPrices } from "../../middlewares/services/promotionHelper.js";
 
 export const getAllBrands = async (req, res) => {
     try {
@@ -47,12 +47,215 @@ export const getAllBrands = async (req, res) => {
     }
 };
 
+// export const getBrandCategoryProducts = async (req, res) => {
+//     try {
+//         const { brandSlug, categorySlug } = req.params;
+//         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
+//         page = Number(page);
+//         limit = Number(limit);
+
+//         const brand = await Brand.findOne({ slug: brandSlug, isActive: true }).lean();
+//         if (!brand) return res.status(404).json({ message: "Brand not found" });
+
+//         const category = await Category.findOne({ slug: categorySlug, isActive: true }).lean();
+//         if (!category) return res.status(404).json({ message: "Category not found" });
+
+//         if (req.user?.id) {
+//             await User.findByIdAndUpdate(req.user.id, { $pull: { recentBrands: brand._id } });
+//             await User.findByIdAndUpdate(req.user.id, {
+//                 $push: { recentBrands: { $each: [brand._id], $position: 0, $slice: 20 } }
+//             });
+//         }
+
+//         const filters = normalizeFilters(queryFilters);
+
+//         // 🔹 Convert skin type names to ObjectIds & track invalid skin types
+//         let invalidSkinTypes = [];
+//         if (filters.skinTypes?.length) {
+//             const skinDocs = await SkinType.find({
+//                 name: { $in: filters.skinTypes.map(s => new RegExp(`^${s}$`, "i")) }
+//             }).select("_id name").lean();
+
+//             const matchedSkinNames = skinDocs.map(s => s.name.toLowerCase());
+//             invalidSkinTypes = filters.skinTypes.filter(s => !matchedSkinNames.includes(s.toLowerCase()));
+
+//             filters.skinTypes = skinDocs.map(s => s._id.toString());
+//         }
+
+//         filters.brandIds = [brand._id.toString()];
+//         filters.categoryIds = [category._id.toString()];
+//         const finalFilter = applyDynamicFilters(filters);
+
+//         const sortOptions = {
+//             recent: { createdAt: -1 },
+//             priceLowToHigh: { price: 1 },
+//             priceHighToLow: { price: -1 },
+//             rating: { avgRating: -1 }
+//         };
+
+//         const total = await Product.countDocuments(finalFilter);
+//         const products = await Product.find(finalFilter)
+//             .sort(sortOptions[sort] || { createdAt: -1 })
+//             .skip((page - 1) * limit)
+//             .limit(limit)
+//             .lean();
+
+//         const now = new Date();
+//         const promotions = await Promotion.find({
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now }
+//         }).lean();
+
+//         const productsWithStock = products.map(p => enrichProductWithStockAndOptions(p, promotions));
+//         const cards = await Promise.all(productsWithStock.map(p => formatProductCard(p)));
+
+//         // 🔹 Generate user-friendly message
+//         let message = "";
+//         if (invalidSkinTypes.length) {
+//             message = `No products found for the selected skin type(s): ${invalidSkinTypes.join(", ")}`;
+//         } else if (products.length === 0) {
+//             if (queryFilters.search) {
+//                 message = `No products found matching “${queryFilters.search}” in ${brand.name} - ${category.name}.`;
+//             } else if (filters.minPrice || filters.maxPrice) {
+//                 message = `No products found with the selected filters.`;
+//             } else {
+//                 message = `No products available in ${brand.name} - ${category.name} at the moment.`;
+//             }
+//         } else if (queryFilters.search) {
+//             message = `Showing search results for “${queryFilters.search}”.`;
+//         } else {
+//             message = `Showing products in ${brand.name} - ${category.name}.`;
+//         }
+
+//         res.status(200).json({
+//             brand: { _id: brand._id, name: brand.name, logo: brand.logo },
+//             category: { _id: category._id, name: category.name, slug: category.slug },
+//             message,
+//             products: cards,
+//             pagination: {
+//                 page,
+//                 limit,
+//                 total,
+//                 totalPages: Math.ceil(total / limit),
+//                 hasMore: page < Math.ceil(total / limit)
+//             },
+//         });
+
+//     } catch (err) {
+//         console.error("🔥 Error in getBrandCategoryProducts:", err);
+//         res.status(500).json({ message: "Failed to fetch category products", error: err.message });
+//     }
+// };
+
+// // ==================== GET BRAND LANDING ====================
+// export const getBrandLanding = async (req, res) => {
+//     try {
+//         const { brandSlug } = req.params;
+//         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
+//         page = Number(page);
+//         limit = Number(limit);
+
+//         const brand = await Brand.findOne({ slug: brandSlug, isActive: true })
+//             .select("banner name logo slug")
+//             .lean();
+//         if (!brand) return res.status(404).json({ message: "Brand not found" });
+
+//         const filters = normalizeFilters(queryFilters);
+
+//         // 🔹 Convert skin type names to ObjectIds
+//         let invalidSkinTypes = [];
+//         if (filters.skinTypes?.length) {
+//             const skinDocs = await SkinType.find({
+//                 name: { $in: filters.skinTypes.map(s => new RegExp(`^${s}$`, "i")) }
+//             }).select("_id name").lean();
+
+//             const matchedSkinTypeNames = skinDocs.map(s => s.name.toLowerCase());
+//             invalidSkinTypes = filters.skinTypes.filter(s => !matchedSkinTypeNames.includes(s.toLowerCase()));
+
+//             filters.skinTypes = skinDocs.map(s => s._id.toString());
+//         }
+
+//         filters.brandIds = [brand._id.toString()];
+//         const finalFilter = applyDynamicFilters(filters);
+
+//         const sortOptions = {
+//             recent: { createdAt: -1 },
+//             priceLowToHigh: { price: 1 },
+//             priceHighToLow: { price: -1 },
+//             rating: { avgRating: -1 }
+//         };
+
+//         const total = await Product.countDocuments(finalFilter);
+//         const products = await Product.find(finalFilter)
+//             .sort(sortOptions[sort] || { createdAt: -1 })
+//             .skip((page - 1) * limit)
+//             .limit(limit)
+//             .lean();
+
+//         const now = new Date();
+//         const promotions = await Promotion.find({
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now }
+//         }).lean();
+
+//         const productsWithStock = products.map(p => enrichProductWithStockAndOptions(p, promotions));
+//         const cards = await Promise.all(productsWithStock.map(p => formatProductCard(p)));
+
+//         const uniqueCategoryIds = await Product.distinct("category", { brand: brand._id, isPublished: true });
+//         const categories = await Category.find({ _id: { $in: uniqueCategoryIds }, isActive: true })
+//             .select("name slug")
+//             .lean();
+
+//         // 🔹 Generate user-friendly message
+//         let message = "";
+//         if (invalidSkinTypes.length) {
+//             message = `No products found for the selected skin type(s): ${invalidSkinTypes.join(", ")}`;
+//         } else if (products.length === 0) {
+//             if (queryFilters.search) {
+//                 message = `No products found matching “${queryFilters.search}” for this brand.`;
+//             } else if (filters.minPrice || filters.maxPrice) {
+//                 message = `No products found with the selected price range.`;
+//             } else {
+//                 message = `No products available for ${brand.name} at the moment.`;
+//             }
+//         } else if (queryFilters.search) {
+//             message = `Showing search results for “${queryFilters.search}”.`;
+//         } else {
+//             message = `Showing products for ${brand.name}.`;
+//         }
+
+//         res.status(200).json({
+//             brandBanner: brand.banner || null,
+//             brand: { _id: brand._id, name: brand.name, logo: brand.logo },
+//             message,
+//             products: cards,
+//             categories,
+//             pagination: {
+//                 page,
+//                 limit,
+//                 total,
+//                 totalPages: Math.ceil(total / limit),
+//                 hasMore: page < Math.ceil(total / limit)
+//             },
+//         });
+
+//     } catch (err) {
+//         console.error("🔥 Error in getBrandLanding:", err);
+//         res.status(500).json({ message: "Failed to fetch brand details", error: err.message });
+//     }
+// };
+
+
+
+// 🔹 BRAND CATEGORY PRODUCTS
 export const getBrandCategoryProducts = async (req, res) => {
     try {
         const { brandSlug, categorySlug } = req.params;
         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
-        page = Number(page);
-        limit = Number(limit);
+        page = Number(page) || 1;
+        limit = Number(limit) || 12;
 
         const brand = await Brand.findOne({ slug: brandSlug, isActive: true }).lean();
         if (!brand) return res.status(404).json({ message: "Brand not found" });
@@ -60,6 +263,7 @@ export const getBrandCategoryProducts = async (req, res) => {
         const category = await Category.findOne({ slug: categorySlug, isActive: true }).lean();
         if (!category) return res.status(404).json({ message: "Category not found" });
 
+        // Track recent brands
         if (req.user?.id) {
             await User.findByIdAndUpdate(req.user.id, { $pull: { recentBrands: brand._id } });
             await User.findByIdAndUpdate(req.user.id, {
@@ -69,21 +273,22 @@ export const getBrandCategoryProducts = async (req, res) => {
 
         const filters = normalizeFilters(queryFilters);
 
-        // 🔹 Convert skin type names to ObjectIds & track invalid skin types
+        // Convert skin types to ObjectId
         let invalidSkinTypes = [];
         if (filters.skinTypes?.length) {
             const skinDocs = await SkinType.find({
                 name: { $in: filters.skinTypes.map(s => new RegExp(`^${s}$`, "i")) }
             }).select("_id name").lean();
 
-            const matchedSkinNames = skinDocs.map(s => s.name.toLowerCase());
-            invalidSkinTypes = filters.skinTypes.filter(s => !matchedSkinNames.includes(s.toLowerCase()));
+            const matchedNames = skinDocs.map(s => s.name.toLowerCase());
+            invalidSkinTypes = filters.skinTypes.filter(s => !matchedNames.includes(s.toLowerCase()));
 
             filters.skinTypes = skinDocs.map(s => s._id.toString());
         }
 
         filters.brandIds = [brand._id.toString()];
         filters.categoryIds = [category._id.toString()];
+
         const finalFilter = applyDynamicFilters(filters);
 
         const sortOptions = {
@@ -107,28 +312,29 @@ export const getBrandCategoryProducts = async (req, res) => {
             endDate: { $gte: now }
         }).lean();
 
-        const productsWithStock = products.map(p => enrichProductWithStockAndOptions(p, promotions));
-        const cards = await Promise.all(productsWithStock.map(p => formatProductCard(p)));
+        // Enrich products & calculate variants
+        const enrichedProducts = products.map(p => {
+            const enriched = enrichProductWithStockAndOptions(p, promotions);
+            enriched.variants = enriched.variants && enriched.variants.length
+                ? calculateVariantPrices(enriched.variants, enriched, promotions)
+                : calculateVariantPrices([getPseudoVariant(enriched)], enriched, promotions);
+            return enriched;
+        });
 
-        // 🔹 Generate user-friendly message
+        const cards = await Promise.all(enrichedProducts.map(p => formatProductCard(p, promotions)));
+
+        // Friendly message
         let message = "";
         if (invalidSkinTypes.length) {
             message = `No products found for the selected skin type(s): ${invalidSkinTypes.join(", ")}`;
         } else if (products.length === 0) {
-            if (queryFilters.search) {
-                message = `No products found matching “${queryFilters.search}” in ${brand.name} - ${category.name}.`;
-            } else if (filters.minPrice || filters.maxPrice) {
-                message = `No products found with the selected filters.`;
-            } else {
-                message = `No products available in ${brand.name} - ${category.name} at the moment.`;
-            }
-        } else if (queryFilters.search) {
-            message = `Showing search results for “${queryFilters.search}”.`;
-        } else {
-            message = `Showing products in ${brand.name} - ${category.name}.`;
-        }
+            if (queryFilters.search) message = `No products found matching “${queryFilters.search}” in ${brand.name} - ${category.name}.`;
+            else if (filters.minPrice || filters.maxPrice) message = `No products found with the selected filters.`;
+            else message = `No products available in ${brand.name} - ${category.name} at the moment.`;
+        } else if (queryFilters.search) message = `Showing search results for “${queryFilters.search}”.`;
+        else message = `Showing products in ${brand.name} - ${category.name}.`;
 
-        res.status(200).json({
+        return res.status(200).json({
             brand: { _id: brand._id, name: brand.name, logo: brand.logo },
             category: { _id: category._id, name: category.name, slug: category.slug },
             message,
@@ -148,13 +354,13 @@ export const getBrandCategoryProducts = async (req, res) => {
     }
 };
 
-// ==================== GET BRAND LANDING ====================
+// 🔹 BRAND LANDING
 export const getBrandLanding = async (req, res) => {
     try {
         const { brandSlug } = req.params;
         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
-        page = Number(page);
-        limit = Number(limit);
+        page = Number(page) || 1;
+        limit = Number(limit) || 12;
 
         const brand = await Brand.findOne({ slug: brandSlug, isActive: true })
             .select("banner name logo slug")
@@ -163,15 +369,15 @@ export const getBrandLanding = async (req, res) => {
 
         const filters = normalizeFilters(queryFilters);
 
-        // 🔹 Convert skin type names to ObjectIds
+        // Convert skin types to ObjectId
         let invalidSkinTypes = [];
         if (filters.skinTypes?.length) {
             const skinDocs = await SkinType.find({
                 name: { $in: filters.skinTypes.map(s => new RegExp(`^${s}$`, "i")) }
             }).select("_id name").lean();
 
-            const matchedSkinTypeNames = skinDocs.map(s => s.name.toLowerCase());
-            invalidSkinTypes = filters.skinTypes.filter(s => !matchedSkinTypeNames.includes(s.toLowerCase()));
+            const matchedNames = skinDocs.map(s => s.name.toLowerCase());
+            invalidSkinTypes = filters.skinTypes.filter(s => !matchedNames.includes(s.toLowerCase()));
 
             filters.skinTypes = skinDocs.map(s => s._id.toString());
         }
@@ -200,33 +406,31 @@ export const getBrandLanding = async (req, res) => {
             endDate: { $gte: now }
         }).lean();
 
-        const productsWithStock = products.map(p => enrichProductWithStockAndOptions(p, promotions));
-        const cards = await Promise.all(productsWithStock.map(p => formatProductCard(p)));
+        const enrichedProducts = products.map(p => {
+            const enriched = enrichProductWithStockAndOptions(p, promotions);
+            enriched.variants = enriched.variants && enriched.variants.length
+                ? calculateVariantPrices(enriched.variants, enriched, promotions)
+                : calculateVariantPrices([getPseudoVariant(enriched)], enriched, promotions);
+            return enriched;
+        });
+
+        const cards = await Promise.all(enrichedProducts.map(p => formatProductCard(p, promotions)));
 
         const uniqueCategoryIds = await Product.distinct("category", { brand: brand._id, isPublished: true });
         const categories = await Category.find({ _id: { $in: uniqueCategoryIds }, isActive: true })
             .select("name slug")
             .lean();
 
-        // 🔹 Generate user-friendly message
         let message = "";
-        if (invalidSkinTypes.length) {
-            message = `No products found for the selected skin type(s): ${invalidSkinTypes.join(", ")}`;
-        } else if (products.length === 0) {
-            if (queryFilters.search) {
-                message = `No products found matching “${queryFilters.search}” for this brand.`;
-            } else if (filters.minPrice || filters.maxPrice) {
-                message = `No products found with the selected price range.`;
-            } else {
-                message = `No products available for ${brand.name} at the moment.`;
-            }
-        } else if (queryFilters.search) {
-            message = `Showing search results for “${queryFilters.search}”.`;
-        } else {
-            message = `Showing products for ${brand.name}.`;
-        }
+        if (invalidSkinTypes.length) message = `No products found for the selected skin type(s): ${invalidSkinTypes.join(", ")}`;
+        else if (products.length === 0) {
+            if (queryFilters.search) message = `No products found matching “${queryFilters.search}” for this brand.`;
+            else if (filters.minPrice || filters.maxPrice) message = `No products found with the selected price range.`;
+            else message = `No products available for ${brand.name} at the moment.`;
+        } else if (queryFilters.search) message = `Showing search results for “${queryFilters.search}”.`;
+        else message = `Showing products for ${brand.name}.`;
 
-        res.status(200).json({
+        return res.status(200).json({
             brandBanner: brand.banner || null,
             brand: { _id: brand._id, name: brand.name, logo: brand.logo },
             message,
