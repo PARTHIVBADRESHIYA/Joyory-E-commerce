@@ -10,7 +10,7 @@ import Formulation from "../../models/shade/Formulation.js";
 import Category from '../../models/Category.js';
 import { getDescendantCategoryIds, getCategoryFallbackChain } from '../../middlewares/utils/categoryUtils.js';
 import { getRecommendations } from '../../middlewares/utils/recommendationService.js';
-import { formatProductCard ,getPseudoVariant} from '../../middlewares/utils/recommendationService.js';
+import { formatProductCard, getPseudoVariant } from '../../middlewares/utils/recommendationService.js';
 import { calculateVariantPrices } from "../../middlewares/services/promotionHelper.js";
 
 import { enrichProductWithStockAndOptions } from "../../middlewares/services/productHelpers.js";
@@ -34,45 +34,151 @@ export const buildOptions = (product) => {
     };
 };
 
+// export const getFilterMetadata = async (req, res) => {
+//     try {
+//         // 🔹 Fetch master data
+//         const [brands, categories, skinTypes, formulations] = await Promise.all([
+//             Brand.find({}, "name").lean(),
+//             Category.find({}, "name").lean(),
+//             SkinType.find({}, "name").lean(),
+//             Formulation.find({}, "name").lean()
+//         ]);
+
+//         // 🔹 Normalize filters from query
+//         const filters = normalizeFilters(req.query);
+
+//         // Determine context: hide filter if already in that page
+//         // Example: /category/:categorySlug/... → hide category filter
+//         const hideCategoryFilter = !!req.params.categorySlug;
+//         const hideBrandFilter = !!req.params.brandSlug;
+//         const hideSkinTypeFilter = !!req.params.skinSlug;
+
+//         // 🔹 Apply dynamic filters for counts
+//         const baseFilter = await applyDynamicFilters(filters);
+
+//         const [brandCountsAgg, categoryCountsAgg, skinTypeCountsAgg, formulationCountsAgg] = await Promise.all([
+//             Product.aggregate([{ $match: baseFilter }, { $group: { _id: "$brand", count: { $sum: 1 } } }]),
+//             Product.aggregate([{ $match: baseFilter }, { $group: { _id: "$category", count: { $sum: 1 } } }]),
+//             Product.aggregate([{ $match: baseFilter }, { $unwind: "$skinTypes" }, { $group: { _id: "$skinTypes", count: { $sum: 1 } } }]),
+//             Product.aggregate([{ $match: baseFilter }, { $unwind: "$formulations" }, { $group: { _id: "$formulations", count: { $sum: 1 } } }]),
+//         ]);
+
+//         const countMap = arr => Object.fromEntries(arr.map(i => [i._id?.toString(), i.count]));
+
+//         res.json({
+//             success: true,
+//             filters: {
+//                 brands: hideBrandFilter
+//                     ? []
+//                     : brands.map(b => ({ ...b, count: countMap(brandCountsAgg)[b._id?.toString()] || 0 })),
+//                 categories: hideCategoryFilter
+//                     ? []
+//                     : categories.map(c => ({ ...c, count: countMap(categoryCountsAgg)[c._id?.toString()] || 0 })),
+//                 skinTypes: hideSkinTypeFilter
+//                     ? []
+//                     : skinTypes.map(s => ({ ...s, count: countMap(skinTypeCountsAgg)[s._id?.toString()] || 0 })),
+//                 formulations: formulations.map(f => ({ ...f, count: countMap(formulationCountsAgg)[f._id?.toString()] || 0 })),
+//                 priceRanges: [
+//                     { label: "Rs. 0 - Rs. 499", min: 0, max: 499 },
+//                     { label: "Rs. 500 - Rs. 999", min: 500, max: 999 },
+//                     { label: "Rs. 1000 - Rs. 1999", min: 1000, max: 1999 },
+//                     { label: "Rs. 2000 - Rs. 3999", min: 2000, max: 3999 },
+//                     { label: "Rs. 4000 & Above", min: 4000, max: null }
+//                 ]
+//             }
+//         });
+
+//     } catch (err) {
+//         console.error("❌ getFilterMetadata error:", err);
+//         res.status(500).json({ message: "Failed to load filters", error: err.message });
+//     }
+// };
 export const getFilterMetadata = async (req, res) => {
     try {
-        // 🔹 Fetch all master data
+        // 1️⃣ --- Master data (fetch all filter sources) ---
         const [brands, categories, skinTypes, formulations] = await Promise.all([
-            Brand.find({}, "name").lean(),
-            Category.find({}, "name").lean(),
-            SkinType.find({}, "name").lean(),
-            Formulation.find({}, "name").lean()
+            Brand.find({ isActive: true }).select("name slug").lean(),
+            Category.find({ isActive: true }).select("name slug").lean(),
+            SkinType.find({ isDeleted: false }).select("name slug").lean(),
+            Formulation.find({ isDeleted: false }).select("name slug").lean()
         ]);
 
-        // 🔹 Normalize filters from query (optional filters from frontend)
+        // 2️⃣ --- Normalize incoming filters ---
         const filters = normalizeFilters(req.query);
 
-        // 🔹 Count products per brand using dynamic filters
-        const brandCountsAgg = await Product.aggregate([
-            { $match: applyDynamicFilters(filters) },
-            { $group: { _id: "$brand", count: { $sum: 1 } } }
+        // 3️⃣ --- Detect page context (hide one filter type like Nykaa) ---
+        const hideCategoryFilter = !!req.params.categorySlug; // e.g., /category/face/...
+        const hideBrandFilter = !!req.params.brandSlug;       // e.g., /brand/lakme/...
+        const hideSkinTypeFilter = !!req.params.skinSlug;     // e.g., /skin-type/oily/...
+
+        // 4️⃣ --- Build base query to count product availability ---
+        const baseFilter = await applyDynamicFilters(filters);
+
+        // Ensure published products only
+        baseFilter.isPublished = true;
+
+        // 5️⃣ --- Run aggregations in parallel (for counts) ---
+        const [brandCounts, categoryCounts, skinTypeCounts, formulationCounts] = await Promise.all([
+            Product.aggregate([
+                { $match: baseFilter },
+                { $group: { _id: "$brand", count: { $sum: 1 } } }
+            ]),
+            Product.aggregate([
+                { $match: baseFilter },
+                { $group: { _id: "$category", count: { $sum: 1 } } }
+            ]),
+            Product.aggregate([
+                { $match: baseFilter },
+                { $unwind: "$skinTypes" },
+                { $group: { _id: "$skinTypes", count: { $sum: 1 } } }
+            ]),
+            Product.aggregate([
+                { $match: baseFilter },
+                { $unwind: "$formulations" },
+                { $group: { _id: "$formulations", count: { $sum: 1 } } }
+            ])
         ]);
 
-        // 🔹 Count products per category using dynamic filters
-        const categoryCountsAgg = await Product.aggregate([
-            { $match: applyDynamicFilters(filters) },
-            { $group: { _id: "$category", count: { $sum: 1 } } }
-        ]);
+        // 6️⃣ --- Helper to quickly map counts ---
+        const mapCounts = (arr) => Object.fromEntries(arr.map(i => [String(i._id), i.count]));
 
-        const countMap = arr => Object.fromEntries(arr.map(i => [i._id?.toString(), i.count]));
+        const brandCountMap = mapCounts(brandCounts);
+        const categoryCountMap = mapCounts(categoryCounts);
+        const skinTypeCountMap = mapCounts(skinTypeCounts);
+        const formulationCountMap = mapCounts(formulationCounts);
 
-        // 🔹 Respond with counts and master data
-        res.json({
-            brands: brands.map(b => ({
-                ...b,
-                count: countMap(brandCountsAgg)[b._id?.toString()] || 0
+        // 7️⃣ --- Construct filters response like Nykaa ---
+        const filtersResponse = {
+            brands: hideBrandFilter
+                ? []
+                : brands.map(b => ({
+                    _id: b._id,
+                    name: b.name,
+                    slug: b.slug,
+                    count: brandCountMap[b._id?.toString()] || 0
+                })),
+            categories: hideCategoryFilter
+                ? []
+                : categories.map(c => ({
+                    _id: c._id,
+                    name: c.name,
+                    slug: c.slug,
+                    count: categoryCountMap[c._id?.toString()] || 0
+                })),
+            skinTypes: hideSkinTypeFilter
+                ? []
+                : skinTypes.map(s => ({
+                    _id: s._id,
+                    name: s.name,
+                    slug: s.slug,
+                    count: skinTypeCountMap[s._id?.toString()] || 0
+                })),
+            formulations: formulations.map(f => ({
+                _id: f._id,
+                name: f.name,
+                slug: f.slug,
+                count: formulationCountMap[f._id?.toString()] || 0
             })),
-            categories: categories.map(c => ({
-                ...c,
-                count: countMap(categoryCountsAgg)[c._id?.toString()] || 0
-            })),
-            skinTypes,
-            formulations,
             priceRanges: [
                 { label: "Rs. 0 - Rs. 499", min: 0, max: 499 },
                 { label: "Rs. 500 - Rs. 999", min: 500, max: 999 },
@@ -80,10 +186,21 @@ export const getFilterMetadata = async (req, res) => {
                 { label: "Rs. 2000 - Rs. 3999", min: 2000, max: 3999 },
                 { label: "Rs. 4000 & Above", min: 4000, max: null }
             ]
+        };
+
+        // 8️⃣ --- Return final response ---
+        res.status(200).json({
+            success: true,
+            filters: filtersResponse
         });
+
     } catch (err) {
         console.error("❌ getFilterMetadata error:", err);
-        res.status(500).json({ message: "Failed to load filters", error: err.message });
+        res.status(500).json({
+            success: false,
+            message: "Failed to load filters",
+            error: err.message
+        });
     }
 };
 
@@ -102,18 +219,30 @@ export const normalizeFilters = (query) => ({
     ratingMin: query.ratingMin ? Number(query.ratingMin) : undefined,
 });
 
-export const applyDynamicFilters = (filters = {}) => {
+export const applyDynamicFilters = async (filters = {}) => {
     const f = { isPublished: true };
+
+    // Helper: convert slugs/names to IDs if needed
+    const resolveIds = async (Model, values) => {
+        if (!values?.length) return [];
+        const objectIds = values.map(toObjectId).filter(Boolean);
+        if (objectIds.length) return objectIds; // already valid IDs
+        // otherwise try resolve by slug or name
+        const docs = await Model.find({
+            $or: [{ slug: { $in: values } }, { name: { $in: values } }]
+        }).select("_id").lean();
+        return docs.map(d => d._id);
+    };
 
     // 🔹 Brand filter
     if (filters.brandIds?.length) {
-        const brandIds = filters.brandIds.map(toObjectId).filter(Boolean);
-        f.brand = { $in: brandIds };
+        const brandIds = await resolveIds(Brand, filters.brandIds);
+        if (brandIds.length) f.brand = { $in: brandIds };
     }
 
     // 🔹 Category filter
     if (filters.categoryIds?.length) {
-        const categoryIds = filters.categoryIds.map(toObjectId).filter(Boolean);
+        const categoryIds = await resolveIds(Category, filters.categoryIds);
         if (categoryIds.length) f.category = { $in: categoryIds };
     }
 
@@ -123,20 +252,26 @@ export const applyDynamicFilters = (filters = {}) => {
         if (filters.minPrice) priceFilter.$gte = filters.minPrice;
         if (filters.maxPrice) priceFilter.$lte = filters.maxPrice;
 
-        // If product has variants, check their prices too
-        f.$or = [
-            { price: priceFilter }, // product.price
-            { "variants.price": priceFilter } // variants.price
-        ];
+        // Merge with category if exists to avoid overriding
+        if (f.category) {
+            f.$and = [
+                { category: f.category },
+                { $or: [{ price: priceFilter }, { "variants.price": priceFilter }] }
+            ];
+            delete f.category;
+        } else {
+            f.$or = [{ price: priceFilter }, { "variants.price": priceFilter }];
+        }
     }
 
     // 🔹 Skin type & formulation filters
-    ["skinTypes", "formulations"].forEach((key) => {
+    const filtersMap = { skinTypes: SkinType, formulations: Formulation };
+    for (const key of Object.keys(filtersMap)) {
         if (filters[key]?.length) {
-            const ids = filters[key].map(toObjectId).filter(Boolean);
-            f[key] = { $in: ids };
+            const ids = await resolveIds(filtersMap[key], filters[key]);
+            if (ids.length) f[key] = { $in: ids };
         }
-    });
+    }
 
     // 🔹 Finish filter
     if (filters.finishes?.length) {
@@ -322,7 +457,7 @@ export const getProductsByCategory = async (req, res) => {
         filters.categoryIds = descendantIds.map(id => id.toString());
 
         // 🔹 Apply dynamic filters
-        const finalFilter = applyDynamicFilters(filters);
+        const finalFilter = await applyDynamicFilters(filters);
         finalFilter.isPublished = true;
 
         const sortOptions = {
@@ -769,6 +904,129 @@ export const getAllSkinTypes = async (req, res) => {
     }
 };
 
+// export const getProductsBySkinType = async (req, res) => {
+//     try {
+//         const slug = req.params.slug.toLowerCase();
+//         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
+//         page = Number(page) || 1;
+//         limit = Number(limit) || 12;
+
+//         // 🔹 Fetch skin type
+//         const skinType = await SkinType.findOne({ slug, isDeleted: false }).lean();
+//         if (!skinType) return res.status(404).json({ message: "Skin type not found" });
+
+//         // 🔹 Related categories (Makeup + Skincare)
+//         const categories = await Category.find({ slug: { $in: ["makeup", "skincare"] } })
+//             .select("_id slug ancestors")
+//             .lean();
+//         const categoryIds = categories.map(c => c._id);
+
+//         // 🔹 Descendant categories
+//         const descendantIds = [];
+//         for (const catId of categoryIds) {
+//             const descendants = await getDescendantCategoryIds(catId);
+//             descendantIds.push(
+//                 ...descendants
+//                     .filter(id => mongoose.Types.ObjectId.isValid(id))
+//                     .map(id => new mongoose.Types.ObjectId(id))
+//             );
+//         }
+//         descendantIds.push(...categoryIds);
+
+//         // 🔹 Normalize filters
+//         const filters = normalizeFilters(queryFilters);
+
+//         // ✅ Include skinType & descendant categories
+//         filters.skinTypes = [skinType._id.toString()];
+//         filters.categoryIds = descendantIds.map(id => id.toString());
+
+//         // 🔹 Apply dynamic filters (⚠️ async!)
+//         const finalFilter = await applyDynamicFilters(filters);
+//         finalFilter.isPublished = true;
+
+//         // 🔹 Sort options
+//         const sortOptions = {
+//             recent: { createdAt: -1 },
+//             priceLowToHigh: { price: 1 },
+//             priceHighToLow: { price: -1 },
+//             rating: { avgRating: -1 }
+//         };
+
+//         // 🔹 Fetch main products
+//         const total = await Product.countDocuments(finalFilter);
+//         const products = await Product.find(finalFilter)
+//             .sort(sortOptions[sort] || { createdAt: -1 })
+//             .skip((page - 1) * limit)
+//             .limit(limit)
+//             .lean();
+
+//         // 🔹 Fetch active promotions
+//         const now = new Date();
+//         const promotions = await Promotion.find({
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now }
+//         }).lean();
+
+//         // 🔹 Enrich products (variants + stock + price + discount)
+//         const productsWithStock = products.map(p => enrichProductWithStockAndOptions(p, promotions));
+//         const formattedProducts = await Promise.all(productsWithStock.map(p => formatProductCard(p, promotions)));
+
+//         // 🔹 Breadcrumbs
+//         let ancestors = [];
+//         if (categories.length) {
+//             const ancestorDocs = await Category.find({
+//                 _id: { $in: categories.flatMap(c => c.ancestors || []) }
+//             })
+//                 .select("name slug")
+//                 .lean();
+
+//             ancestors = categories
+//                 .flatMap(c =>
+//                     (c.ancestors || []).map(id =>
+//                         ancestorDocs.find(a => String(a._id) === String(id))
+//                     )
+//                 )
+//                 .filter(Boolean);
+//         }
+
+//         // 🔹 Friendly message
+//         let message = null;
+//         if (total === 0) {
+//             if (queryFilters.search) {
+//                 message = `No products found matching “${queryFilters.search}” for this skin type.`;
+//             } else if (
+//                 filters.minPrice ||
+//                 filters.maxPrice ||
+//                 filters.brandIds?.length ||
+//                 filters.skinTypes?.length
+//             ) {
+//                 message = `No products found with the selected filters for this skin type.`;
+//             } else {
+//                 message = `No products available for ${skinType.name} at the moment.`;
+//             }
+//         }
+
+//         res.json({
+//             success: true,
+//             skinType: skinType.name,
+//             products: formattedProducts,
+//             breadcrumb: ancestors,
+//             pagination: {
+//                 page,
+//                 limit,
+//                 total,
+//                 totalPages: Math.ceil(total / limit),
+//                 hasMore: page < Math.ceil(total / limit)
+//             },
+//             message
+//         });
+
+//     } catch (err) {
+//         console.error("❌ getProductsBySkinType error:", err);
+//         res.status(500).json({ success: false, message: err.message });
+//     }
+// };
 export const getProductsBySkinType = async (req, res) => {
     try {
         const slug = req.params.slug.toLowerCase();
@@ -780,29 +1038,33 @@ export const getProductsBySkinType = async (req, res) => {
         const skinType = await SkinType.findOne({ slug, isDeleted: false }).lean();
         if (!skinType) return res.status(404).json({ message: "Skin type not found" });
 
-        // 🔹 Related categories (Makeup + Skincare)
+        // 🔹 Related categories
         const categories = await Category.find({ slug: { $in: ["makeup", "skincare"] } })
             .select("_id slug ancestors")
             .lean();
-        const categoryIds = categories.map(c => c._id);
 
         // 🔹 Descendant categories
         const descendantIds = [];
-        for (const catId of categoryIds) {
-            const descendants = await getDescendantCategoryIds(catId);
-            descendantIds.push(...descendants.filter(id => mongoose.Types.ObjectId.isValid(id)).map(id => new mongoose.Types.ObjectId(id)));
+        for (const cat of categories) {
+            const descendants = await getDescendantCategoryIds(cat._id);
+            descendantIds.push(...descendants.filter(id => mongoose.Types.ObjectId.isValid(id)));
         }
-        descendantIds.push(...categoryIds);
+
+        const allCategoryIds = Array.from(new Set([
+            ...descendantIds.map(id => id.toString()),
+            ...categories.map(c => c._id.toString()),
+            ...(queryFilters.categoryIds || []) // merge query param
+        ]));
 
         // 🔹 Normalize filters
         const filters = normalizeFilters(queryFilters);
 
-        // ✅ Include skinType & descendant categories
+        // ✅ Merge skinType + categoryIds
         filters.skinTypes = [skinType._id.toString()];
-        filters.categoryIds = descendantIds.map(id => id.toString());
+        filters.categoryIds = allCategoryIds;
 
         // 🔹 Apply dynamic filters
-        const finalFilter = applyDynamicFilters(filters);
+        const finalFilter = await applyDynamicFilters(filters);
         finalFilter.isPublished = true;
 
         // 🔹 Sort options
@@ -813,7 +1075,7 @@ export const getProductsBySkinType = async (req, res) => {
             rating: { avgRating: -1 }
         };
 
-        // 🔹 Fetch main products
+        // 🔹 Fetch products
         const total = await Product.countDocuments(finalFilter);
         const products = await Product.find(finalFilter)
             .sort(sortOptions[sort] || { createdAt: -1 })
@@ -821,7 +1083,7 @@ export const getProductsBySkinType = async (req, res) => {
             .limit(limit)
             .lean();
 
-        // 🔹 Fetch active promotions
+        // 🔹 Active promotions
         const now = new Date();
         const promotions = await Promotion.find({
             status: "active",
@@ -829,31 +1091,22 @@ export const getProductsBySkinType = async (req, res) => {
             endDate: { $gte: now }
         }).lean();
 
-        // 🔹 Enrich products (variants + stock + price + discount)
-        const productsWithStock = products.map(p => enrichProductWithStockAndOptions(p, promotions));
-        const formattedProducts = await Promise.all(productsWithStock.map(p => formatProductCard(p)));
+        // 🔹 Enrich products
+        const enrichedProducts = products.map(p => enrichProductWithStockAndOptions(p, promotions));
+        const formattedProducts = await Promise.all(enrichedProducts.map(p => formatProductCard(p, promotions)));
 
         // 🔹 Breadcrumbs
-        let ancestors = [];
-        if (categories.length) {
-            const ancestorDocs = await Category.find({ _id: { $in: categories.flatMap(c => c.ancestors || []) } })
-                .select("name slug")
-                .lean();
-            ancestors = categories.flatMap(c => (c.ancestors || []).map(id => ancestorDocs.find(a => String(a._id) === String(id)))).filter(Boolean);
-        }
+        const ancestorIds = categories.flatMap(c => c.ancestors || []);
+        const ancestorDocs = await Category.find({ _id: { $in: ancestorIds } }).select("name slug").lean();
+        const ancestors = ancestorIds.map(id => ancestorDocs.find(a => String(a._id) === String(id))).filter(Boolean);
 
-
-
-        // 🔹 Friendly message
+        // 🔹 Message
         let message = null;
         if (total === 0) {
-            if (queryFilters.search) {
-                message = `No products found matching “${queryFilters.search}” for this skin type.`;
-            } else if (filters.minPrice || filters.maxPrice || filters.brandIds?.length || filters.skinTypes?.length) {
+            if (queryFilters.search) message = `No products found matching “${queryFilters.search}” for this skin type.`;
+            else if (filters.minPrice || filters.maxPrice || filters.brandIds?.length || filters.skinTypes?.length) {
                 message = `No products found with the selected filters for this skin type.`;
-            } else {
-                message = `No products available for ${skinType.name} at the moment.`;
-            }
+            } else message = `No products available for ${skinType.name} at the moment.`;
         }
 
         res.json({
@@ -876,6 +1129,7 @@ export const getProductsBySkinType = async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 };
+
 
 export const getProductDetail = async (req, res) => {
     try {

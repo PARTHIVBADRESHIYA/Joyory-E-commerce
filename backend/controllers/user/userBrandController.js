@@ -289,7 +289,7 @@ export const getBrandCategoryProducts = async (req, res) => {
         filters.brandIds = [brand._id.toString()];
         filters.categoryIds = [category._id.toString()];
 
-        const finalFilter = applyDynamicFilters(filters);
+        const finalFilter = await applyDynamicFilters(filters);
 
         const sortOptions = {
             recent: { createdAt: -1 },
@@ -383,7 +383,7 @@ export const getBrandLanding = async (req, res) => {
         }
 
         filters.brandIds = [brand._id.toString()];
-        const finalFilter = applyDynamicFilters(filters);
+        const finalFilter = await applyDynamicFilters(filters);
 
         const sortOptions = {
             recent: { createdAt: -1 },
