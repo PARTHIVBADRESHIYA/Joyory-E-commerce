@@ -425,6 +425,123 @@ export const getAllFilteredProducts = async (req, res) => {
 };
 
 // 🔹 Main API: get products by category
+// export const getProductsByCategory = async (req, res) => {
+//     try {
+//         const slug = req.params.slug.toLowerCase();
+//         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
+//         page = Number(page) || 1;
+//         limit = Number(limit) || 12;
+
+//         // 🔹 Fetch category
+//         const category = mongoose.Types.ObjectId.isValid(slug)
+//             ? await Category.findById(slug).select("name slug bannerImage thumbnailImage ancestors").lean()
+//             : await Category.findOne({ slug }).select("name slug bannerImage thumbnailImage ancestors").lean();
+//         if (!category) return res.status(404).json({ message: "Category not found" });
+
+//         // 🔹 Track user
+//         if (req.user?.id) {
+//             await User.findByIdAndUpdate(req.user.id, { $pull: { recentCategories: category._id } });
+//             await User.findByIdAndUpdate(req.user.id, {
+//                 $push: { recentCategories: { $each: [category._id], $position: 0, $slice: 20 } }
+//             });
+//         }
+
+//         // 🔹 Descendant categories
+//         const descendantIds = (await getDescendantCategoryIds(category._id))
+//             .filter(id => mongoose.Types.ObjectId.isValid(id))
+//             .map(id => new mongoose.Types.ObjectId(id));
+//         descendantIds.push(category._id);
+
+//         // 🔹 Normalize filters
+//         const filters = normalizeFilters(queryFilters);
+//         filters.categoryIds = descendantIds.map(id => id.toString());
+
+//         // 🔹 Apply dynamic filters
+//         const finalFilter = await applyDynamicFilters(filters);
+//         finalFilter.isPublished = true;
+
+//         const sortOptions = {
+//             recent: { createdAt: -1 },
+//             priceLowToHigh: { price: 1 },
+//             priceHighToLow: { price: -1 },
+//             rating: { avgRating: -1 }
+//         };
+
+//         // 🔹 Fetch products
+//         const total = await Product.countDocuments(finalFilter);
+//         const products = await Product.find(finalFilter)
+//             .sort(sortOptions[sort] || { createdAt: -1 })
+//             .skip((page - 1) * limit)
+//             .limit(limit)
+//             .lean();
+
+//         // 🔹 Active promotions
+//         const now = new Date();
+//         const promotions = await Promotion.find({
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now }
+//         }).lean();
+
+//         // 🔹 Enrich products & calculate variants for frontend
+//         const enrichedProducts = products.map(p => {
+//             const enriched = enrichProductWithStockAndOptions(p, promotions);
+
+//             // ⚡ Ensure variants exist but do NOT touch legacy `variant`
+//             enriched.variants = enriched.variants && enriched.variants.length
+//                 ? calculateVariantPrices(enriched.variants, enriched, promotions)
+//                 : calculateVariantPrices([getPseudoVariant(enriched)], enriched, promotions);
+
+//             return enriched;
+//         });
+
+//         // 🔹 Format product cards
+//         const cards = await Promise.all(enrichedProducts.map(p => formatProductCard(p, promotions)));
+
+//         // 🔹 Breadcrumbs
+//         let ancestors = [];
+//         if (Array.isArray(category.ancestors) && category.ancestors.length) {
+//             const ancestorDocs = await Category.find({ _id: { $in: category.ancestors } })
+//                 .select("name slug")
+//                 .lean();
+//             ancestors = category.ancestors
+//                 .map(id => ancestorDocs.find(a => String(a._id) === String(id)))
+//                 .filter(Boolean);
+//         }
+
+//         // 🔹 Friendly messages
+//         let message = null;
+//         if (total === 0) {
+//             if (queryFilters.search) {
+//                 message = `No products found matching “${queryFilters.search}” in this category.`;
+//             } else if (filters.minPrice || filters.maxPrice || filters.brandIds?.length || filters.skinTypes?.length) {
+//                 message = `No products found with the selected filters in this category.`;
+//             } else {
+//                 message = `No products available in ${category.name} at the moment.`;
+//             }
+//         }
+
+//         return res.status(200).json({
+//             category,
+//             breadcrumb: ancestors,
+//             products: cards,
+//             pagination: {
+//                 page,
+//                 limit,
+//                 total,
+//                 totalPages: Math.ceil(total / limit),
+//                 hasMore: page < Math.ceil(total / limit)
+//             },
+//             message
+//         });
+
+//     } catch (err) {
+//         console.error("❌ getProductsByCategory error:", err);
+//         return res.status(500).json({ message: "Server error", error: err.message });
+//     }
+// };
+
+// 🔹 Main API: get products by category
 export const getProductsByCategory = async (req, res) => {
     try {
         const slug = req.params.slug.toLowerCase();
@@ -487,10 +604,10 @@ export const getProductsByCategory = async (req, res) => {
         const enrichedProducts = products.map(p => {
             const enriched = enrichProductWithStockAndOptions(p, promotions);
 
-            // ⚡ Ensure variants exist but do NOT touch legacy `variant`
+            // ⚡ ONLY calculate variants if actual variants exist
             enriched.variants = enriched.variants && enriched.variants.length
                 ? calculateVariantPrices(enriched.variants, enriched, promotions)
-                : calculateVariantPrices([getPseudoVariant(enriched)], enriched, promotions);
+                : []; // ✅ no pseudo variant
 
             return enriched;
         });
@@ -540,7 +657,6 @@ export const getProductsByCategory = async (req, res) => {
         return res.status(500).json({ message: "Server error", error: err.message });
     }
 };
-
 
 
 // export const getSingleProduct = async (req, res) => {
@@ -657,6 +773,8 @@ export const getProductsByCategory = async (req, res) => {
 //     }
 // };
 
+
+// 🔹 Get single product
 export const getSingleProduct = async (req, res) => {
     try {
         const productId = req.params.id;
@@ -723,10 +841,10 @@ export const getSingleProduct = async (req, res) => {
             endDate: { $gte: now }
         }).lean();
 
-        // 6) 🔹 Keep legacy variant intact and calculate variants array for frontend
+        // 6) Calculate variants ONLY if actual variants exist
         const variantsArray = product.variants && product.variants.length
             ? calculateVariantPrices(product.variants, product, promotions)
-            : calculateVariantPrices([getPseudoVariant(product)], product, promotions);
+            : []; // ❌ no pseudo variants
 
         // 7) Recommendations
         const [moreLikeThis, boughtTogether, alsoViewed] = await Promise.all([
@@ -735,11 +853,12 @@ export const getSingleProduct = async (req, res) => {
             getRecommendations({ mode: "alsoViewed", productId, userId: req.user?.id })
         ]);
 
+        // 8) Prepare response
         res.status(200).json({
             _id: product._id,
             name: product.name,
             brand: brandObj ? brandObj.name : product.brand,
-            variant: product.variant, // ⚡ legacy variant intact
+            variant: product.variant || null, // legacy
             description: product.description || "",
             summary: product.summary || "",
             features: product.features || [],
@@ -752,9 +871,9 @@ export const getSingleProduct = async (req, res) => {
             category: categoryObj,
             shadeOptions: buildOptions(product).shadeOptions || [],
             colorOptions: buildOptions(product).colorOptions || [],
-            variants: variantsArray, // ⚡ internal frontend logic only
-            status: variantsArray[0]?.status || "inStock",
-            message: variantsArray[0]?.message || null,
+            variants: variantsArray, // ✅ empty if no variants
+            status: variantsArray[0]?.status || (product.quantity > 0 ? "inStock" : "outOfStock"),
+            message: variantsArray[0]?.message || (product.quantity > 0 ? "In-stock" : "No stock available"),
             avgRating,
             totalRatings: count || 0,
             recommendations: { moreLikeThis, boughtTogether, alsoViewed }
@@ -765,7 +884,6 @@ export const getSingleProduct = async (req, res) => {
         res.status(500).json({ message: "Server error", error: err.message });
     }
 };
-
 
 export const getTopSellingProducts = async (req, res) => {
     try {

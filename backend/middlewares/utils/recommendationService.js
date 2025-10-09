@@ -11,7 +11,7 @@ import { calculateVariantPrices } from "../../middlewares/services/promotionHelp
 export const getPseudoVariant = (product) => ({
     sku: product._id.toString(),
     stock: product.quantity || 0,
-    price: product.price || 0, 
+    price: product.price || 0,
     discountedPrice: product.discountedPrice || product.price || 0,
     originalPrice: product.price || 0,
     displayPrice: product.discountedPrice || product.price || 0,
@@ -21,6 +21,64 @@ export const getPseudoVariant = (product) => ({
     message: product.quantity > 0 ? "In-stock" : "No stock available",
     images: product.images || [],
 });
+
+// // 🔹 Format product card
+// export const formatProductCard = async (product, promotions = []) => {
+//     if (!product) return null;
+
+//     // 🔹 Fetch category info
+//     let categoryObj = null;
+//     if (mongoose.Types.ObjectId.isValid(product.category)) {
+//         categoryObj = await Category.findById(product.category)
+//             .select("name slug")
+//             .lean();
+//     }
+
+//     const { shadeOptions, colorOptions } = buildOptions(product);
+
+//     // 🔹 Ensure variants exist for internal calculations
+//     let variantsArray = product.variants && product.variants.length
+//         ? calculateVariantPrices(product.variants, product, promotions)
+//         : calculateVariantPrices([getPseudoVariant(product)], product, promotions);
+
+//     // 🔹 Pick first variant for display price
+//     const displayVariant = variantsArray[0];
+
+//     // 🔹 Price & discount
+//     const price = displayVariant?.displayPrice ?? product.price ?? 0;
+//     const mrp = displayVariant?.originalPrice ?? product.price ?? 0;
+//     const discountPercent = mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
+
+//     // 🔹 Stock & message
+//     const status = displayVariant?.status || "inStock";
+//     const message = displayVariant?.message || "In-stock";
+//     const inStock = displayVariant?.stock > 0;
+
+//     return {
+//         _id: product._id,
+//         name: product.name,
+//         brand: product.brand,
+//         variant: product.variant ?? null, // ⚡ KEEP legacy variant intact
+//         price,
+//         mrp,
+//         discountPercent,
+//         discountAmount: mrp - price,
+//         images: normalizeImages(product.images || []),
+//         shadeOptions,
+//         colorOptions,
+//         avgRating: product.avgRating || 0,
+//         totalRatings: product.commentsCount || 0,
+//         status,
+//         message,
+//         inStock,
+//         variants: variantsArray, // ⚡ internal frontend logic
+//         selectedVariant: null,
+//         category: categoryObj
+//             ? { _id: categoryObj._id, name: categoryObj.name, slug: categoryObj.slug }
+//             : null,
+//     };
+// };
+
 
 // 🔹 Format product card
 export const formatProductCard = async (product, promotions = []) => {
@@ -36,10 +94,10 @@ export const formatProductCard = async (product, promotions = []) => {
 
     const { shadeOptions, colorOptions } = buildOptions(product);
 
-    // 🔹 Ensure variants exist for internal calculations
+    // 🔹 Calculate variants ONLY if actual variants exist
     let variantsArray = product.variants && product.variants.length
         ? calculateVariantPrices(product.variants, product, promotions)
-        : calculateVariantPrices([getPseudoVariant(product)], product, promotions);
+        : []; // ✅ no pseudo variants
 
     // 🔹 Pick first variant for display price
     const displayVariant = variantsArray[0];
@@ -50,9 +108,9 @@ export const formatProductCard = async (product, promotions = []) => {
     const discountPercent = mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
 
     // 🔹 Stock & message
-    const status = displayVariant?.status || "inStock";
-    const message = displayVariant?.message || "In-stock";
-    const inStock = displayVariant?.stock > 0;
+    const status = displayVariant?.status || (product.quantity > 0 ? "inStock" : "outOfStock");
+    const message = displayVariant?.message || (product.quantity > 0 ? "In-stock" : "No stock available");
+    const inStock = displayVariant?.stock > 0 || product.quantity > 0;
 
     return {
         _id: product._id,
@@ -71,13 +129,14 @@ export const formatProductCard = async (product, promotions = []) => {
         status,
         message,
         inStock,
-        variants: variantsArray, // ⚡ internal frontend logic
+        variants: variantsArray, // ✅ empty if no variants
         selectedVariant: null,
         category: categoryObj
             ? { _id: categoryObj._id, name: categoryObj.name, slug: categoryObj.slug }
             : null,
     };
 };
+
 
 export const getRecommendations = async ({
     mode,
