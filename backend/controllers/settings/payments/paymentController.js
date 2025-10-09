@@ -3026,9 +3026,6 @@ export const createRazorpayOrder = async (req, res) => {
     }
 };
 
-/**
- * ✅ Verify Razorpay Payment
- */
 export const verifyRazorpayPayment = async (req, res) => {
     try {
         const {
@@ -3085,9 +3082,8 @@ export const verifyRazorpayPayment = async (req, res) => {
             });
         }
 
-        // 🧾 Fetch payment from Razorpay
+        // Fetch payment from Razorpay
         const rpPayment = await razorpay.payments.fetch(razorpay_payment_id);
-
         if (rpPayment.status !== "captured") {
             return res.status(400).json({
                 step: "PAYMENT_STATUS",
@@ -3104,12 +3100,11 @@ export const verifyRazorpayPayment = async (req, res) => {
             });
         }
 
-        // 🏷️ Deduct stock for products & variants
+        // Deduct stock & increment sales
         for (const item of order.products) {
-            const product = await Product.findById(item.productId._id);
+            const product = await Product.findById(item.productId); // ✅ CORRECT
             if (!product) continue;
 
-            // 🧪 Variant stock
             if (item.selectedVariant?.sku && product.variants?.length) {
                 const idx = product.variants.findIndex(v => v.sku === item.selectedVariant.sku);
                 if (idx !== -1) {
@@ -3125,7 +3120,6 @@ export const verifyRazorpayPayment = async (req, res) => {
                     variant.sales = (variant.sales || 0) + item.quantity;
                 }
             } else {
-                // 🏷️ Simple stock
                 if (product.quantity < item.quantity) {
                     return res.status(400).json({
                         step: "STOCK",
@@ -3137,29 +3131,19 @@ export const verifyRazorpayPayment = async (req, res) => {
                 product.sales = (product.sales || 0) + item.quantity;
             }
 
-            // 🛑 Update product status
+            // Update product status
             if (product.variants?.length) {
                 const totalStock = product.variants.reduce((s, v) => s + (v.stock || 0), 0);
                 product.quantity = totalStock;
-                product.status =
-                    totalStock <= 0
-                        ? "Out of stock"
-                        : totalStock < product.thresholdValue
-                            ? "Low stock"
-                            : "In-stock";
+                product.status = totalStock <= 0 ? "Out of stock" : totalStock < product.thresholdValue ? "Low stock" : "In-stock";
             } else {
-                product.status =
-                    product.quantity <= 0
-                        ? "Out of stock"
-                        : product.quantity < product.thresholdValue
-                            ? "Low stock"
-                            : "In-stock";
+                product.status = product.quantity <= 0 ? "Out of stock" : product.quantity < product.thresholdValue ? "Low stock" : "In-stock";
             }
 
             await product.save();
         }
 
-        // ✅ Update order
+        // Update order
         order.paid = true;
         order.paymentStatus = "success";
         order.paymentMethod = rpPayment.method || "Razorpay";
@@ -3167,7 +3151,7 @@ export const verifyRazorpayPayment = async (req, res) => {
         order.orderStatus = "Processing";
         if (shippingAddress) order.shippingAddress = shippingAddress;
 
-        // 🧾 Record payment
+        // Record payment
         await Payment.create({
             order: order._id,
             method: rpPayment.method,
@@ -3176,29 +3160,26 @@ export const verifyRazorpayPayment = async (req, res) => {
             amount: order.amount,
             cardHolderName: rpPayment.card?.name,
             cardNumber: rpPayment.card?.last4,
-            expiryDate: rpPayment.card
-                ? `${rpPayment.card.expiry_month}/${rpPayment.card.expiry_year}`
-                : undefined,
+            expiryDate: rpPayment.card ? `${rpPayment.card.expiry_month}/${rpPayment.card.expiry_year}` : undefined,
             isActive: true,
         });
 
-        // 🧹 Clear user cart
+        // Clear user cart
         const user = await User.findById(order.user._id);
         if (user) {
             user.cart = [];
             await user.save();
         }
 
-        // 🚚 Shiprocket Integration
-        let shiprocketRes = null;
+        // Shiprocket integration
         try {
-            shiprocketRes = await createShipment(order);
+            const shiprocketRes = await createShipment(order);
             order.shipment = shiprocketRes.shipmentDetails;
         } catch (err) {
             console.error("⚠️ Shiprocket Error:", err.message);
         }
 
-        // 🧾 Tracking
+        // Tracking
         order.trackingHistory.push(
             { status: "Payment Successful", timestamp: new Date(), location: "Online - Razorpay" },
             { status: "Processing", timestamp: new Date(), location: "Store" }
@@ -3206,27 +3187,17 @@ export const verifyRazorpayPayment = async (req, res) => {
 
         await order.save();
 
-        // 🧾 Generate & send invoice
+        // Invoice
         try {
             const { pdfBuffer, pdfUrl } = await generateInvoice(order, order.user);
-            order.invoice = {
-                number: `INV-${order._id}`,
-                generatedAt: new Date(),
-                pdfUrl,
-            };
+            order.invoice = { number: `INV-${order._id}`, generatedAt: new Date(), pdfUrl };
             await order.save();
 
             await sendEmail(
                 order.user.email,
                 "🧾 Your Invoice",
                 `<p>Thank you for your purchase, ${order.user.name}!</p>`,
-                [
-                    {
-                        name: "invoice.pdf",
-                        content: pdfBuffer,
-                        mime_type: "application/pdf",
-                    },
-                ]
+                [{ name: "invoice.pdf", content: pdfBuffer, mime_type: "application/pdf" }]
             );
         } catch (err) {
             console.warn("⚠️ Invoice generation skipped:", err.message);
@@ -3248,7 +3219,6 @@ export const verifyRazorpayPayment = async (req, res) => {
         });
     }
 };
-
 
 
 export const payForOrder = async (req, res) => {
