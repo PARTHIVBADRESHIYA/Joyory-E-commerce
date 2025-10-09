@@ -81,6 +81,62 @@ export const getPseudoVariant = (product) => ({
 
 
 // 🔹 Format product card
+// export const formatProductCard = async (product, promotions = []) => {
+//     if (!product) return null;
+
+//     // 🔹 Fetch category info
+//     let categoryObj = null;
+//     if (mongoose.Types.ObjectId.isValid(product.category)) {
+//         categoryObj = await Category.findById(product.category)
+//             .select("name slug")
+//             .lean();
+//     }
+
+//     const { shadeOptions, colorOptions } = buildOptions(product);
+
+//     // 🔹 Calculate variants ONLY if actual variants exist
+//     let variantsArray = product.variants && product.variants.length
+//         ? calculateVariantPrices(product.variants, product, promotions)
+//         : []; // ✅ no pseudo variants
+
+//     // 🔹 Pick first variant for display price
+//     const displayVariant = variantsArray[0];
+
+//     // 🔹 Price & discount
+//     const price = displayVariant?.displayPrice ?? product.price ?? 0;
+//     const mrp = displayVariant?.originalPrice ?? product.price ?? 0;
+//     const discountPercent = mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
+
+//     // 🔹 Stock & message
+//     const status = displayVariant?.status || (product.quantity > 0 ? "inStock" : "outOfStock");
+//     const message = displayVariant?.message || (product.quantity > 0 ? "In-stock" : "No stock available");
+//     const inStock = displayVariant?.stock > 0 || product.quantity > 0;
+
+//     return {
+//         _id: product._id,
+//         name: product.name,
+//         brand: product.brand,
+//         variant: product.variant ?? null, // ⚡ KEEP legacy variant intact
+//         price,
+//         mrp,
+//         discountPercent,
+//         discountAmount: mrp - price,
+//         images: normalizeImages(product.images || []),
+//         shadeOptions,
+//         colorOptions,
+//         avgRating: product.avgRating || 0,
+//         totalRatings: product.commentsCount || 0,
+//         status,
+//         message,
+//         inStock,
+//         variants: variantsArray, // ✅ empty if no variants
+//         selectedVariant: null,
+//         category: categoryObj
+//             ? { _id: categoryObj._id, name: categoryObj.name, slug: categoryObj.slug }
+//             : null,
+//     };
+// };
+
 export const formatProductCard = async (product, promotions = []) => {
     if (!product) return null;
 
@@ -94,17 +150,35 @@ export const formatProductCard = async (product, promotions = []) => {
 
     const { shadeOptions, colorOptions } = buildOptions(product);
 
-    // 🔹 Calculate variants ONLY if actual variants exist
-    let variantsArray = product.variants && product.variants.length
-        ? calculateVariantPrices(product.variants, product, promotions)
-        : []; // ✅ no pseudo variants
+    // 🔹 Normalize variants
+    let variantsArray = [];
 
-    // 🔹 Pick first variant for display price
+    if (Array.isArray(product.variants) && product.variants.length > 0) {
+        // ✅ Real variants (shadeName, hex, etc.)
+        variantsArray = calculateVariantPrices(product.variants, product, promotions);
+    } else if (product.variant && (!product.variants || !product.variants.length)) {
+        // ✅ Old legacy single variant like "30ml", "60g", etc.
+        const legacyVariant = {
+            name: product.variant,
+            sku: product.sku ?? `${product._id}-default`,
+            stock: product.quantity ?? 0,
+            originalPrice: product.mrp ?? product.price ?? 0,
+            displayPrice: product.price ?? 0,
+            discountPercent: product.mrp && product.mrp > product.price
+                ? Math.round(((product.mrp - product.price) / product.mrp) * 100)
+                : 0,
+            message: product.quantity > 0 ? "In-stock" : "No stock available",
+            status: product.quantity > 0 ? "inStock" : "outOfStock",
+            images: normalizeImages(product.images || []),
+        };
+        variantsArray = calculateVariantPrices([legacyVariant], product, promotions);
+    } 
+    // ❌ else no variants at all (product without variant fields)
+
+    // 🔹 Display price logic
     const displayVariant = variantsArray[0];
-
-    // 🔹 Price & discount
     const price = displayVariant?.displayPrice ?? product.price ?? 0;
-    const mrp = displayVariant?.originalPrice ?? product.price ?? 0;
+    const mrp = displayVariant?.originalPrice ?? product.mrp ?? product.price ?? 0;
     const discountPercent = mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
 
     // 🔹 Stock & message
@@ -116,7 +190,7 @@ export const formatProductCard = async (product, promotions = []) => {
         _id: product._id,
         name: product.name,
         brand: product.brand,
-        variant: product.variant ?? null, // ⚡ KEEP legacy variant intact
+        variant: product.variant ?? null, // ⚡ Keep legacy field
         price,
         mrp,
         discountPercent,
@@ -129,13 +203,14 @@ export const formatProductCard = async (product, promotions = []) => {
         status,
         message,
         inStock,
-        variants: variantsArray, // ✅ empty if no variants
+        variants: variantsArray, // ✅ will only appear if variant/variants exist
         selectedVariant: null,
         category: categoryObj
             ? { _id: categoryObj._id, name: categoryObj.name, slug: categoryObj.slug }
             : null,
     };
 };
+
 
 
 export const getRecommendations = async ({
