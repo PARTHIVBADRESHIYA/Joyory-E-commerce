@@ -3145,7 +3145,7 @@ export const verifyRazorpayPayment = async (req, res) => {
 
             // Recalculate and update product.status for affected products (inside transaction)
             // We fetch the latest product docs in-session and update their status based on quantity/thresholdValue
-            const changedProductIds = Array.from(productIdsToRecalc).map(id => mongoose.Types.ObjectId(id));
+            const changedProductIds = Array.from(productIdsToRecalc).map(id => new mongoose.Types.ObjectId(id));
             const products = await Product.find({ _id: { $in: changedProductIds } }).session(session);
 
             // Prepare bulk operations
