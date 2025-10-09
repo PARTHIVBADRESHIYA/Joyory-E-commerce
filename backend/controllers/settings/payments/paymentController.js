@@ -3081,29 +3081,29 @@ export const verifyRazorpayPayment = async (req, res) => {
                 productIdsToRecalc.add(String(productId));
 
                 if (item.selectedVariant?.sku) {
-                    // Atomic update: ensure variant with sku has enough stock and then decrement it
                     const sku = item.selectedVariant.sku;
+
+                    // Atomic update on variant (do NOT touch top-level quantity here)
                     const updateRes = await Product.updateOne(
                         { _id: productId, "variants.sku": sku, "variants.stock": { $gte: qty } }, // ensure enough stock
                         {
                             $inc: {
                                 "variants.$.stock": -qty,
                                 "variants.$.sales": qty,
-                                quantity: -qty,   // keep product.quantity in-sync by decrementing
-                                sales: qty       // aggregate product.sales
+                                sales: qty // increment total product sales counter
                             }
                         },
                         { session }
                     );
 
                     if (!updateRes || updateRes.modifiedCount === 0) {
-                        // Nothing modified -> either sku not found or insufficient stock
                         throw { step: "STOCK", type: "INSUFFICIENT", message: `Insufficient stock or SKU missing for product ${productId} (sku: ${sku})` };
                     }
+
                 } else {
-                    // Simple product: decrement quantity atomically if enough stock
+                    // Simple product (non-variant)
                     const updateRes = await Product.updateOne(
-                        { _id: productId, quantity: { $gte: qty } },
+                        { _id: productId, $or: [{ quantity: { $exists: true, $gte: qty } }, { quantity: { $exists: false } }] },
                         { $inc: { quantity: -qty, sales: qty } },
                         { session }
                     );
@@ -3143,22 +3143,28 @@ export const verifyRazorpayPayment = async (req, res) => {
             // Save the order inside the transaction
             await sessionOrder.save({ session });
 
-            // Recalculate and update product.status for affected products (inside transaction)
-            // We fetch the latest product docs in-session and update their status based on quantity/thresholdValue
+            // Recalculate and update product.status and quantity for affected products (inside transaction)
             const changedProductIds = Array.from(productIdsToRecalc).map(id => new mongoose.Types.ObjectId(id));
             const products = await Product.find({ _id: { $in: changedProductIds } }).session(session);
 
             // Prepare bulk operations
             const bulkOps = products.map(prod => {
-                const qty = Number(prod.quantity || 0);
-                let newStatus = "In-stock";
-                if (qty <= 0) newStatus = "Out of stock";
-                else if (prod.thresholdValue != null && qty < prod.thresholdValue) newStatus = "Low stock";
+                // Compute total quantity dynamically from variants if they exist
+                let totalQty = 0;
+                if (Array.isArray(prod.variants) && prod.variants.length > 0) {
+                    totalQty = prod.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+                } else {
+                    totalQty = Number(prod.quantity || 0);
+                }
 
-                // Ensure variant stock non-negative (defensive)
+                let newStatus = "In-stock";
+                if (totalQty <= 0) newStatus = "Out of stock";
+                else if (prod.thresholdValue != null && totalQty < prod.thresholdValue) newStatus = "Low stock";
+
+                // Clamp variant stock (defensive)
                 if (Array.isArray(prod.variants)) {
                     prod.variants = prod.variants.map(v => {
-                        if ((v.stock ?? 0) < 0) v.stock = 0; // safety clamp
+                        if ((v.stock ?? 0) < 0) v.stock = 0;
                         return v;
                     });
                 }
@@ -3169,7 +3175,8 @@ export const verifyRazorpayPayment = async (req, res) => {
                         update: {
                             $set: {
                                 status: newStatus,
-                                variants: prod.variants // we keep variants as-is; they were already updated via $inc
+                                quantity: totalQty,
+                                variants: prod.variants
                             }
                         }
                     }
@@ -3244,8 +3251,6 @@ export const verifyRazorpayPayment = async (req, res) => {
         return res.status(500).json({ step: "FATAL", success: false, message: "Unexpected server error during payment verification", error: (err && err.message) || err });
     }
 };
-
-
 
 
 export const payForOrder = async (req, res) => {
