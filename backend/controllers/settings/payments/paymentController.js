@@ -3026,124 +3026,86 @@ export const createRazorpayOrder = async (req, res) => {
     }
 };
 
+// -------------------- VERIFY RAZORPAY PAYMENT (WITH DETAILED LOGGING) --------------------
 export const verifyRazorpayPayment = async (req, res) => {
     try {
-        const {
-            orderId,
-            razorpay_order_id,
-            razorpay_payment_id,
-            razorpay_signature,
-            shippingAddress,
-        } = req.body;
+        const { orderId, razorpay_order_id, razorpay_payment_id, razorpay_signature, shippingAddress } = req.body;
 
         if (!orderId || !razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-            return res.status(400).json({
-                step: "VALIDATION",
-                success: false,
-                message: "❌ Missing required fields",
-            });
+            return res.status(400).json({ step: "VALIDATION", success: false, message: "❌ Missing required fields" });
         }
 
-        const order = await Order.findById(orderId)
-            .populate("user")
-            .populate("products.productId");
+        const order = await Order.findById(orderId).populate("user").populate("products.productId");
+        if (!order) return res.status(404).json({ step: "ORDER_FETCH", success: false, message: "Order not found" });
+        if (order.paid) return res.status(200).json({ step: "IDEMPOTENT", success: true, message: "✅ Order already paid", order });
 
-        if (!order) {
-            return res.status(404).json({ step: "ORDER_FETCH", success: false, message: "Order not found" });
-        }
-
-        if (order.paid) {
-            return res.status(200).json({
-                step: "IDEMPOTENT",
-                success: true,
-                message: "✅ Order already paid",
-                order,
-            });
-        }
-
-        if (order.razorpayOrderId && order.razorpayOrderId !== razorpay_order_id) {
-            return res.status(400).json({
-                step: "MISMATCH",
-                success: false,
-                message: "❌ Order mismatch",
-            });
-        }
-
-        const expectedSignature = crypto
-            .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+        // Razorpay signature check
+        const expectedSignature = crypto.createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
             .update(`${razorpay_order_id}|${razorpay_payment_id}`)
             .digest("hex");
-
-        if (expectedSignature !== razorpay_signature) {
-            return res.status(400).json({
-                step: "SIGNATURE",
-                success: false,
-                message: "❌ Invalid signature",
-            });
-        }
+        if (expectedSignature !== razorpay_signature) return res.status(400).json({ step: "SIGNATURE", success: false, message: "❌ Invalid signature" });
 
         // Fetch payment from Razorpay
         const rpPayment = await razorpay.payments.fetch(razorpay_payment_id);
-        if (rpPayment.status !== "captured") {
-            return res.status(400).json({
-                step: "PAYMENT_STATUS",
-                success: false,
-                message: `Payment not captured (status: ${rpPayment.status})`,
-            });
-        }
+        if (rpPayment.status !== "captured") return res.status(400).json({ step: "PAYMENT_STATUS", success: false, message: `Payment not captured (status: ${rpPayment.status})` });
+        if (rpPayment.amount / 100 !== order.amount) return res.status(400).json({ step: "AMOUNT_CHECK", success: false, message: "❌ Amount mismatch" });
 
-        if (rpPayment.amount / 100 !== order.amount) {
-            return res.status(400).json({
-                step: "AMOUNT_CHECK",
-                success: false,
-                message: "❌ Amount mismatch",
-            });
-        }
-
-        // Deduct stock & increment sales
+        // -------------------- DEDUCT STOCK & INCREMENT SALES WITH LOGS --------------------
+        console.log("🔹 Starting stock deduction & sales increment...");
         for (const item of order.products) {
-            const product = await Product.findById(item.productId); // ✅ CORRECT
+            const product = await Product.findById(item.productId);
             if (!product) continue;
+
+            console.log(`\n📦 Product: ${product.name} (ID: ${product._id})`);
+            console.log(`- Quantity before: ${product.quantity}, Sales before: ${product.sales || 0}`);
 
             if (item.selectedVariant?.sku && product.variants?.length) {
                 const idx = product.variants.findIndex(v => v.sku === item.selectedVariant.sku);
-                if (idx !== -1) {
-                    const variant = product.variants[idx];
-                    if (variant.stock < item.quantity) {
-                        return res.status(400).json({
-                            step: "STOCK",
-                            success: false,
-                            message: `Insufficient stock for ${product.name} - ${variant.shadeName}`,
-                        });
-                    }
-                    variant.stock -= item.quantity;
-                    variant.sales = (variant.sales || 0) + item.quantity;
+                if (idx === -1) {
+                    console.log(`❌ Variant SKU not found for ${product.name}`);
+                    return res.status(400).json({ step: "STOCK", success: false, message: `❌ Variant SKU not found for ${product.name}` });
                 }
+
+                const variant = product.variants[idx];
+                console.log(`- Variant SKU: ${variant.sku}, Shade: ${variant.shadeName}`);
+                console.log(`- Variant stock before: ${variant.stock}, sales before: ${variant.sales || 0}`);
+
+                if ((variant.stock ?? 0) < item.quantity) {
+                    console.log(`❌ Insufficient stock for ${product.name} - ${variant.shadeName}`);
+                    return res.status(400).json({ step: "STOCK", success: false, message: `Insufficient stock for ${product.name} - ${variant.shadeName}` });
+                }
+
+                // Deduct stock & increment sales
+                variant.stock -= item.quantity;
+                variant.sales = (variant.sales || 0) + item.quantity;
+
+                // Update total product quantity as sum of all variant stocks
+                product.quantity = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
+
+                console.log(`- Variant stock after: ${variant.stock}, sales after: ${variant.sales}`);
+                console.log(`- Total product quantity after: ${product.quantity}`);
             } else {
-                if (product.quantity < item.quantity) {
-                    return res.status(400).json({
-                        step: "STOCK",
-                        success: false,
-                        message: `Insufficient stock for ${product.name}`,
-                    });
+                // No variant
+                if ((product.quantity ?? 0) < item.quantity) {
+                    console.log(`❌ Insufficient stock for ${product.name}`);
+                    return res.status(400).json({ step: "STOCK", success: false, message: `Insufficient stock for ${product.name}` });
                 }
+
                 product.quantity -= item.quantity;
                 product.sales = (product.sales || 0) + item.quantity;
+                console.log(`- Quantity after: ${product.quantity}, Sales after: ${product.sales}`);
             }
 
             // Update product status
-            if (product.variants?.length) {
-                const totalStock = product.variants.reduce((s, v) => s + (v.stock || 0), 0);
-                product.quantity = totalStock;
-                product.status = totalStock <= 0 ? "Out of stock" : totalStock < product.thresholdValue ? "Low stock" : "In-stock";
-            } else {
-                product.status = product.quantity <= 0 ? "Out of stock" : product.quantity < product.thresholdValue ? "Low stock" : "In-stock";
-            }
+            product.status = product.quantity <= 0 ? "Out of stock" :
+                product.quantity < product.thresholdValue ? "Low stock" : "In-stock";
+            console.log(`- Updated product status: ${product.status}`);
 
             await product.save();
         }
+        console.log("🔹 Stock deduction & sales increment completed.\n");
 
-        // Update order
+        // -------------------- UPDATE ORDER --------------------
         order.paid = true;
         order.paymentStatus = "success";
         order.paymentMethod = rpPayment.method || "Razorpay";
@@ -3151,7 +3113,6 @@ export const verifyRazorpayPayment = async (req, res) => {
         order.orderStatus = "Processing";
         if (shippingAddress) order.shippingAddress = shippingAddress;
 
-        // Record payment
         await Payment.create({
             order: order._id,
             method: rpPayment.method,
@@ -3164,61 +3125,21 @@ export const verifyRazorpayPayment = async (req, res) => {
             isActive: true,
         });
 
-        // Clear user cart
         const user = await User.findById(order.user._id);
-        if (user) {
-            user.cart = [];
-            await user.save();
-        }
+        if (user) { user.cart = []; await user.save(); }
 
-        // Shiprocket integration
-        try {
-            const shiprocketRes = await createShipment(order);
-            order.shipment = shiprocketRes.shipmentDetails;
-        } catch (err) {
-            console.error("⚠️ Shiprocket Error:", err.message);
-        }
-
-        // Tracking
-        order.trackingHistory.push(
-            { status: "Payment Successful", timestamp: new Date(), location: "Online - Razorpay" },
-            { status: "Processing", timestamp: new Date(), location: "Store" }
-        );
+        try { const shiprocketRes = await createShipment(order); order.shipment = shiprocketRes.shipmentDetails; } catch (err) { console.error("⚠️ Shiprocket Error:", err.message); }
+        order.trackingHistory.push({ status: "Payment Successful", timestamp: new Date(), location: "Online - Razorpay" }, { status: "Processing", timestamp: new Date(), location: "Store" });
 
         await order.save();
 
-        // Invoice
-        try {
-            const { pdfBuffer, pdfUrl } = await generateInvoice(order, order.user);
-            order.invoice = { number: `INV-${order._id}`, generatedAt: new Date(), pdfUrl };
-            await order.save();
-
-            await sendEmail(
-                order.user.email,
-                "🧾 Your Invoice",
-                `<p>Thank you for your purchase, ${order.user.name}!</p>`,
-                [{ name: "invoice.pdf", content: pdfBuffer, mime_type: "application/pdf" }]
-            );
-        } catch (err) {
-            console.warn("⚠️ Invoice generation skipped:", err.message);
-        }
-
-        res.status(200).json({
-            step: "COMPLETE",
-            success: true,
-            message: "✅ Payment verified & order processed",
-            order,
-        });
+        res.status(200).json({ step: "COMPLETE", success: true, message: "✅ Payment verified & order processed", order });
     } catch (err) {
         console.error("🔥 verifyRazorpayPayment Error:", err);
-        res.status(500).json({
-            step: "FATAL",
-            success: false,
-            message: "Unexpected server error during payment verification",
-            error: err.message,
-        });
+        res.status(500).json({ step: "FATAL", success: false, message: "Unexpected server error during payment verification", error: err.message });
     }
 };
+
 
 
 export const payForOrder = async (req, res) => {
