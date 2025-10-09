@@ -29,33 +29,214 @@ const razorpay = new Razorpay({
     key_secret: process.env.RAZORPAY_KEY_SECRET
 });
 
+// export const createRazorpayOrder = async (req, res) => {
+//     try {
+//         const { orderId } = req.body;
+
+//         if (!orderId) {
+//             return res.status(400).json({ message: "❌ orderId is required" });
+//         }
+
+//         const order = await Order.findById(orderId).populate("user");
+//         if (!order) {
+//             return res.status(404).json({ message: "❌ Order not found" });
+//         }
+
+//         // 🚫 Prevent duplicate payment
+//         if (order.paid) {
+//             return res.status(400).json({ message: "⚠️ Order is already paid" });
+//         }
+
+//         // ✅ Ensure final payable amount is already saved in DB
+//         if (!order.amount || order.amount <= 0) {
+//             return res.status(400).json({ message: "❌ Invalid order amount" });
+//         }
+
+//         // Convert to paise
+//         const amountInPaise = Math.round(order.amount * 100);
+
+//         // ✅ Create Razorpay order
+//         const razorpayOrder = await razorpay.orders.create({
+//             amount: amountInPaise,
+//             currency: "INR",
+//             receipt: order._id.toString(),
+//             payment_capture: 1,
+//             notes: {
+//                 orderId: order._id.toString(),
+//                 customer: order.user?.name || "Guest User",
+//             },
+//         });
+
+//         // ✅ Ensure seller split exists
+//         await splitOrderForPersistence(order);
+
+//         // 🟢 NEW seller tracking (safe, non-blocking)
+//         try {
+//             const updatedProducts = [];
+//             for (const p of order.products) {
+//                 if (!p.seller) {
+//                     // fallback: fetch product’s seller
+//                     const prod = await Product.findById(p.productId).select("seller").lean();
+//                     if (prod?.seller) {
+//                         p.seller = prod.seller;
+//                         updatedProducts.push(p.productId.toString());
+//                     } else {
+//                         console.warn(
+//                             `⚠️ Seller missing for product ${p.productId} in order ${order._id}`
+//                         );
+//                     }
+//                 }
+//             }
+//             if (updatedProducts.length) {
+//                 console.log(`🟢 Backfilled seller for products:`, updatedProducts);
+//             }
+//         } catch (sellerErr) {
+//             console.warn("⚠️ Seller backfill skipped:", sellerErr.message);
+//         }
+
+//         // 🔄 Update order
+//         order.razorpayOrderId = razorpayOrder.id;
+//         order.paymentStatus = "pending";
+//         order.orderStatus = "Awaiting Payment";
+
+//         // 📌 Tracking history
+//         if (!order.trackingHistory || order.trackingHistory.length === 0) {
+//             order.trackingHistory = [
+//                 { status: "Order Placed", timestamp: new Date(), location: "Store" },
+//                 { status: "Awaiting Payment", timestamp: new Date() },
+//             ];
+//         } else {
+//             order.trackingHistory.push({
+//                 status: "Awaiting Payment",
+//                 timestamp: new Date(),
+//             });
+//         }
+
+//         // 🎁 Optional: E-Card generation
+//         try {
+//             const { occasion, festival } = await determineOccasions({
+//                 userId: order.user._id,
+//                 userDoc: order.user,
+//             });
+
+//             const message = craftMessage({
+//                 occasion,
+//                 user: order.user,
+//                 festival,
+//             });
+
+//             if (message) {
+//                 const pdfBuffer = await buildEcardPdf({
+//                     title: "A Special Note from Joyory 🎉",
+//                     name: order.user?.name || "Customer",
+//                     message,
+//                 });
+
+//                 // Upload PDF to Cloudinary
+//                 const uploadResult = await new Promise((resolve, reject) => {
+//                     const uploadStream = cloudinary.uploader.upload_stream(
+//                         {
+//                             folder: "ecards",
+//                             resource_type: "raw",
+//                             public_id: `ecard-${order._id}`,
+//                             access_mode: "public",
+//                         },
+//                         (error, result) => {
+//                             if (error) return reject(error);
+//                             resolve(result);
+//                         }
+//                     );
+//                     uploadStream.end(pdfBuffer);
+//                 });
+
+//                 // Send email with PDF
+//                 await sendEmail(
+//                     order.user.email,
+//                     "🎁 Your Joyory E-Card",
+//                     `<p>${message}</p><p>We’ve also attached your special card as a PDF.</p>`,
+//                     [
+//                         {
+//                             name: "ecard.pdf",
+//                             content: pdfBuffer,
+//                             mime_type: "application/pdf",
+//                         },
+//                     ]
+//                 );
+
+//                 // Save e-card reference in order
+//                 order.ecard = {
+//                     occasion,
+//                     message,
+//                     emailSentAt: new Date(),
+//                     pdfUrl: uploadResult?.secure_url || null,
+//                 };
+//             }
+//         } catch (ecardErr) {
+//             console.warn("⚠️ E-Card skipped:", ecardErr.message);
+//         }
+
+//         await order.save();
+
+//         return res.status(200).json({
+//             success: true,
+//             message: "✅ Razorpay order created (E-card processed if applicable)",
+//             razorpayOrderId: razorpayOrder.id,
+//             amount: order.amount, // ✅ final discounted total
+//             currency: "INR",
+//             orderId: order._id,
+//         });
+//     } catch (err) {
+//         console.error("🔥 Error creating Razorpay order:", err);
+//         res.status(500).json({
+//             success: false,
+//             message: "Failed to create Razorpay order",
+//             error: err.message,
+//         });
+//     }
+// };
 export const createRazorpayOrder = async (req, res) => {
     try {
         const { orderId } = req.body;
 
+        // 🛑 Step 1: Validate orderId
         if (!orderId) {
-            return res.status(400).json({ message: "❌ orderId is required" });
+            return res.status(400).json({ success: false, message: "❌ orderId is required." });
         }
 
+        // 🧾 Step 2: Fetch order from DB
         const order = await Order.findById(orderId).populate("user");
         if (!order) {
-            return res.status(404).json({ message: "❌ Order not found" });
+            return res.status(404).json({ success: false, message: "❌ Order not found." });
         }
 
-        // 🚫 Prevent duplicate payment
+        // 🚫 Step 3: Prevent duplicate payment
         if (order.paid) {
-            return res.status(400).json({ message: "⚠️ Order is already paid" });
+            return res.status(400).json({ 
+                success: false, 
+                message: "⚠️ This order has already been paid. Please do not retry payment." 
+            });
         }
 
-        // ✅ Ensure final payable amount is already saved in DB
+        // 🛡️ Step 4: Prevent duplicate Razorpay order creation
+        if (order.razorpayOrderId) {
+            return res.status(200).json({
+                success: true,
+                message: "🟡 Razorpay order already exists for this order.",
+                razorpayOrderId: order.razorpayOrderId,
+                amount: order.amount,
+                currency: "INR",
+                orderId: order._id,
+            });
+        }
+
+        // 💰 Step 5: Check amount
         if (!order.amount || order.amount <= 0) {
-            return res.status(400).json({ message: "❌ Invalid order amount" });
+            return res.status(400).json({ success: false, message: "❌ Invalid order amount." });
         }
 
-        // Convert to paise
         const amountInPaise = Math.round(order.amount * 100);
 
-        // ✅ Create Razorpay order
+        // 🧾 Step 6: Create Razorpay order
         const razorpayOrder = await razorpay.orders.create({
             amount: amountInPaise,
             currency: "INR",
@@ -67,39 +248,36 @@ export const createRazorpayOrder = async (req, res) => {
             },
         });
 
-        // ✅ Ensure seller split exists
+        // 🧾 Step 7: Ensure seller split exists
         await splitOrderForPersistence(order);
 
-        // 🟢 NEW seller tracking (safe, non-blocking)
+        // 🧾 Step 8: Seller backfill (non-blocking)
         try {
             const updatedProducts = [];
             for (const p of order.products) {
                 if (!p.seller) {
-                    // fallback: fetch product’s seller
                     const prod = await Product.findById(p.productId).select("seller").lean();
                     if (prod?.seller) {
                         p.seller = prod.seller;
                         updatedProducts.push(p.productId.toString());
                     } else {
-                        console.warn(
-                            `⚠️ Seller missing for product ${p.productId} in order ${order._id}`
-                        );
+                        console.warn(`⚠️ Seller missing for product ${p.productId} in order ${order._id}`);
                     }
                 }
             }
             if (updatedProducts.length) {
-                console.log(`🟢 Backfilled seller for products:`, updatedProducts);
+                console.log(`🟢 Seller backfilled for products:`, updatedProducts);
             }
         } catch (sellerErr) {
             console.warn("⚠️ Seller backfill skipped:", sellerErr.message);
         }
 
-        // 🔄 Update order
+        // 🧾 Step 9: Update order with Razorpay ID
         order.razorpayOrderId = razorpayOrder.id;
         order.paymentStatus = "pending";
         order.orderStatus = "Awaiting Payment";
 
-        // 📌 Tracking history
+        // 🚚 Step 10: Tracking history
         if (!order.trackingHistory || order.trackingHistory.length === 0) {
             order.trackingHistory = [
                 { status: "Order Placed", timestamp: new Date(), location: "Store" },
@@ -112,7 +290,7 @@ export const createRazorpayOrder = async (req, res) => {
             });
         }
 
-        // 🎁 Optional: E-Card generation
+        // 🪄 Step 11: Optional — Generate and send E-card
         try {
             const { occasion, festival } = await determineOccasions({
                 userId: order.user._id,
@@ -149,7 +327,7 @@ export const createRazorpayOrder = async (req, res) => {
                     uploadStream.end(pdfBuffer);
                 });
 
-                // Send email with PDF
+                // Send email with E-card
                 await sendEmail(
                     order.user.email,
                     "🎁 Your Joyory E-Card",
@@ -163,7 +341,6 @@ export const createRazorpayOrder = async (req, res) => {
                     ]
                 );
 
-                // Save e-card reference in order
                 order.ecard = {
                     occasion,
                     message,
@@ -175,25 +352,28 @@ export const createRazorpayOrder = async (req, res) => {
             console.warn("⚠️ E-Card skipped:", ecardErr.message);
         }
 
+        // 💾 Step 12: Save order
         await order.save();
 
         return res.status(200).json({
             success: true,
-            message: "✅ Razorpay order created (E-card processed if applicable)",
+            message: "✅ Razorpay order created successfully.",
             razorpayOrderId: razorpayOrder.id,
-            amount: order.amount, // ✅ final discounted total
+            amount: order.amount,
             currency: "INR",
             orderId: order._id,
         });
+
     } catch (err) {
         console.error("🔥 Error creating Razorpay order:", err);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
-            message: "Failed to create Razorpay order",
+            message: "❌ Something went wrong while creating Razorpay order.",
             error: err.message,
         });
     }
 };
+
 
 export const verifyRazorpayPayment = async (req, res) => {
     try {
