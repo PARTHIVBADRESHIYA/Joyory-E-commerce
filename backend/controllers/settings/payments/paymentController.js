@@ -3028,9 +3028,9 @@ export const createRazorpayOrder = async (req, res) => {
 
 // -------------------- VERIFY RAZORPAY PAYMENT (FIXED PERSISTENCE) --------------------
 
+// production-ready verifyRazorpayPayment (variant-aware, transaction-safe)
 export const verifyRazorpayPayment = async (req, res) => {
     const session = await mongoose.startSession();
-
     try {
         const { orderId, razorpay_order_id, razorpay_payment_id, razorpay_signature, shippingAddress } = req.body;
 
@@ -3038,12 +3038,12 @@ export const verifyRazorpayPayment = async (req, res) => {
             return res.status(400).json({ step: "VALIDATION", success: false, message: "❌ Missing required fields" });
         }
 
-        // Fetch order (no DB changes yet)
+        // initial fetch (read-only)
         const order = await Order.findById(orderId).populate("user").populate("products.productId");
         if (!order) return res.status(404).json({ step: "ORDER_FETCH", success: false, message: "Order not found" });
         if (order.paid) return res.status(200).json({ step: "IDEMPOTENT", success: true, message: "✅ Order already paid", order });
 
-        // Razorpay signature verification
+        // verify signature
         const expectedSignature = crypto.createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
             .update(`${razorpay_order_id}|${razorpay_payment_id}`)
             .digest("hex");
@@ -3052,69 +3052,79 @@ export const verifyRazorpayPayment = async (req, res) => {
             return res.status(400).json({ step: "SIGNATURE", success: false, message: "❌ Invalid signature" });
         }
 
-        // Fetch payment from Razorpay
+        // fetch payment from Razorpay
         const rpPayment = await razorpay.payments.fetch(razorpay_payment_id);
         if (rpPayment.status !== "captured") {
             return res.status(400).json({ step: "PAYMENT_STATUS", success: false, message: `Payment not captured (status: ${rpPayment.status})` });
         }
-        // rpPayment.amount is in paisa; order.amount assumed to be in rupees
         if ((rpPayment.amount / 100) !== Number(order.amount)) {
             return res.status(400).json({ step: "AMOUNT_CHECK", success: false, message: "❌ Amount mismatch" });
         }
 
         console.log("🔹 Starting DB transaction for stock deduction & order persistence...");
 
-        let productIdsToRecalc = new Set();
+        const productIdsToRecalc = new Set();
 
-        // Transactional work
+        // transaction block
         await session.withTransaction(async () => {
-            // Re-fetch the order inside the session with a 'for update' style read
+            // re-fetch order inside session to ensure consistency
             const sessionOrder = await Order.findById(orderId).session(session).populate("user").populate("products.productId");
             if (!sessionOrder) throw new Error("Order vanished during transaction");
 
-            // For each ordered item do an atomic update on Product
+            // iterate items and perform atomic updates
             for (const item of sessionOrder.products) {
-                const productId = item.productId instanceof mongoose.Types.ObjectId ? item.productId : item.productId._id;
+                const rawProd = item.productId;
+                const productId = (rawProd && rawProd._id) ? rawProd._id : rawProd;
                 const qty = Number(item.quantity || 0);
                 if (qty <= 0) continue;
 
                 productIdsToRecalc.add(String(productId));
 
                 if (item.selectedVariant?.sku) {
+                    // ---- VARIANT PATH ----
                     const sku = item.selectedVariant.sku;
+                    console.log(`Attempting variant update: product=${productId}, sku=${sku}, qty=${qty}`);
 
-                    // Atomic update on variant (do NOT touch top-level quantity here)
                     const updateRes = await Product.updateOne(
-                        { _id: productId, "variants.sku": sku, "variants.stock": { $gte: qty } }, // ensure enough stock
+                        { _id: productId, "variants.sku": sku, "variants.stock": { $gte: qty } },
                         {
                             $inc: {
                                 "variants.$.stock": -qty,
                                 "variants.$.sales": qty,
-                                sales: qty // increment total product sales counter
+                                sales: qty
                             }
                         },
                         { session }
                     );
 
-                    if (!updateRes || updateRes.modifiedCount === 0) {
-                        throw { step: "STOCK", type: "INSUFFICIENT", message: `Insufficient stock or SKU missing for product ${productId} (sku: ${sku})` };
+                    const modified = (updateRes && (updateRes.modifiedCount ?? updateRes.nModified ?? 0));
+                    console.log(`Variant update result for sku=${sku}: matched=${updateRes.matchedCount ?? updateRes.n ?? 0}, modified=${modified}`);
+
+                    if (!modified) {
+                        // Explicit, actionable error for the caller
+                        throw { step: "STOCK", type: "INSUFFICIENT", message: `Insufficient variant stock or SKU missing for product ${productId} (sku: ${sku})` };
                     }
 
                 } else {
-                    // Simple product (non-variant)
+                    // ---- SIMPLE PRODUCT PATH ----
+                    console.log(`Attempting simple product update: product=${productId}, qty=${qty}`);
+
                     const updateRes = await Product.updateOne(
-                        { _id: productId, $or: [{ quantity: { $exists: true, $gte: qty } }, { quantity: { $exists: false } }] },
+                        { _id: productId, quantity: { $gte: qty } },
                         { $inc: { quantity: -qty, sales: qty } },
                         { session }
                     );
 
-                    if (!updateRes || updateRes.modifiedCount === 0) {
+                    const modified = (updateRes && (updateRes.modifiedCount ?? updateRes.nModified ?? 0));
+                    console.log(`Simple product update result: matched=${updateRes.matchedCount ?? updateRes.n ?? 0}, modified=${modified}`);
+
+                    if (!modified) {
                         throw { step: "STOCK", type: "INSUFFICIENT", message: `Insufficient stock for product ${productId}` };
                     }
                 }
-            } // end for each product
+            } // end for items
 
-            // Update order fields (inside transaction)
+            // ---- update order fields inside transaction ----
             sessionOrder.paid = true;
             sessionOrder.paymentStatus = "success";
             sessionOrder.paymentMethod = rpPayment.method || "Razorpay";
@@ -3122,7 +3132,7 @@ export const verifyRazorpayPayment = async (req, res) => {
             sessionOrder.orderStatus = "Processing";
             if (shippingAddress) sessionOrder.shippingAddress = shippingAddress;
 
-            // Create Payment record inside transaction
+            // create Payment record in same transaction
             await Payment.create([{
                 order: sessionOrder._id,
                 method: rpPayment.method,
@@ -3135,69 +3145,70 @@ export const verifyRazorpayPayment = async (req, res) => {
                 isActive: true,
             }], { session });
 
-            // Clear user's cart inside transaction
+            // clear user's cart inside tx
             if (sessionOrder.user && sessionOrder.user._id) {
                 await User.updateOne({ _id: sessionOrder.user._id }, { $set: { cart: [] } }, { session });
             }
 
-            // Save the order inside the transaction
+            // save the order inside tx
             await sessionOrder.save({ session });
 
-            // Recalculate and update product.status and quantity for affected products (inside transaction)
-            const changedProductIds = Array.from(productIdsToRecalc).map(id => new mongoose.Types.ObjectId(id));
-            const products = await Product.find({ _id: { $in: changedProductIds } }).session(session);
+            // ---- recalc total quantity and status for affected products ----
+            if (productIdsToRecalc.size > 0) {
+                const changedProductIds = Array.from(productIdsToRecalc).map(id => new mongoose.Types.ObjectId(id));
+                const products = await Product.find({ _id: { $in: changedProductIds } }).session(session);
 
-            // Prepare bulk operations
-            const bulkOps = products.map(prod => {
-                // Compute total quantity dynamically from variants if they exist
-                let totalQty = 0;
-                if (Array.isArray(prod.variants) && prod.variants.length > 0) {
-                    totalQty = prod.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
-                } else {
-                    totalQty = Number(prod.quantity || 0);
-                }
+                const bulkOps = products.map(prod => {
+                    // totalQty derived from variants if available; otherwise use product.quantity
+                    let totalQty = 0;
+                    if (Array.isArray(prod.variants) && prod.variants.length > 0) {
+                        totalQty = prod.variants.reduce((s, v) => s + (Number(v.stock) || 0), 0);
+                    } else {
+                        totalQty = Number(prod.quantity || 0);
+                    }
 
-                let newStatus = "In-stock";
-                if (totalQty <= 0) newStatus = "Out of stock";
-                else if (prod.thresholdValue != null && totalQty < prod.thresholdValue) newStatus = "Low stock";
+                    // compute status
+                    let newStatus = "In-stock";
+                    if (totalQty <= 0) newStatus = "Out of stock";
+                    else if (prod.thresholdValue != null && totalQty < prod.thresholdValue) newStatus = "Low stock";
 
-                // Clamp variant stock (defensive)
-                if (Array.isArray(prod.variants)) {
-                    prod.variants = prod.variants.map(v => {
-                        if ((v.stock ?? 0) < 0) v.stock = 0;
-                        return v;
-                    });
-                }
+                    // defensive clamp variants' stock to >=0
+                    if (Array.isArray(prod.variants)) {
+                        prod.variants = prod.variants.map(v => {
+                            if ((v.stock ?? 0) < 0) v.stock = 0;
+                            return v;
+                        });
+                    }
 
-                return {
-                    updateOne: {
-                        filter: { _id: prod._id },
-                        update: {
-                            $set: {
-                                status: newStatus,
-                                quantity: totalQty,
-                                variants: prod.variants
+                    return {
+                        updateOne: {
+                            filter: { _id: prod._id },
+                            update: {
+                                $set: {
+                                    status: newStatus,
+                                    quantity: totalQty,
+                                    variants: prod.variants
+                                }
                             }
                         }
-                    }
-                };
-            });
+                    };
+                });
 
-            if (bulkOps.length) {
-                await Product.bulkWrite(bulkOps, { session });
+                if (bulkOps.length) {
+                    const bwRes = await Product.bulkWrite(bulkOps, { session });
+                    console.log("BulkWrite result:", bwRes);
+                }
             }
 
-            // Transaction function success -> commit will be attempted after this block
+            // finishing transaction block (commit attempted automatically after success)
         }); // end withTransaction
 
-        session.endSession();
         console.log("🔹 DB transaction committed successfully.");
 
-        // After successful DB transaction, do external shipment creation (do NOT include external calls in transaction)
-        let finalOrder = await Order.findById(orderId).populate("user").populate("products.productId");
-
+        // ---- post-commit: external shipment (do not include external calls inside tx) ----
+        const finalOrder = await Order.findById(orderId).populate("user").populate("products.productId");
         try {
-            const shiprocketRes = await createShipment(finalOrder); // external call
+            const shiprocketRes = await createShipment(finalOrder);
             if (shiprocketRes?.shipmentDetails) {
                 finalOrder.shipment = shiprocketRes.shipmentDetails;
                 finalOrder.trackingHistory.push({ status: "Shipment Created", timestamp: new Date(), location: "Shiprocket" });
@@ -3206,19 +3217,18 @@ export const verifyRazorpayPayment = async (req, res) => {
                 console.warn("⚠️ Shiprocket responded without shipmentDetails", shiprocketRes);
             }
         } catch (shipErr) {
-            // Shipment failed — log it but do not roll back DB transaction (already committed)
             console.error("⚠️ Shiprocket Error (post-commit):", shipErr?.message || shipErr);
-            // Add a trackingHistory note so admins can see shipment creation failed
+            // record failure note
             try {
                 await Order.updateOne({ _id: finalOrder._id }, {
                     $push: { trackingHistory: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } }
                 });
             } catch (err) {
-                console.error("⚠️ Failed to record shipment failure in order:", err);
+                console.error("⚠️ Failed to record shipment failure:", err);
             }
         }
 
-        // Push payment/tracking history entries for order (safe to do after commit)
+        // push payment/tracking history
         try {
             await Order.updateOne({ _id: finalOrder._id }, {
                 $push: {
@@ -3232,23 +3242,24 @@ export const verifyRazorpayPayment = async (req, res) => {
             console.error("⚠️ Failed to push tracking history after commit:", err);
         }
 
-        // Return updated order (refetch for latest)
+        // return final order
         const refreshedOrder = await Order.findById(orderId).populate("user").populate("products.productId");
-
         return res.status(200).json({ step: "COMPLETE", success: true, message: "✅ Payment verified & order processed", order: refreshedOrder });
 
     } catch (err) {
-        // Transaction will be aborted automatically on thrown error in session.withTransaction
-        session.endSession();
-
-        // Distinguish stock errors we threw intentionally
+        // If we threw our stock error object, send friendly message
         if (err && err.step === "STOCK") {
             console.error("🔴 Stock error during payment verification:", err.message || err);
+            await session.endSession();
             return res.status(400).json({ step: "STOCK", success: false, message: err.message || "Insufficient stock for one or more items" });
         }
 
         console.error("🔥 verifyRazorpayPayment Error:", err);
+        await session.endSession();
         return res.status(500).json({ step: "FATAL", success: false, message: "Unexpected server error during payment verification", error: (err && err.message) || err });
+    } finally {
+        // ensure session is ended in all cases
+        try { await session.endSession(); } catch (e) { /* ignore */ }
     }
 };
 
