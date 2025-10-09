@@ -668,6 +668,9 @@ export const fetchPromotionProductsHelper = async (params) => {
 
 // -------------------- CALCULATE VARIANT PRICES --------------------
 export const calculateVariantPrices = (variants = [], product, promotions = []) => {
+    // Ensure promotions is always an array
+    promotions = Array.isArray(promotions) ? promotions : [];
+
     return (variants.length ? variants : [{
         sku: product._id.toString(),
         shadeName: product.variant || "",
@@ -695,8 +698,13 @@ export const calculateVariantPrices = (variants = [], product, promotions = []) 
 
         let status = "inStock";
         let message = "In-stock";
-        if (v.stock <= 0) { status = "outOfStock"; message = "No stock available"; }
-        else if (v.thresholdValue && v.stock <= v.thresholdValue) { status = "lowStock"; message = `Few left (${v.stock})`; }
+        if (v.stock <= 0) {
+            status = "outOfStock";
+            message = "No stock available";
+        } else if (v.thresholdValue && v.stock <= v.thresholdValue) {
+            status = "lowStock";
+            message = `Few left (${v.stock})`;
+        }
 
         const discountPercent = basePrice > 0 ? Math.floor(((basePrice - finalDiscountedPrice) / basePrice) * 100) : 0;
 

@@ -3026,7 +3026,7 @@ export const createRazorpayOrder = async (req, res) => {
     }
 };
 
-// -------------------- VERIFY RAZORPAY PAYMENT (WITH DETAILED LOGGING) --------------------
+// -------------------- VERIFY RAZORPAY PAYMENT (FIXED PERSISTENCE) --------------------
 export const verifyRazorpayPayment = async (req, res) => {
     try {
         const { orderId, razorpay_order_id, razorpay_payment_id, razorpay_signature, shippingAddress } = req.body;
@@ -3039,19 +3039,23 @@ export const verifyRazorpayPayment = async (req, res) => {
         if (!order) return res.status(404).json({ step: "ORDER_FETCH", success: false, message: "Order not found" });
         if (order.paid) return res.status(200).json({ step: "IDEMPOTENT", success: true, message: "✅ Order already paid", order });
 
-        // Razorpay signature check
+        // Razorpay signature verification
         const expectedSignature = crypto.createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
             .update(`${razorpay_order_id}|${razorpay_payment_id}`)
             .digest("hex");
-        if (expectedSignature !== razorpay_signature) return res.status(400).json({ step: "SIGNATURE", success: false, message: "❌ Invalid signature" });
+
+        if (expectedSignature !== razorpay_signature) {
+            return res.status(400).json({ step: "SIGNATURE", success: false, message: "❌ Invalid signature" });
+        }
 
         // Fetch payment from Razorpay
         const rpPayment = await razorpay.payments.fetch(razorpay_payment_id);
         if (rpPayment.status !== "captured") return res.status(400).json({ step: "PAYMENT_STATUS", success: false, message: `Payment not captured (status: ${rpPayment.status})` });
         if (rpPayment.amount / 100 !== order.amount) return res.status(400).json({ step: "AMOUNT_CHECK", success: false, message: "❌ Amount mismatch" });
 
-        // -------------------- DEDUCT STOCK & INCREMENT SALES WITH LOGS --------------------
+        // -------------------- DEDUCT STOCK & INCREMENT SALES --------------------
         console.log("🔹 Starting stock deduction & sales increment...");
+
         for (const item of order.products) {
             const product = await Product.findById(item.productId);
             if (!product) continue;
@@ -3068,7 +3072,7 @@ export const verifyRazorpayPayment = async (req, res) => {
 
                 const variant = product.variants[idx];
                 console.log(`- Variant SKU: ${variant.sku}, Shade: ${variant.shadeName}`);
-                console.log(`- Variant stock before: ${variant.stock}, sales before: ${variant.sales || 0}`);
+                console.log(`- Variant stock before: ${variant.stock}, Sales before: ${variant.sales || 0}`);
 
                 if ((variant.stock ?? 0) < item.quantity) {
                     console.log(`❌ Insufficient stock for ${product.name} - ${variant.shadeName}`);
@@ -3079,13 +3083,16 @@ export const verifyRazorpayPayment = async (req, res) => {
                 variant.stock -= item.quantity;
                 variant.sales = (variant.sales || 0) + item.quantity;
 
-                // Update total product quantity as sum of all variant stocks
+                // ⚡ Mark nested subdocument as modified
+                product.markModified(`variants.${idx}`);
+
+                // Update total product quantity
                 product.quantity = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
 
-                console.log(`- Variant stock after: ${variant.stock}, sales after: ${variant.sales}`);
+                console.log(`- Variant stock after: ${variant.stock}, Sales after: ${variant.sales}`);
                 console.log(`- Total product quantity after: ${product.quantity}`);
             } else {
-                // No variant
+                // Simple product
                 if ((product.quantity ?? 0) < item.quantity) {
                     console.log(`❌ Insufficient stock for ${product.name}`);
                     return res.status(400).json({ step: "STOCK", success: false, message: `Insufficient stock for ${product.name}` });
@@ -3093,6 +3100,7 @@ export const verifyRazorpayPayment = async (req, res) => {
 
                 product.quantity -= item.quantity;
                 product.sales = (product.sales || 0) + item.quantity;
+
                 console.log(`- Quantity after: ${product.quantity}, Sales after: ${product.sales}`);
             }
 
@@ -3103,6 +3111,7 @@ export const verifyRazorpayPayment = async (req, res) => {
 
             await product.save();
         }
+
         console.log("🔹 Stock deduction & sales increment completed.\n");
 
         // -------------------- UPDATE ORDER --------------------
@@ -3128,17 +3137,29 @@ export const verifyRazorpayPayment = async (req, res) => {
         const user = await User.findById(order.user._id);
         if (user) { user.cart = []; await user.save(); }
 
-        try { const shiprocketRes = await createShipment(order); order.shipment = shiprocketRes.shipmentDetails; } catch (err) { console.error("⚠️ Shiprocket Error:", err.message); }
-        order.trackingHistory.push({ status: "Payment Successful", timestamp: new Date(), location: "Online - Razorpay" }, { status: "Processing", timestamp: new Date(), location: "Store" });
+        // Shiprocket + tracking
+        try {
+            const shiprocketRes = await createShipment(order);
+            order.shipment = shiprocketRes.shipmentDetails;
+        } catch (err) {
+            console.error("⚠️ Shiprocket Error:", err.message);
+        }
+
+        order.trackingHistory.push(
+            { status: "Payment Successful", timestamp: new Date(), location: "Online - Razorpay" },
+            { status: "Processing", timestamp: new Date(), location: "Store" }
+        );
 
         await order.save();
 
         res.status(200).json({ step: "COMPLETE", success: true, message: "✅ Payment verified & order processed", order });
+
     } catch (err) {
         console.error("🔥 verifyRazorpayPayment Error:", err);
         res.status(500).json({ step: "FATAL", success: false, message: "Unexpected server error during payment verification", error: err.message });
     }
 };
+
 
 
 
