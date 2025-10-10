@@ -802,9 +802,17 @@ export const getProductsByCategory = async (req, res) => {
                 } else if (enriched.variant && (!enriched.variants || !enriched.variants.length)) {
                     const legacyVariant = {
                         sku: enriched.sku ?? `${enriched._id}-default`,
-                        name: enriched.variant,
+                        shadeName: enriched.variant || "Default",
+                        hex: null,
+                        images: normalizeImages(enriched.images || []),
                         stock: enriched.quantity ?? 0,
+                        sales: enriched.sales ?? 0,
+                        thresholdValue: 0,
+                        isActive: true,
+                        toneKeys: [],
+                        undertoneKeys: [],
                         originalPrice: enriched.mrp ?? enriched.price ?? 0,
+                        discountedPrice: enriched.price ?? 0,
                         displayPrice: enriched.price ?? 0,
                         discountAmount:
                             enriched.mrp && enriched.price ? enriched.mrp - enriched.price : 0,
@@ -812,10 +820,11 @@ export const getProductsByCategory = async (req, res) => {
                             enriched.mrp && enriched.mrp > enriched.price
                                 ? Math.round(((enriched.mrp - enriched.price) / enriched.mrp) * 100)
                                 : 0,
+                        createdAt: new Date(),
                         status: enriched.quantity > 0 ? "inStock" : "outOfStock",
-                        message: enriched.quantity > 0 ? "In-stock" : "No stock available",
-                        images: normalizeImages(enriched.images || [])
+                        message: enriched.quantity > 0 ? "In-stock" : "No stock available"
                     };
+
                     normalizedVariants = calculateVariantPrices([legacyVariant], enriched, promotions);
                 } else {
                     normalizedVariants = calculateVariantPrices([getPseudoVariant(enriched)], enriched, promotions);
@@ -978,9 +987,17 @@ export const getSingleProduct = async (req, res) => {
         else if (enriched.variant && (!enriched.variants || !enriched.variants.length)) {
             const legacyVariant = {
                 sku: enriched.sku ?? `${enriched._id}-default`,
-                name: enriched.variant,
+                shadeName: enriched.variant || "Default",
+                hex: null,
+                images: normalizeImages(enriched.images || []),
                 stock: enriched.quantity ?? 0,
+                sales: enriched.sales ?? 0,
+                thresholdValue: 0,
+                isActive: true,
+                toneKeys: [],
+                undertoneKeys: [],
                 originalPrice: enriched.mrp ?? enriched.price ?? 0,
+                discountedPrice: enriched.price ?? 0,
                 displayPrice: enriched.price ?? 0,
                 discountAmount:
                     enriched.mrp && enriched.price ? enriched.mrp - enriched.price : 0,
@@ -988,10 +1005,11 @@ export const getSingleProduct = async (req, res) => {
                     enriched.mrp && enriched.mrp > enriched.price
                         ? Math.round(((enriched.mrp - enriched.price) / enriched.mrp) * 100)
                         : 0,
+                createdAt: new Date(),
                 status: enriched.quantity > 0 ? "inStock" : "outOfStock",
-                message: enriched.quantity > 0 ? "In-stock" : "No stock available",
-                images: normalizeImages(enriched.images || [])
+                message: enriched.quantity > 0 ? "In-stock" : "No stock available"
             };
+
             normalizedVariants = calculateVariantPrices([legacyVariant], enriched, promotions);
         }
         else {
