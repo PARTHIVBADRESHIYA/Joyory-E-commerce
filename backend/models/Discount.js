@@ -8,7 +8,7 @@ const discountSchema = new mongoose.Schema({
     },
     type: { type: String, enum: ['Flat', 'Percentage'], required: true },
     value: { type: Number, required: true },
-      status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' }, // ✅ Add this
+    status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' }, // ✅ Add this
     minimumOrderAmount: { type: Number },
     eligibility: { type: String, enum: ['All', 'New Users', 'Existing Users'], default: 'All' },
     appliesTo: {

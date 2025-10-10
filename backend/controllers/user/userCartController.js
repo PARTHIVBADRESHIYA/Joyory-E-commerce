@@ -105,6 +105,166 @@ export const addToCart = async (req, res) => {
 };
 
 // -------------------- GET CART SUMMARY --------------------
+// export const getCartSummary = async (req, res) => {
+//   try {
+//     if (!req.user || !req.user._id) return res.status(401).json({ message: "Unauthorized" });
+
+//     const user = await User.findById(req.user._id).populate("cart.product");
+//     if (!user) return res.status(404).json({ message: "User not found" });
+
+//     const validCartItems = (user.cart || []).filter(item => item.product);
+//     if (!validCartItems.length) return res.status(400).json({ message: "Cart is empty" });
+
+//     /* -------------------- Apply Promotions -------------------- */
+//     const itemsInput = validCartItems.map(i => ({
+//       productId: String(i.product._id),
+//       qty: i.quantity,
+//       selectedVariant: i.selectedVariant || null,
+//     }));
+//     const promoResult = await applyPromotions(itemsInput, { userContext: { isNewUser: user.isNewUser } });
+//     const { items: promoItems, summary, appliedPromotions } = promoResult;
+
+//     /* -------------------- Coupons -------------------- */
+//     const allDiscountDocs = await Discount.find({ status: "Active" }).lean();
+//     const nonPromoItemsInput = promoItems.filter(i => !i.discounts?.length)
+//       .map(i => ({ productId: i.productId, qty: i.qty }));
+
+//     const couponsChecked = await Promise.all(
+//       allDiscountDocs.map(async (d) => {
+//         try {
+//           if (!nonPromoItemsInput.length) throw new Error("No items");
+//           await validateDiscountForCartInternal({ code: d.code, cart: nonPromoItemsInput, userId: req.user._id });
+//           return { code: d.code, label: d.name, type: d.type, value: d.value, status: "Applicable", message: `Apply code ${d.code} and save ${d.type === "Percentage" ? d.value + "%" : "₹" + d.value}` };
+//         } catch {
+//           return { code: d.code, label: d.name, type: d.type, value: d.value, status: "Not applicable", message: "Not valid for current cart" };
+//         }
+//       })
+//     );
+
+//     const applicableCoupons = couponsChecked.filter(c => c.status === "Applicable");
+//     const inapplicableCoupons = couponsChecked.filter(c => c.status !== "Applicable");
+
+//     let appliedCoupon = null;
+//     let discountFromCoupon = 0;
+//     if (req.query.discount && nonPromoItemsInput.length) {
+//       try {
+//         const result = await validateDiscountForCartInternal({ code: req.query.discount.trim(), cart: nonPromoItemsInput, userId: req.user._id });
+//         const COUPON_MAX_CAP = result.discount.maxCap || 500;
+//         discountFromCoupon = Math.min(result.priced.discountAmount, COUPON_MAX_CAP);
+//         appliedCoupon = { code: result.discount.code, discount: discountFromCoupon };
+//       } catch { appliedCoupon = null; discountFromCoupon = 0; }
+//     }
+
+//     /* -------------------- Referral Points -------------------- */
+//     const wallet = await getOrCreateWallet(req.user._id);
+//     let pointsUsed = 0, pointsDiscount = 0, pointsMessage = "";
+//     if (req.query.pointsToUse) {
+//       pointsUsed = Math.min(Number(req.query.pointsToUse), wallet.rewardPoints);
+//       pointsDiscount = pointsUsed * 0.1;
+//       pointsMessage = pointsUsed ? `🎉 You used ${pointsUsed} points from your wallet! Discount applied: ₹${pointsDiscount}` : "";
+//     }
+
+//     /* -------------------- Gift Card -------------------- */
+//     let giftCardApplied = null, giftCardDiscount = 0;
+//     if (req.query.giftCardCode && req.query.giftCardPin) {
+//       const giftCard = await GiftCard.findOne({ code: req.query.giftCardCode.trim(), pin: req.query.giftCardPin.trim() });
+//       if (!giftCard || giftCard.expiryDate < new Date() || giftCard.balance <= 0) {
+//         giftCardApplied = { status: "Invalid", message: "❌ Gift card not valid" };
+//       } else {
+//         const requested = Number(req.query.giftCardAmount || 0);
+//         const maxRedeemable = Math.min(requested, giftCard.balance, summary.payable - discountFromCoupon - pointsDiscount);
+//         giftCardDiscount = maxRedeemable;
+//         giftCardApplied = {
+//           status: "Applied",
+//           code: giftCard.code,
+//           appliedAmount: giftCardDiscount,
+//           remainingBalance: giftCard.balance - giftCardDiscount,
+//           message: `🎉 Successfully applied ₹${giftCardDiscount} from your gift card!`
+//         };
+//       }
+//     }
+
+//     /* -------------------- Final Cart -------------------- */
+//     const round2 = n => Math.round(n * 100) / 100;
+//     const now = new Date();
+//     const activePromotions = await Promotion.find({ status: "active", startDate: { $lte: now }, endDate: { $gte: now } }).lean();
+
+//     const finalCart = validCartItems.map(item => {
+//       const productDoc = item.product;
+//       let enrichedVariant;
+
+//       if (item.selectedVariant) {
+//         // calculate prices using your function
+//         const calcVariant = calculateVariantPrices([item.selectedVariant], productDoc, activePromotions)[0];
+
+//         // ✅ Get images from product's variant schema, fallback to product images
+//         const variantFromProduct = productDoc.variants.find(v => v.sku === item.selectedVariant.sku);
+//         enrichedVariant = {
+//           ...calcVariant,
+//           images: (variantFromProduct?.images?.length ? variantFromProduct.images : productDoc.images) || []
+//         };
+//       } else {
+//         enrichedVariant = calculateVariantPrices([getPseudoVariant(productDoc)], productDoc, activePromotions)[0];
+//         enrichedVariant.images = enrichedVariant.images || productDoc.images || [];
+//       }
+
+//       return {
+//         _id: item._id,
+//         product: productDoc._id,
+//         name: enrichedVariant?.shadeName ? `${productDoc.name} - ${enrichedVariant.shadeName}` : productDoc.name,
+//         quantity: item.quantity,
+//         variant: {
+//           sku: enrichedVariant?.sku,
+//           shadeName: enrichedVariant?.shadeName || productDoc.variant || null,
+//           hex: enrichedVariant?.hex || null,
+//           image: enrichedVariant.images[0] || null, // ✅ now it comes from product variant
+//           stock: enrichedVariant?.stock,
+//           originalPrice: enrichedVariant?.originalPrice,
+//           discountedPrice: enrichedVariant?.displayPrice,
+//           displayPrice: enrichedVariant?.displayPrice,
+//           discountPercent: enrichedVariant?.discountPercent,
+//           discountAmount: enrichedVariant?.discountAmount,
+//         },
+//       };
+//     });
+
+//     /* -------------------- Price Calculations -------------------- */
+//     const bagMrp = round2(finalCart.reduce((sum, item) => sum + (item.variant.originalPrice || 0) * item.quantity, 0));
+//     const bagPayable = round2(finalCart.reduce((sum, item) => sum + (item.variant.displayPrice || 0) * item.quantity, 0));
+//     const totalSavings = round2(bagMrp - bagPayable + discountFromCoupon + pointsDiscount + giftCardDiscount);
+//     const grandTotal = round2(bagPayable - discountFromCoupon - pointsDiscount - giftCardDiscount);
+
+//     /* -------------------- Response -------------------- */
+//     res.json({
+//       cart: finalCart,
+//       priceDetails: {
+//         bagMrp,
+//         totalSavings,
+//         bagDiscount: round2(bagMrp - bagPayable),
+//         autoDiscount: round2(bagMrp - bagPayable),
+//         couponDiscount: round2(discountFromCoupon),
+//         referralPointsDiscount: round2(pointsDiscount),
+//         giftCardDiscount: round2(giftCardDiscount),
+//         payable: grandTotal,
+//         savingsMessage: totalSavings > 0 ? `🎉 You saved ₹${totalSavings} on this order!` : "",
+//       },
+//       appliedCoupon,
+//       appliedPromotions,
+//       applicableCoupons,
+//       inapplicableCoupons,
+//       pointsUsed,
+//       pointsDiscount,
+//       pointsMessage,
+//       giftCardApplied,
+//       grandTotal,
+//     });
+//   } catch (error) {
+//     console.error("getCartSummary error:", error);
+//     res.status(500).json({ message: "Failed to get cart summary", error: error.message });
+//   }
+// };
+
+
 export const getCartSummary = async (req, res) => {
   try {
     if (!req.user || !req.user._id) return res.status(401).json({ message: "Unauthorized" });
@@ -194,10 +354,7 @@ export const getCartSummary = async (req, res) => {
       let enrichedVariant;
 
       if (item.selectedVariant) {
-        // calculate prices using your function
         const calcVariant = calculateVariantPrices([item.selectedVariant], productDoc, activePromotions)[0];
-
-        // ✅ Get images from product's variant schema, fallback to product images
         const variantFromProduct = productDoc.variants.find(v => v.sku === item.selectedVariant.sku);
         enrichedVariant = {
           ...calcVariant,
@@ -217,7 +374,7 @@ export const getCartSummary = async (req, res) => {
           sku: enrichedVariant?.sku,
           shadeName: enrichedVariant?.shadeName || productDoc.variant || null,
           hex: enrichedVariant?.hex || null,
-          image: enrichedVariant.images[0] || null, // ✅ now it comes from product variant
+          image: enrichedVariant.images[0] || null,
           stock: enrichedVariant?.stock,
           originalPrice: enrichedVariant?.originalPrice,
           discountedPrice: enrichedVariant?.displayPrice,
@@ -232,7 +389,23 @@ export const getCartSummary = async (req, res) => {
     const bagMrp = round2(finalCart.reduce((sum, item) => sum + (item.variant.originalPrice || 0) * item.quantity, 0));
     const bagPayable = round2(finalCart.reduce((sum, item) => sum + (item.variant.displayPrice || 0) * item.quantity, 0));
     const totalSavings = round2(bagMrp - bagPayable + discountFromCoupon + pointsDiscount + giftCardDiscount);
-    const grandTotal = round2(bagPayable - discountFromCoupon - pointsDiscount - giftCardDiscount);
+    let grandTotal = round2(bagPayable - discountFromCoupon - pointsDiscount - giftCardDiscount);
+
+    /* -------------------- Shipping -------------------- */
+    const FREE_SHIPPING_THRESHOLD = 499;
+    const SHIPPING_CHARGE = 70;
+    let shippingCharge = 0;
+    let shippingMessage = "";
+
+    if (grandTotal >= FREE_SHIPPING_THRESHOLD) {
+      shippingCharge = 0;
+      shippingMessage = "🎉 Hurray! You get FREE shipping on your order!";
+    } else {
+      shippingCharge = SHIPPING_CHARGE;
+      const amountToFree = round2(FREE_SHIPPING_THRESHOLD - grandTotal);
+      shippingMessage = `📦 Add just ₹${amountToFree} more to your order to enjoy FREE shipping!`;
+      grandTotal += SHIPPING_CHARGE; // add shipping to final payable
+    }
 
     /* -------------------- Response -------------------- */
     res.json({
@@ -245,6 +418,8 @@ export const getCartSummary = async (req, res) => {
         couponDiscount: round2(discountFromCoupon),
         referralPointsDiscount: round2(pointsDiscount),
         giftCardDiscount: round2(giftCardDiscount),
+        shippingCharge: round2(shippingCharge),
+        shippingMessage,
         payable: grandTotal,
         savingsMessage: totalSavings > 0 ? `🎉 You saved ₹${totalSavings} on this order!` : "",
       },
