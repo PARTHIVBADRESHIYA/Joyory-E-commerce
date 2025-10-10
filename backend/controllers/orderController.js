@@ -227,33 +227,6 @@ export const getAllOrders = async (req, res) => {
     }
 };
 // Get summary metrics for dashboard
-// export const getOrderSummary = async (req, res) => {
-//     try {
-//         const now = new Date();
-//         const lastWeek = new Date();
-//         lastWeek.setDate(now.getDate() - 7);
-
-//         const totalOrders = await Order.countDocuments();
-//         const newOrders = await Order.countDocuments({ createdAt: { $gte: lastWeek } });
-//         const completedOrders = await Order.countDocuments({
-//             status: { $in: ['Delivered', 'Completed'] },
-//             createdAt: { $gte: lastWeek }
-//         });
-//         const cancelledOrders = await Order.countDocuments({ status: 'Cancelled', createdAt: { $gte: lastWeek } });
-
-//         res.status(200).json({
-//             totalOrders,
-//             newOrders,
-//             completedOrders,
-//             cancelledOrders
-//         });
-//     } catch (error) {
-//         res.status(500).json({ message: 'Error getting summary', error });
-//     }
-// };
-
-
-// controllers/orderController.js
 
 export const getOrderSummary = async (req, res) => {
     try {
@@ -348,79 +321,6 @@ export const getOrderSummary = async (req, res) => {
         });
     }
 };
-
-
-
-
-// ✅ Get single order with full details (Admin view)
-// export const getOrderById = async (req, res) => {
-//     try {
-//         const { id } = req.params; // This will be MongoDB _id
-
-//         const order = await Order.findById(id)
-//             .populate("user", "name email phone")
-//             .populate("products.productId", "name brand category images price")
-//             .populate("affiliate", "name referralCode")
-//             .populate("discount", "code type value")
-//             .lean();
-
-//         if (!order) {
-//             return res.status(404).json({ message: "Order not found" });
-//         }
-
-//         const response = {
-//             _id: order._id,  // <-- Mongo's default ID
-//             orderId: order.orderId,  // keep it if you still want to show
-//             orderNumber: order.orderNumber,
-//             date: order.date,
-//             customer: {
-//                 id: order.user?._id,
-//                 name: order.user?.name || order.customerName,
-//                 email: order.user?.email,
-//                 phone: order.user?.phone,
-//             },
-//             status: order.status,
-//             orderType: order.orderType,
-//             amount: order.amount,
-//             discount: {
-//                 code: order.discountCode,
-//                 discountAmount: order.discountAmount || 0,
-//                 buyerDiscountAmount: order.buyerDiscountAmount || 0,
-//             },
-//             affiliate: order.affiliate
-//                 ? {
-//                     id: order.affiliate._id,
-//                     name: order.affiliate.name,
-//                     referralCode: order.affiliate.referralCode,
-//                 }
-//                 : null,
-//             shippingAddress: order.shippingAddress || null,
-//             products: order.products.map(item => ({
-//                 id: item.productId?._id,
-//                 name: item.productId?.name || "Unknown Product",
-//                 brand: item.productId?.brand || null,
-//                 category: item.productId?.category || null,
-//                 image: item.productId?.images?.[0] || null,
-//                 quantity: item.quantity,
-//                 price: item.price,
-//                 total: item.quantity * item.price,
-//             })),
-//             payment: {
-//                 method: order.paymentMethod || "Manual",
-//                 status: order.paymentStatus || "Pending",
-//                 transactionId: order.transactionId || null,
-//             },
-//             expectedDelivery: order.expectedDelivery || null,
-//             shipment: order.shipment || null,
-//         };
-
-//         res.status(200).json(response);
-//     } catch (error) {
-//         console.error("🔥 Error fetching order:", error);
-//         res.status(500).json({ message: "Failed to fetch order", error: error.message });
-//     }
-// };
-
 
 export const getOrderById = async (req, res) => {
     try {
