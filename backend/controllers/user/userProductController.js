@@ -918,7 +918,7 @@ export const getProductsByCategory = async (req, res) => {
 export const getSingleProduct = async (req, res) => {
     try {
         const productId = req.params.id;
-        const selectedSku = req.query.variant; // get selected variant SKU from query
+        const selectedSku = req.query.variant; // Selected variant SKU from query (optional)
 
         if (!mongoose.Types.ObjectId.isValid(productId)) {
             return res.status(400).json({ message: "Invalid product id" });
@@ -983,15 +983,14 @@ export const getSingleProduct = async (req, res) => {
             endDate: { $gte: now }
         }).lean();
 
-        // 6️⃣ Enrich product with stock/options
+        // 6️⃣ Enrich product
         const enriched = enrichProductWithStockAndOptions(product, promotions);
 
-        // 7️⃣ Normalize variants
+        // 7️⃣ Normalize variants (aligned with getProductsByCategory)
         let normalizedVariants = [];
         if (Array.isArray(enriched.variants) && enriched.variants.length > 0) {
             normalizedVariants = calculateVariantPrices(enriched.variants, enriched, promotions);
         } else if (enriched.variant && (!enriched.variants || !enriched.variants.length)) {
-            // Legacy single variant
             const legacyVariant = {
                 sku: enriched.sku ?? `${enriched._id}-default`,
                 shadeName: enriched.variant || "Default",
@@ -1017,7 +1016,7 @@ export const getSingleProduct = async (req, res) => {
                 message: enriched.quantity > 0 ? "In-stock" : "No stock available"
             };
 
-            // Persist to DB if not exists
+            // Persist legacy variant if missing
             await Product.updateOne(
                 { _id: enriched._id, "variants.sku": { $ne: legacyVariant.sku } },
                 { $push: { variants: legacyVariant } }
@@ -1030,21 +1029,22 @@ export const getSingleProduct = async (req, res) => {
 
         enriched.variants = normalizedVariants;
 
-        // ✅ Shade options
+        // ✅ Shade options (same as getProductsByCategory)
         enriched.shadeOptions = normalizedVariants.map(v => ({
             name: v.shadeName || enriched.variant || "Default",
             sku: v.sku,
-            image: Array.isArray(v.images) && v.images.length ? v.images[0] : enriched.thumbnail || null,
+            image: Array.isArray(v.images) && v.images.length ? v.images[0] : (enriched.thumbnail || null),
             price: v.displayPrice,
             status: v.status || "inStock"
         }));
 
-        // 8️⃣ Select the correct variant (from query or first in-stock)
-        let displayVariant =
+        // ✅ Select correct display variant
+        const displayVariant =
             normalizedVariants.find(v => v.sku === selectedSku) ||
             normalizedVariants.find(v => v.stock > 0 && v.isActive) ||
-            normalizedVariants[0];
+            normalizedVariants[0] || {};
 
+        // ✅ Compute aligned pricing/status
         const price = displayVariant.displayPrice ?? enriched.price ?? 0;
         const mrp = displayVariant.originalPrice ?? enriched.mrp ?? enriched.price ?? 0;
         const discountPercent = mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
@@ -1052,45 +1052,38 @@ export const getSingleProduct = async (req, res) => {
         const message = displayVariant.message || (enriched.quantity > 0 ? "In-stock" : "No stock available");
         const inStock = displayVariant.stock > 0 || enriched.quantity > 0;
 
-        // 9️⃣ Build recommendations
+        // 9️⃣ Recommendations
         const [moreLikeThis, boughtTogether, alsoViewed] = await Promise.all([
             getRecommendations({ mode: "moreLikeThis", productId, userId: req.user?.id }),
             getRecommendations({ mode: "boughtTogether", productId, userId: req.user?.id }),
             getRecommendations({ mode: "alsoViewed", productId, userId: req.user?.id })
         ]);
 
-        // 🔟 Final Response
+        // 🔟 Final Response (identical structure to getProductsByCategory)
         return res.status(200).json({
             _id: enriched._id,
             name: enriched.name,
-            brand: brandObj ? brandObj.name : enriched.brand,
-            variant: displayVariant.shadeName || enriched.variant || null,
-            description: enriched.description || "",
-            summary: enriched.summary || "",
-            features: enriched.features || [],
-            howToUse: enriched.howToUse || "",
-            ingredients: enriched.ingredients || [],
+            brand: brandObj ? brandObj.name : enriched.brand || null,
             mrp,
             price,
             discountPercent,
             discountAmount: mrp - price,
             images: normalizeImages(enriched.images || []),
-            category: categoryObj,
+            variants: normalizedVariants,
             shadeOptions: enriched.shadeOptions || [],
-            colorOptions: enriched.colorOptions || [],
-            variants: enriched.variants || [],
-            selectedVariant: displayVariant,
             status,
             message,
-            inStock,
             avgRating,
             totalRatings: count || 0,
+            inStock,
+            selectedVariant: displayVariant, // ✅ identical variant structure for cart
+            category: categoryObj,
             recommendations: { moreLikeThis, boughtTogether, alsoViewed }
         });
 
     } catch (err) {
         console.error("❌ getSingleProduct error:", err);
-        res.status(500).json({ message: "Server error", error: err.message });
+        return res.status(500).json({ message: "Server error", error: err.message });
     }
 };
 
