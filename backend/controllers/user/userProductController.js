@@ -918,7 +918,7 @@ export const getProductsByCategory = async (req, res) => {
 export const getSingleProduct = async (req, res) => {
     try {
         const productId = req.params.id;
-        const selectedSku = req.query.variant; // Selected variant SKU from query (optional)
+        const selectedSku = req.query.variant; // Selected variant SKU (optional)
 
         if (!mongoose.Types.ObjectId.isValid(productId)) {
             return res.status(400).json({ message: "Invalid product id" });
@@ -932,50 +932,7 @@ export const getSingleProduct = async (req, res) => {
         );
         if (!product) return res.status(404).json({ message: "Product not found" });
 
-        // 2️⃣ Track recent products & categories
-        if (req.user?.id) {
-            const categoryValue = mongoose.Types.ObjectId.isValid(product.category)
-                ? product.category
-                : product.category?.slug || String(product.category || "");
-
-            await User.bulkWrite([
-                {
-                    updateOne: {
-                        filter: { _id: req.user.id },
-                        update: { $pull: { recentProducts: product._id, recentCategories: categoryValue } }
-                    }
-                },
-                {
-                    updateOne: {
-                        filter: { _id: req.user.id },
-                        update: {
-                            $push: {
-                                recentProducts: { $each: [product._id], $position: 0, $slice: 20 },
-                                recentCategories: { $each: [categoryValue], $position: 0, $slice: 20 }
-                            }
-                        }
-                    }
-                }
-            ]);
-        }
-
-        // 3️⃣ Category & Brand info
-        const categoryObj = mongoose.Types.ObjectId.isValid(product.category)
-            ? await Category.findById(product.category).select("name slug parent").lean()
-            : null;
-
-        const brandObj = mongoose.Types.ObjectId.isValid(product.brand)
-            ? await Brand.findById(product.brand).select("name").lean()
-            : null;
-
-        // 4️⃣ Ratings
-        const [{ avg = 0, count = 0 } = {}] = await Review.aggregate([
-            { $match: { productId: product._id, status: "Active" } },
-            { $group: { _id: "$productId", avg: { $avg: "$rating" }, count: { $sum: 1 } } }
-        ]);
-        const avgRating = Math.round((avg || 0) * 10) / 10;
-
-        // 5️⃣ Active promotions
+        // 2️⃣ Active promotions
         const now = new Date();
         const promotions = await Promotion.find({
             status: "active",
@@ -983,10 +940,10 @@ export const getSingleProduct = async (req, res) => {
             endDate: { $gte: now }
         }).lean();
 
-        // 6️⃣ Enrich product
+        // 3️⃣ Enrich product
         const enriched = enrichProductWithStockAndOptions(product, promotions);
 
-        // 7️⃣ Normalize variants (aligned with getProductsByCategory)
+        // 4️⃣ Normalize variants (same as category)
         let normalizedVariants = [];
         if (Array.isArray(enriched.variants) && enriched.variants.length > 0) {
             normalizedVariants = calculateVariantPrices(enriched.variants, enriched, promotions);
@@ -1016,7 +973,7 @@ export const getSingleProduct = async (req, res) => {
                 message: enriched.quantity > 0 ? "In-stock" : "No stock available"
             };
 
-            // Persist legacy variant if missing
+            // Persist if missing
             await Product.updateOne(
                 { _id: enriched._id, "variants.sku": { $ne: legacyVariant.sku } },
                 { $push: { variants: legacyVariant } }
@@ -1029,7 +986,7 @@ export const getSingleProduct = async (req, res) => {
 
         enriched.variants = normalizedVariants;
 
-        // ✅ Shade options (same as getProductsByCategory)
+        // 5️⃣ Shade options
         enriched.shadeOptions = normalizedVariants.map(v => ({
             name: v.shadeName || enriched.variant || "Default",
             sku: v.sku,
@@ -1038,13 +995,13 @@ export const getSingleProduct = async (req, res) => {
             status: v.status || "inStock"
         }));
 
-        // ✅ Select correct display variant
+        // 6️⃣ Select display variant
         const displayVariant =
             normalizedVariants.find(v => v.sku === selectedSku) ||
             normalizedVariants.find(v => v.stock > 0 && v.isActive) ||
             normalizedVariants[0] || {};
 
-        // ✅ Compute aligned pricing/status
+        // 7️⃣ Compute pricing & status
         const price = displayVariant.displayPrice ?? enriched.price ?? 0;
         const mrp = displayVariant.originalPrice ?? enriched.mrp ?? enriched.price ?? 0;
         const discountPercent = mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
@@ -1052,18 +1009,18 @@ export const getSingleProduct = async (req, res) => {
         const message = displayVariant.message || (enriched.quantity > 0 ? "In-stock" : "No stock available");
         const inStock = displayVariant.stock > 0 || enriched.quantity > 0;
 
-        // 9️⃣ Recommendations
-        const [moreLikeThis, boughtTogether, alsoViewed] = await Promise.all([
-            getRecommendations({ mode: "moreLikeThis", productId, userId: req.user?.id }),
-            getRecommendations({ mode: "boughtTogether", productId, userId: req.user?.id }),
-            getRecommendations({ mode: "alsoViewed", productId, userId: req.user?.id })
+        // 8️⃣ Ratings
+        const [{ avg = 0, count = 0 } = {}] = await Review.aggregate([
+            { $match: { productId: enriched._id, status: "Active" } },
+            { $group: { _id: "$productId", avg: { $avg: "$rating" }, count: { $sum: 1 } } }
         ]);
+        const avgRating = Math.round((avg || 0) * 10) / 10;
 
-        // 🔟 Final Response (identical structure to getProductsByCategory)
+        // 9️⃣ Final response (same structure as category API)
         return res.status(200).json({
             _id: enriched._id,
             name: enriched.name,
-            brand: brandObj ? brandObj.name : enriched.brand || null,
+            brand: enriched.brand || null,
             mrp,
             price,
             discountPercent,
@@ -1076,9 +1033,7 @@ export const getSingleProduct = async (req, res) => {
             avgRating,
             totalRatings: count || 0,
             inStock,
-            selectedVariant: displayVariant, // ✅ identical variant structure for cart
-            category: categoryObj,
-            recommendations: { moreLikeThis, boughtTogether, alsoViewed }
+            selectedVariant: displayVariant
         });
 
     } catch (err) {
