@@ -174,9 +174,10 @@ export const enrichProductWithStockAndOptions = (product, promotions = []) => {
     const { shadeOptions, colorOptions } = buildOptions(product);
     const globalOriginalPrice = Number(product.price ?? 0);
 
-    if (product.variants?.length) {
-        product.variants = product.variants.map(v => {
-            // 🔹 Stock status
+    // Normalize variants array
+    let variants = [];
+    if (Array.isArray(product.variants) && product.variants.length > 0) {
+        variants = product.variants.map(v => {
             let status, message;
             if (v.stock === 0) {
                 status = "outOfStock";
@@ -189,15 +190,13 @@ export const enrichProductWithStockAndOptions = (product, promotions = []) => {
                 message = "In-stock";
             }
 
-            // 🔹 Use variant's own price or product price as base
             const variantBasePrice = Number(v.discountedPrice ?? v.price ?? globalOriginalPrice);
             let displayPrice = variantBasePrice;
 
-            // 🔹 Apply promotions if any
+            // Apply promotions
             for (const promo of promotions) {
                 if (!productMatchesPromo(product, promo)) continue;
                 if (promo.promotionType !== "discount") continue;
-
                 const val = Number(promo.discountValue || 0);
                 if (promo.discountUnit === "percent" && val > 0) {
                     displayPrice = Math.round(variantBasePrice * (1 - val / 100));
@@ -206,71 +205,66 @@ export const enrichProductWithStockAndOptions = (product, promotions = []) => {
                 }
             }
 
-            // 🔹 Calculate discountPercent vs main product price
             const discountPercent = globalOriginalPrice > displayPrice
                 ? Math.round(((globalOriginalPrice - displayPrice) / globalOriginalPrice) * 100)
                 : 0;
 
             return {
                 ...v,
+                shadeName: v.shadeName || product.variant || "Default",
                 status,
                 message,
-                originalPrice: globalOriginalPrice, // always main product price
+                originalPrice: globalOriginalPrice,
                 displayPrice,
                 discountPercent: discountPercent > 0 ? `${discountPercent}% off` : "0"
             };
         });
-
-        return {
-            ...product,
-            variants: product.variants,
-            shadeOptions,
-            colorOptions,
-            selectedVariant: product.variants[0] || null
-        };
     } else {
-        // Simple product
-        let status, message;
-        if (product.quantity === 0) {
-            status = "outOfStock";
-            message = "No stock available now, please try again later";
-        } else if (product.quantity < (product.thresholdValue || 5)) {
-            status = "lowStock";
-            message = `Few left (${product.quantity})`;
-        } else {
-            status = "inStock";
-            message = "In-stock";
-        }
+        // Single variant fallback
+        const singleVariant = {
+            sku: product.sku ?? `${product._id}-default`,
+            shadeName: product.variant || "Default",
+            images: product.images || [],
+            stock: product.quantity ?? 0,
+            sales: product.sales ?? 0,
+            thresholdValue: product.thresholdValue ?? 0,
+            isActive: true,
+            toneKeys: [],
+            undertoneKeys: [],
+            originalPrice: product.mrp ?? product.price ?? 0,
+            discountedPrice: product.price ?? 0,
+            displayPrice: product.price ?? 0,
+            discountAmount: (product.mrp && product.price) ? product.mrp - product.price : 0,
+            discountPercent: (product.mrp && product.mrp > product.price)
+                ? Math.round(((product.mrp - product.price) / product.mrp) * 100)
+                : 0,
+            status: product.quantity > 0 ? "inStock" : "outOfStock",
+            message: product.quantity > 0 ? "In-stock" : "No stock available"
+        };
 
-        let displayPrice = globalOriginalPrice;
-
+        // Apply promotions
         for (const promo of promotions) {
             if (!productMatchesPromo(product, promo)) continue;
             if (promo.promotionType !== "discount") continue;
-
             const val = Number(promo.discountValue || 0);
             if (promo.discountUnit === "percent" && val > 0) {
-                displayPrice = Math.round(globalOriginalPrice * (1 - val / 100));
+                singleVariant.displayPrice = Math.round(singleVariant.displayPrice * (1 - val / 100));
             } else if (promo.discountUnit === "amount" && val > 0) {
-                displayPrice = Math.max(0, globalOriginalPrice - val);
+                singleVariant.displayPrice = Math.max(0, singleVariant.displayPrice - val);
             }
         }
 
-        const discountPercent = globalOriginalPrice > displayPrice
-            ? Math.round(((globalOriginalPrice - displayPrice) / globalOriginalPrice) * 100)
-            : 0;
-
-        return {
-            ...product,
-            status,
-            message,
-            shadeOptions,
-            colorOptions,
-            originalPrice: globalOriginalPrice,
-            displayPrice,
-            discountPercent: discountPercent > 0 ? `${discountPercent}% off` : "0"
-        };
+        variants = [singleVariant];
     }
+
+    return {
+        ...product,
+        variants,
+        shadeOptions,
+        colorOptions,
+        selectedVariant: variants[0] || null,
+        variant: variants[0]?.shadeName || product.variant || null
+    };
 };
 
 

@@ -383,6 +383,7 @@ const variantSchema = new mongoose.Schema({
 const productSchema = new mongoose.Schema({
     name: { type: String, required: true, unique: true },
     buyingPrice: { type: Number, required: true },
+    variant: String,
     price: { type: Number, required: true },
     discountedPrice: { type: Number, default: null },
     discountPercent: { type: Number, default: 0 },

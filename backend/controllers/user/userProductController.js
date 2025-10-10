@@ -825,8 +825,15 @@ export const getProductsByCategory = async (req, res) => {
                         message: enriched.quantity > 0 ? "In-stock" : "No stock available"
                     };
 
+                    // ✅ Persist to DB if not already exists
+                    await Product.updateOne(
+                        { _id: enriched._id, "variants.sku": { $ne: legacyVariant.sku } },
+                        { $push: { variants: legacyVariant } }
+                    );
+
                     normalizedVariants = calculateVariantPrices([legacyVariant], enriched, promotions);
-                } else {
+                }
+                else {
                     normalizedVariants = calculateVariantPrices([getPseudoVariant(enriched)], enriched, promotions);
                 }
 
@@ -834,7 +841,7 @@ export const getProductsByCategory = async (req, res) => {
 
                 // ✅ Shade options
                 enriched.shadeOptions = normalizedVariants.map(v => ({
-                    name: v.name || "Default",
+                    name: v.shadeName || enriched.variant || "Default", // <-- use shadeName
                     sku: v.sku,
                     image: Array.isArray(v.images) && v.images.length ? v.images[0] : (enriched.thumbnail || null),
                     price: v.displayPrice,
@@ -983,11 +990,11 @@ export const getSingleProduct = async (req, res) => {
         let normalizedVariants = [];
         if (Array.isArray(enriched.variants) && enriched.variants.length > 0) {
             normalizedVariants = calculateVariantPrices(enriched.variants, enriched, promotions);
-        }
-        else if (enriched.variant && (!enriched.variants || !enriched.variants.length)) {
+        } else if (enriched.variant && (!enriched.variants || !enriched.variants.length)) {
+            // Legacy single variant
             const legacyVariant = {
                 sku: enriched.sku ?? `${enriched._id}-default`,
-                shadeName: enriched.variant || "Default",
+                shadeName: enriched.variant || "Defaultsssss",
                 hex: null,
                 images: normalizeImages(enriched.images || []),
                 stock: enriched.quantity ?? 0,
@@ -1010,9 +1017,14 @@ export const getSingleProduct = async (req, res) => {
                 message: enriched.quantity > 0 ? "In-stock" : "No stock available"
             };
 
+            // Persist to DB if not exists
+            await Product.updateOne(
+                { _id: enriched._id, "variants.sku": { $ne: legacyVariant.sku } },
+                { $push: { variants: legacyVariant } }
+            );
+
             normalizedVariants = calculateVariantPrices([legacyVariant], enriched, promotions);
-        }
-        else {
+        } else {
             normalizedVariants = calculateVariantPrices([getPseudoVariant(enriched)], enriched, promotions);
         }
 
@@ -1020,9 +1032,9 @@ export const getSingleProduct = async (req, res) => {
 
         // ✅ Auto-build shade options
         enriched.shadeOptions = normalizedVariants.map(v => ({
-            name: v.name || "Default",
+            name: v.shadeName || enriched.variant || "Default",
             sku: v.sku,
-            image: Array.isArray(v.images) && v.images.length ? v.images[0] : (enriched.thumbnail || null),
+            image: Array.isArray(v.images) && v.images.length ? v.images[0] : enriched.thumbnail || null,
             price: v.displayPrice,
             status: v.status || "inStock"
         }));
@@ -1048,7 +1060,7 @@ export const getSingleProduct = async (req, res) => {
             _id: enriched._id,
             name: enriched.name,
             brand: brandObj ? brandObj.name : enriched.brand,
-            variant: enriched.variant ?? null,
+            variant: enriched.variant || displayVariant.shadeName || null, // ✅ fixed variant
             description: enriched.description || "",
             summary: enriched.summary || "",
             features: enriched.features || [],
@@ -1063,7 +1075,7 @@ export const getSingleProduct = async (req, res) => {
             shadeOptions: enriched.shadeOptions || [],
             colorOptions: enriched.colorOptions || [],
             variants: enriched.variants || [],
-            selectedVariant: null,
+            selectedVariant: displayVariant,
             status,
             message,
             inStock,
@@ -1077,6 +1089,7 @@ export const getSingleProduct = async (req, res) => {
         res.status(500).json({ message: "Server error", error: err.message });
     }
 };
+
 
 
 // 🔹 Get single product
