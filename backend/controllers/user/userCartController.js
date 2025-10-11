@@ -354,13 +354,21 @@ export const getCartSummary = async (req, res) => {
       let enrichedVariant;
 
       if (item.selectedVariant) {
-        const calcVariant = calculateVariantPrices([item.selectedVariant], productDoc, activePromotions)[0];
+        // Always fetch fresh variant from product document
         const variantFromProduct = productDoc.variants.find(v => v.sku === item.selectedVariant.sku);
+
+        // Fallback to pseudo variant if not found
+        const baseVariant = variantFromProduct || getPseudoVariant(productDoc);
+
+        // Recalculate pricing properly
+        const calcVariant = calculateVariantPrices([baseVariant], productDoc, activePromotions)[0];
+
         enrichedVariant = {
           ...calcVariant,
-          images: (variantFromProduct?.images?.length ? variantFromProduct.images : productDoc.images) || []
+          images: (baseVariant?.images?.length ? baseVariant.images : productDoc.images) || []
         };
-      } else {
+      }
+      else {
         enrichedVariant = calculateVariantPrices([getPseudoVariant(productDoc)], productDoc, activePromotions)[0];
         enrichedVariant.images = enrichedVariant.images || productDoc.images || [];
       }
