@@ -157,7 +157,7 @@ export const uploadProductWithVariants = multer({
 
 
 export const uploadEcard = makeCloudinaryPdfUploader("ecards", 1);
-export const uploadProduct = makeCloudinaryUploader('products', 5);
+export const uploadProduct = makeCloudinaryUploader('products', 25);
 export const uploadPromotion = makeCloudinaryUploader('promotions', 1);
 export const uploadCampaign = makeCloudinaryUploader('campaigns', 1);
 export const uploadBlogImage = makeCloudinaryUploader('blogs', 1);

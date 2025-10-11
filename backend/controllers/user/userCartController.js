@@ -35,25 +35,61 @@ export const updateCartItem = async (req, res) => {
 
 export const removeFromCart = async (req, res) => {
   try {
-    const { productId, variantSku } = req.params;
+    const { productId } = req.params;
+    const { variantSku } = req.query; // ✅ read from query
     const user = await User.findById(req.user._id);
 
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    const updatedCart = user.cart.filter(
-      p =>
-        String(p.product) !== String(productId) ||
-        (variantSku && p.selectedVariant?.sku !== variantSku)
-    );
+    // Filter cart items
+    const updatedCart = user.cart.filter(item => {
+      // Keep items with different product
+      if (String(item.product) !== String(productId)) return true;
 
+      // If variantSku is provided, remove only that variant
+      if (variantSku) return item.selectedVariant?.sku !== variantSku;
+
+      // If no variantSku, remove all variants of the product
+      return false;
+    });
+
+    // Save updated cart
     user.cart = updatedCart;
     await user.save();
 
-    res.status(200).json({ message: "❌ Removed from cart", cart: user.cart });
+    const removedMessage = variantSku
+      ? `Variant ${variantSku} removed from cart`
+      : `All variants of product removed from cart`;
+
+    res.status(200).json({ message: removedMessage, cart: user.cart });
   } catch (err) {
+    console.error("removeFromCart error:", err);
     res.status(500).json({ message: "Error removing from cart", error: err.message });
   }
 };
+
+
+// export const removeFromCart = async (req, res) => {
+//   try {
+//     const { productId, variantSku } = req.params;
+//     const user = await User.findById(req.user._id);
+
+//     if (!user) return res.status(404).json({ message: "User not found" });
+
+//     const updatedCart = user.cart.filter(
+//       p =>
+//         String(p.product) !== String(productId) ||
+//         (variantSku && p.selectedVariant?.sku !== variantSku)
+//     );
+
+//     user.cart = updatedCart;
+//     await user.save();
+
+//     res.status(200).json({ message: "❌ Removed from cart", cart: user.cart });
+//   } catch (err) {
+//     res.status(500).json({ message: "Error removing from cart", error: err.message });
+//   }
+// };
 
 // -------------------- ADD TO CART --------------------
 export const addToCart = async (req, res) => {
@@ -459,15 +495,15 @@ export const addToCart = async (req, res) => {
 
 export const getCartSummary = async (req, res) => {
   try {
-    if (!req.user || !req.user._id) 
+    if (!req.user || !req.user._id)
       return res.status(401).json({ message: "Unauthorized" });
 
     const user = await User.findById(req.user._id).populate("cart.product");
-    if (!user) 
+    if (!user)
       return res.status(404).json({ message: "User not found" });
 
     const validCartItems = (user.cart || []).filter(item => item.product);
-    if (!validCartItems.length) 
+    if (!validCartItems.length)
       return res.status(400).json({ message: "Cart is empty" });
 
     /* -------------------- Apply Promotions -------------------- */

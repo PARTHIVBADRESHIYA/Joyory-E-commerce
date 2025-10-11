@@ -541,11 +541,9 @@ const updateVariantImages = async (req, res) => {
             { _id: id, "variants.sku": sku },
             {
                 $push: {
-                    "variants.$.images": {
-                        $each: uploadedImages,
-                        $slice: -5
-                    }
+                    "variants.$.images": { $each: uploadedImages }
                 }
+
             },
             { new: true }
         );
