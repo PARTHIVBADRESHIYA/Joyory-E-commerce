@@ -939,7 +939,7 @@ export const getSingleProduct = async (req, res) => {
             startDate: { $lte: now },
             endDate: { $gte: now }
         }).lean();
-
+        
         // 3️⃣ Enrich product
         const enriched = enrichProductWithStockAndOptions(product, promotions);
 
@@ -1046,9 +1046,295 @@ export const getSingleProduct = async (req, res) => {
 // export const getSingleProduct = async (req, res) => {
 //     try {
 //         const productId = req.params.id;
-//         const selectedSku = req.query.variant || null;
-//         const userId = req.user?._id || null; // optional for "alsoViewed"
-//         const skinTypeSlug = req.query.skinType || null; // optional for personalized recs
+//         if (!mongoose.Types.ObjectId.isValid(productId)) {
+//             return res.status(400).json({ message: "Invalid product id" });
+//         }
+
+//         // 1️⃣ Fetch product + increment views
+//         const product = await Product.findOneAndUpdate(
+//             { _id: productId, isPublished: true },
+//             { $inc: { views: 1 } },
+//             { new: true, lean: true }
+//         );
+//         if (!product) return res.status(404).json({ message: "Product not found" });
+
+//         // 2️⃣ Track user recent views
+//         if (req.user?.id) {
+//             const categoryValue = mongoose.Types.ObjectId.isValid(product.category)
+//                 ? product.category
+//                 : product.category?.slug || String(product.category || "");
+
+//             await User.bulkWrite([
+//                 { updateOne: { filter: { _id: req.user.id }, update: { $pull: { recentProducts: product._id, recentCategories: categoryValue } } } },
+//                 { updateOne: { filter: { _id: req.user.id }, update: { $push: { recentProducts: { $each: [product._id], $position: 0, $slice: 20 }, recentCategories: { $each: [categoryValue], $position: 0, $slice: 20 } } } } }
+//             ]);
+//         }
+
+//         // 3️⃣ Category & Brand info
+//         const categoryObj = mongoose.Types.ObjectId.isValid(product.category)
+//             ? await Category.findById(product.category).select("name slug parent").lean()
+//             : null;
+
+//         const brandObj = mongoose.Types.ObjectId.isValid(product.brand)
+//             ? await Brand.findById(product.brand).select("name").lean()
+//             : null;
+
+//         // 4️⃣ Ratings aggregation
+//         const [{ avg = 0, count = 0 } = {}] = await Review.aggregate([
+//             { $match: { productId: product._id, status: "Active" } },
+//             { $group: { _id: "$productId", avg: { $avg: "$rating" }, count: { $sum: 1 } } }
+//         ]);
+//         const avgRating = Math.round((avg || 0) * 10) / 10;
+
+//         // 5️⃣ Active promotions
+//         const now = new Date();
+//         const promotions = await Promotion.find({
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now }
+//         }).lean();
+
+//         // 6️⃣ Variant price calculation
+//         const variants = product.variants?.length
+//             ? calculateVariantPrices(product.variants, product, promotions)
+//             : [];
+
+//         // 7️⃣ Determine stock & pricing
+//         const mainVariant = variants.length > 0 ? variants[0] : null;
+//         const inStock = mainVariant
+//             ? mainVariant.stock > 0
+//             : product.quantity > 0;
+
+//         // 8️⃣ Build final response
+//         const response = {
+//             _id: product._id,
+//             name: product.name,
+//             brand: brandObj?.name || product.brand,
+//             description: product.description || "",
+//             summary: product.summary || "",
+//             features: product.features || [],
+//             howToUse: product.howToUse || "",
+//             ingredients: product.ingredients || [],
+//             mrp: mainVariant?.originalPrice || product.price || 0,
+//             price: mainVariant?.displayPrice || product.price || 0,
+//             discountPercent: mainVariant?.discountPercent || 0,
+//             discountAmount: mainVariant?.discountAmount || 0,
+//             images: normalizeImages(mainVariant?.images?.length ? mainVariant.images : product.images || []),
+//             category: categoryObj ? {
+//                 _id: categoryObj._id,
+//                 name: categoryObj.name,
+//                 slug: categoryObj.slug
+//             } : null,
+//             shadeOptions: buildOptions(product).shadeOptions || [],
+//             colorOptions: buildOptions(product).colorOptions || [],
+//             variants, // ✅ only if real ones exist
+//             status: inStock ? "inStock" : "outOfStock",
+//             message: inStock ? "In-stock" : "No stock available",
+//             inStock,
+//             avgRating,
+//             totalRatings: count || 0,
+//         };
+
+//         // 9️⃣ Add recommendations
+//         const [moreLikeThis, boughtTogether, alsoViewed] = await Promise.all([
+//             getRecommendations({ mode: "moreLikeThis", productId, userId: req.user?.id }),
+//             getRecommendations({ mode: "boughtTogether", productId, userId: req.user?.id }),
+//             getRecommendations({ mode: "alsoViewed", productId, userId: req.user?.id })
+//         ]);
+
+//         response.recommendations = { moreLikeThis, boughtTogether, alsoViewed };
+
+//         return res.status(200).json(response);
+
+//     } catch (err) {
+//         console.error("❌ getSingleProduct error:", err);
+//         res.status(500).json({ message: "Server error", error: err.message });
+//     }
+// };
+
+
+// export const getSingleProduct = async (req, res) => {
+//     try {
+//         const productId = req.params.id;
+//         if (!mongoose.Types.ObjectId.isValid(productId)) {
+//             return res.status(400).json({ message: "Invalid product id" });
+//         }
+
+//         // 1️⃣ Load product + increment views
+//         const product = await Product.findOneAndUpdate(
+//             { _id: productId, isPublished: true },
+//             { $inc: { views: 1 } },
+//             { new: true, lean: true }
+//         );
+//         if (!product) return res.status(404).json({ message: "Product not found" });
+
+//         // 2️⃣ Track recent products & categories
+//         if (req.user?.id) {
+//             const categoryValue = mongoose.Types.ObjectId.isValid(product.category)
+//                 ? product.category
+//                 : product.category?.slug || String(product.category || "");
+
+//             await User.bulkWrite([
+//                 {
+//                     updateOne: {
+//                         filter: { _id: req.user.id },
+//                         update: { $pull: { recentProducts: product._id, recentCategories: categoryValue } }
+//                     }
+//                 },
+//                 {
+//                     updateOne: {
+//                         filter: { _id: req.user.id },
+//                         update: {
+//                             $push: {
+//                                 recentProducts: { $each: [product._id], $position: 0, $slice: 20 },
+//                                 recentCategories: { $each: [categoryValue], $position: 0, $slice: 20 }
+//                             }
+//                         }
+//                     }
+//                 }
+//             ]);
+//         }
+
+//         // 3️⃣ Category & Brand info
+//         const categoryObj = mongoose.Types.ObjectId.isValid(product.category)
+//             ? await Category.findById(product.category).select("name slug parent").lean()
+//             : null;
+
+//         const brandObj = mongoose.Types.ObjectId.isValid(product.brand)
+//             ? await Brand.findById(product.brand).select("name").lean()
+//             : null;
+
+//         // 4️⃣ Ratings
+//         const [{ avg = 0, count = 0 } = {}] = await Review.aggregate([
+//             { $match: { productId: product._id, status: "Active" } },
+//             { $group: { _id: "$productId", avg: { $avg: "$rating" }, count: { $sum: 1 } } }
+//         ]);
+//         const avgRating = Math.round((avg || 0) * 10) / 10;
+
+//         // 5️⃣ Active promotions
+//         const now = new Date();
+//         const promotions = await Promotion.find({
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now }
+//         }).lean();
+
+//         // 6️⃣ Enrich product with stock/options
+//         const enriched = enrichProductWithStockAndOptions(product, promotions);
+
+//         // 7️⃣ Normalize variants + build shade options
+//         let normalizedVariants = [];
+//         if (Array.isArray(enriched.variants) && enriched.variants.length > 0) {
+//             normalizedVariants = calculateVariantPrices(enriched.variants, enriched, promotions);
+//         } else if (enriched.variant && (!enriched.variants || !enriched.variants.length)) {
+//             // Legacy single variant
+//             const legacyVariant = {
+//                 sku: enriched.sku ?? `${enriched._id}-default`,
+//                 shadeName: enriched.variant || "Defaultsssss",
+//                 hex: null,
+//                 images: normalizeImages(enriched.images || []),
+//                 stock: enriched.quantity ?? 0,
+//                 sales: enriched.sales ?? 0,
+//                 thresholdValue: 0,
+//                 isActive: true,
+//                 toneKeys: [],
+//                 undertoneKeys: [],
+//                 originalPrice: enriched.mrp ?? enriched.price ?? 0,
+//                 discountedPrice: enriched.price ?? 0,
+//                 displayPrice: enriched.price ?? 0,
+//                 discountAmount:
+//                     enriched.mrp && enriched.price ? enriched.mrp - enriched.price : 0,
+//                 discountPercent:
+//                     enriched.mrp && enriched.mrp > enriched.price
+//                         ? Math.round(((enriched.mrp - enriched.price) / enriched.mrp) * 100)
+//                         : 0,
+//                 createdAt: new Date(),
+//                 status: enriched.quantity > 0 ? "inStock" : "outOfStock",
+//                 message: enriched.quantity > 0 ? "In-stock" : "No stock available"
+//             };
+
+//             // Persist to DB if not exists
+//             await Product.updateOne(
+//                 { _id: enriched._id, "variants.sku": { $ne: legacyVariant.sku } },
+//                 { $push: { variants: legacyVariant } }
+//             );
+
+//             normalizedVariants = calculateVariantPrices([legacyVariant], enriched, promotions);
+//         } else {
+//             normalizedVariants = calculateVariantPrices([getPseudoVariant(enriched)], enriched, promotions);
+//         }
+
+//         enriched.variants = normalizedVariants;
+
+//         // ✅ Auto-build shade options
+//         enriched.shadeOptions = normalizedVariants.map(v => ({
+//             name: v.shadeName || enriched.variant || "Default",
+//             sku: v.sku,
+//             image: Array.isArray(v.images) && v.images.length ? v.images[0] : enriched.thumbnail || null,
+//             price: v.displayPrice,
+//             status: v.status || "inStock"
+//         }));
+
+//         // 8️⃣ Build variant display data
+//         const displayVariant = enriched.variants?.[0] || {};
+//         const price = displayVariant.displayPrice ?? enriched.price ?? 0;
+//         const mrp = displayVariant.originalPrice ?? enriched.mrp ?? enriched.price ?? 0;
+//         const discountPercent = mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
+//         const status = displayVariant.status || (enriched.quantity > 0 ? "inStock" : "outOfStock");
+//         const message = displayVariant.message || (enriched.quantity > 0 ? "In-stock" : "No stock available");
+//         const inStock = displayVariant.stock > 0 || enriched.quantity > 0;
+
+//         // 9️⃣ Build recommendations
+//         const [moreLikeThis, boughtTogether, alsoViewed] = await Promise.all([
+//             getRecommendations({ mode: "moreLikeThis", productId, userId: req.user?.id }),
+//             getRecommendations({ mode: "boughtTogether", productId, userId: req.user?.id }),
+//             getRecommendations({ mode: "alsoViewed", productId, userId: req.user?.id })
+//         ]);
+
+//         // 🔟 Final Response
+//         return res.status(200).json({
+//             _id: enriched._id,
+//             name: enriched.name,
+//             brand: brandObj ? brandObj.name : enriched.brand,
+//             variant: enriched.variant || displayVariant.shadeName || null, // ✅ fixed variant
+//             description: enriched.description || "",
+//             summary: enriched.summary || "",
+//             features: enriched.features || [],
+//             howToUse: enriched.howToUse || "",
+//             ingredients: enriched.ingredients || [],
+//             mrp,
+//             price,
+//             discountPercent,
+//             discountAmount: mrp - price,
+//             images: normalizeImages(enriched.images || []),
+//             category: categoryObj,
+//             shadeOptions: enriched.shadeOptions || [],
+//             colorOptions: enriched.colorOptions || [],
+//             variants: enriched.variants || [],
+//             selectedVariant: displayVariant,
+//             status,
+//             message,
+//             inStock,
+//             avgRating,
+//             totalRatings: count || 0,
+//             recommendations: { moreLikeThis, boughtTogether, alsoViewed }
+//         });
+
+//     } catch (err) {
+//         console.error("❌ getSingleProduct error:", err);
+//         res.status(500).json({ message: "Server error", error: err.message });
+//     }
+// };
+
+
+
+// 🔹 Get single product
+
+
+// export const getSingleProduct = async (req, res) => {
+//     try {
+//         const productId = req.params.id;
+//         const selectedSku = req.query.variant; // get selected variant SKU from query
 
 //         if (!mongoose.Types.ObjectId.isValid(productId)) {
 //             return res.status(400).json({ message: "Invalid product id" });
@@ -1062,7 +1348,50 @@ export const getSingleProduct = async (req, res) => {
 //         );
 //         if (!product) return res.status(404).json({ message: "Product not found" });
 
-//         // 2️⃣ Active promotions
+//         // 2️⃣ Track recent products & categories
+//         if (req.user?.id) {
+//             const categoryValue = mongoose.Types.ObjectId.isValid(product.category)
+//                 ? product.category
+//                 : product.category?.slug || String(product.category || "");
+
+//             await User.bulkWrite([
+//                 {
+//                     updateOne: {
+//                         filter: { _id: req.user.id },
+//                         update: { $pull: { recentProducts: product._id, recentCategories: categoryValue } }
+//                     }
+//                 },
+//                 {
+//                     updateOne: {
+//                         filter: { _id: req.user.id },
+//                         update: {
+//                             $push: {
+//                                 recentProducts: { $each: [product._id], $position: 0, $slice: 20 },
+//                                 recentCategories: { $each: [categoryValue], $position: 0, $slice: 20 }
+//                             }
+//                         }
+//                     }
+//                 }
+//             ]);
+//         }
+
+//         // 3️⃣ Category & Brand info
+//         const categoryObj = mongoose.Types.ObjectId.isValid(product.category)
+//             ? await Category.findById(product.category).select("name slug parent").lean()
+//             : null;
+
+//         const brandObj = mongoose.Types.ObjectId.isValid(product.brand)
+//             ? await Brand.findById(product.brand).select("name").lean()
+//             : null;
+
+//         // 4️⃣ Ratings
+//         const [{ avg = 0, count = 0 } = {}] = await Review.aggregate([
+//             { $match: { productId: product._id, status: "Active" } },
+//             { $group: { _id: "$productId", avg: { $avg: "$rating" }, count: { $sum: 1 } } }
+//         ]);
+//         const avgRating = Math.round((avg || 0) * 10) / 10;
+
+//         // 5️⃣ Active promotions
 //         const now = new Date();
 //         const promotions = await Promotion.find({
 //             status: "active",
@@ -1070,14 +1399,15 @@ export const getSingleProduct = async (req, res) => {
 //             endDate: { $gte: now }
 //         }).lean();
 
-//         // 3️⃣ Enrich product with variants and stock info
+//         // 6️⃣ Enrich product with stock/options
 //         const enriched = enrichProductWithStockAndOptions(product, promotions);
 
-//         // 4️⃣ Normalize variants
+//         // 7️⃣ Normalize variants
 //         let normalizedVariants = [];
 //         if (Array.isArray(enriched.variants) && enriched.variants.length > 0) {
 //             normalizedVariants = calculateVariantPrices(enriched.variants, enriched, promotions);
 //         } else if (enriched.variant && (!enriched.variants || !enriched.variants.length)) {
+//             // Legacy single variant
 //             const legacyVariant = {
 //                 sku: enriched.sku ?? `${enriched._id}-default`,
 //                 shadeName: enriched.variant || "Default",
@@ -1103,6 +1433,7 @@ export const getSingleProduct = async (req, res) => {
 //                 message: enriched.quantity > 0 ? "In-stock" : "No stock available"
 //             };
 
+//             // Persist to DB if not exists
 //             await Product.updateOne(
 //                 { _id: enriched._id, "variants.sku": { $ne: legacyVariant.sku } },
 //                 { $push: { variants: legacyVariant } }
@@ -1110,115 +1441,72 @@ export const getSingleProduct = async (req, res) => {
 
 //             normalizedVariants = calculateVariantPrices([legacyVariant], enriched, promotions);
 //         } else {
-//             normalizedVariants = calculateVariantPrices(
-//                 [getPseudoVariant(enriched)],
-//                 enriched,
-//                 promotions
-//             );
+//             normalizedVariants = calculateVariantPrices([getPseudoVariant(enriched)], enriched, promotions);
 //         }
 
 //         enriched.variants = normalizedVariants;
 
-//         // 5️⃣ Shade options
-//         enriched.shadeOptions = normalizedVariants.map((v) => ({
+//         // ✅ Shade options
+//         enriched.shadeOptions = normalizedVariants.map(v => ({
 //             name: v.shadeName || enriched.variant || "Default",
 //             sku: v.sku,
-//             image:
-//                 Array.isArray(v.images) && v.images.length
-//                     ? v.images[0]
-//                     : enriched.thumbnail || null,
+//             image: Array.isArray(v.images) && v.images.length ? v.images[0] : enriched.thumbnail || null,
 //             price: v.displayPrice,
 //             status: v.status || "inStock"
 //         }));
 
-//         // 6️⃣ Select display variant
-//         const displayVariant =
-//             normalizedVariants.find((v) => v.sku === selectedSku) ||
-//             normalizedVariants.find((v) => v.stock > 0 && v.isActive) ||
-//             normalizedVariants[0] ||
-//             {};
+//         // 8️⃣ Select the correct variant (from query or first in-stock)
+//         let displayVariant =
+//             normalizedVariants.find(v => v.sku === selectedSku) ||
+//             normalizedVariants.find(v => v.stock > 0 && v.isActive) ||
+//             normalizedVariants[0];
 
-//         // 7️⃣ Compute pricing & stock status
 //         const price = displayVariant.displayPrice ?? enriched.price ?? 0;
 //         const mrp = displayVariant.originalPrice ?? enriched.mrp ?? enriched.price ?? 0;
-//         const discountPercent =
-//             mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
-//         const status =
-//             displayVariant.status ||
-//             (enriched.quantity > 0 ? "inStock" : "outOfStock");
-//         const message =
-//             displayVariant.message ||
-//             (enriched.quantity > 0 ? "In-stock" : "No stock available");
+//         const discountPercent = mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
+//         const status = displayVariant.status || (enriched.quantity > 0 ? "inStock" : "outOfStock");
+//         const message = displayVariant.message || (enriched.quantity > 0 ? "In-stock" : "No stock available");
 //         const inStock = displayVariant.stock > 0 || enriched.quantity > 0;
 
-//         // 8️⃣ Ratings
-//         const [{ avg = 0, count = 0 } = {}] = await Review.aggregate([
-//             { $match: { productId: enriched._id, status: "Active" } },
-//             {
-//                 $group: {
-//                     _id: "$productId",
-//                     avg: { $avg: "$rating" },
-//                     count: { $sum: 1 }
-//                 }
-//             }
+//         // 9️⃣ Build recommendations
+//         const [moreLikeThis, boughtTogether, alsoViewed] = await Promise.all([
+//             getRecommendations({ mode: "moreLikeThis", productId, userId: req.user?.id }),
+//             getRecommendations({ mode: "boughtTogether", productId, userId: req.user?.id }),
+//             getRecommendations({ mode: "alsoViewed", productId, userId: req.user?.id })
 //         ]);
-//         const avgRating = Math.round((avg || 0) * 10) / 10;
 
-//         // 9️⃣ Recommendations (Nykaa-style sections)
-//         const [moreLikeThis, boughtTogether, alsoViewed, skinTypeRecs, topSelling] =
-//             await Promise.all([
-//                 getRecommendations({
-//                     mode: "moreLikeThis",
-//                     productId: enriched._id,
-//                     categorySlug: null,
-//                     userId,
-//                     limit: 6
-//                 }),
-//                 getRecommendations({
-//                     mode: "boughtTogether",
-//                     productId: enriched._id,
-//                     limit: 6
-//                 }),
-//                 getRecommendations({
-//                     mode: "alsoViewed",
-//                     productId: enriched._id,
-//                     userId,
-//                     limit: 6
-//                 })
-//             ]);
-
-//         // 🔟 Final structured response
+//         // 🔟 Final Response
 //         return res.status(200).json({
-//             success: true,
-//             product: {
-//                 _id: enriched._id,
-//                 name: enriched.name,
-//                 brand: enriched.brand || null,
-//                 mrp,
-//                 price,
-//                 discountPercent,
-//                 discountAmount: mrp - price,
-//                 images: normalizeImages(enriched.images || []),
-//                 variants: normalizedVariants,
-//                 shadeOptions: enriched.shadeOptions || [],
-//                 status,
-//                 message,
-//                 avgRating,
-//                 totalRatings: count || 0,
-//                 inStock,
-//                 selectedVariant: displayVariant
-//             },
-//             recommendations: {
-//                 moreLikeThis,
-//                 boughtTogether,
-//                 alsoViewed,
-//                 skinType: skinTypeRecs,
-//                 categoryTopSelling: topSelling
-//             }
+//             _id: enriched._id,
+//             name: enriched.name,
+//             brand: brandObj ? brandObj.name : enriched.brand,
+//             variant: displayVariant.shadeName || enriched.variant || null,
+//             description: enriched.description || "",
+//             summary: enriched.summary || "",
+//             features: enriched.features || [],
+//             howToUse: enriched.howToUse || "",
+//             ingredients: enriched.ingredients || [],
+//             mrp,
+//             price,
+//             discountPercent,
+//             discountAmount: mrp - price,
+//             images: normalizeImages(enriched.images || []),
+//             category: categoryObj,
+//             shadeOptions: enriched.shadeOptions || [],
+//             colorOptions: enriched.colorOptions || [],
+//             variants: enriched.variants || [],
+//             selectedVariant: displayVariant,
+//             status,
+//             message,
+//             inStock,
+//             avgRating,
+//             totalRatings: count || 0,
+//             recommendations: { moreLikeThis, boughtTogether, alsoViewed }
 //         });
+
 //     } catch (err) {
 //         console.error("❌ getSingleProduct error:", err);
-//         return res.status(500).json({ message: "Server error", error: err.message });
+//         res.status(500).json({ message: "Server error", error: err.message });
 //     }
 // };
 
