@@ -8,7 +8,7 @@ import ProductViewLog from "../../models/ProductViewLog.js";
 import { buildOptions, normalizeImages } from "../../controllers/user/userProductController.js";
 import { getCategoryFallbackChain } from "../../middlewares/utils/categoryUtils.js";
 import { calculateVariantPrices } from "../../middlewares/services/promotionHelper.js";
-import { enrichProductWithStockAndOptions } from "../../middlewares/services/productHelpers.js";
+import { enrichProductWithStockAndOptions, enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
 
 export const getPseudoVariant = (product) => ({
     sku: product._id.toString(),
@@ -23,121 +23,6 @@ export const getPseudoVariant = (product) => ({
     message: product.quantity > 0 ? "In-stock" : "No stock available",
     images: product.images || [],
 });
-
-// // 🔹 Format product card
-// export const formatProductCard = async (product, promotions = []) => {
-//     if (!product) return null;
-
-//     // 🔹 Fetch category info
-//     let categoryObj = null;
-//     if (mongoose.Types.ObjectId.isValid(product.category)) {
-//         categoryObj = await Category.findById(product.category)
-//             .select("name slug")
-//             .lean();
-//     }
-
-//     const { shadeOptions, colorOptions } = buildOptions(product);
-
-//     // 🔹 Ensure variants exist for internal calculations
-//     let variantsArray = product.variants && product.variants.length
-//         ? calculateVariantPrices(product.variants, product, promotions)
-//         : calculateVariantPrices([getPseudoVariant(product)], product, promotions);
-
-//     // 🔹 Pick first variant for display price
-//     const displayVariant = variantsArray[0];
-
-//     // 🔹 Price & discount
-//     const price = displayVariant?.displayPrice ?? product.price ?? 0;
-//     const mrp = displayVariant?.originalPrice ?? product.price ?? 0;
-//     const discountPercent = mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
-
-//     // 🔹 Stock & message
-//     const status = displayVariant?.status || "inStock";
-//     const message = displayVariant?.message || "In-stock";
-//     const inStock = displayVariant?.stock > 0;
-
-//     return {
-//         _id: product._id,
-//         name: product.name,
-//         brand: product.brand,
-//         variant: product.variant ?? null, // ⚡ KEEP legacy variant intact
-//         price,
-//         mrp,
-//         discountPercent,
-//         discountAmount: mrp - price,
-//         images: normalizeImages(product.images || []),
-//         shadeOptions,
-//         colorOptions,
-//         avgRating: product.avgRating || 0,
-//         totalRatings: product.commentsCount || 0,
-//         status,
-//         message,
-//         inStock,
-//         variants: variantsArray, // ⚡ internal frontend logic
-//         selectedVariant: null,
-//         category: categoryObj
-//             ? { _id: categoryObj._id, name: categoryObj.name, slug: categoryObj.slug }
-//             : null,
-//     };
-// };
-
-
-// 🔹 Format product card
-// export const formatProductCard = async (product, promotions = []) => {
-//     if (!product) return null;
-
-//     // 🔹 Fetch category info
-//     let categoryObj = null;
-//     if (mongoose.Types.ObjectId.isValid(product.category)) {
-//         categoryObj = await Category.findById(product.category)
-//             .select("name slug")
-//             .lean();
-//     }
-
-//     const { shadeOptions, colorOptions } = buildOptions(product);
-
-//     // 🔹 Calculate variants ONLY if actual variants exist
-//     let variantsArray = product.variants && product.variants.length
-//         ? calculateVariantPrices(product.variants, product, promotions)
-//         : []; // ✅ no pseudo variants
-
-//     // 🔹 Pick first variant for display price
-//     const displayVariant = variantsArray[0];
-
-//     // 🔹 Price & discount
-//     const price = displayVariant?.displayPrice ?? product.price ?? 0;
-//     const mrp = displayVariant?.originalPrice ?? product.price ?? 0;
-//     const discountPercent = mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
-
-//     // 🔹 Stock & message
-//     const status = displayVariant?.status || (product.quantity > 0 ? "inStock" : "outOfStock");
-//     const message = displayVariant?.message || (product.quantity > 0 ? "In-stock" : "No stock available");
-//     const inStock = displayVariant?.stock > 0 || product.quantity > 0;
-
-//     return {
-//         _id: product._id,
-//         name: product.name,
-//         brand: product.brand,
-//         variant: product.variant ?? null, // ⚡ KEEP legacy variant intact
-//         price,
-//         mrp,
-//         discountPercent,
-//         discountAmount: mrp - price,
-//         images: normalizeImages(product.images || []),
-//         shadeOptions,
-//         colorOptions,
-//         avgRating: product.avgRating || 0,
-//         totalRatings: product.commentsCount || 0,
-//         status,
-//         message,
-//         inStock,
-//         variants: variantsArray, // ✅ empty if no variants
-//         selectedVariant: null,
-//         category: categoryObj
-//             ? { _id: categoryObj._id, name: categoryObj.name, slug: categoryObj.slug }
-//             : null,
-//     };
-// };
 
 export const formatProductCard = async (product, promotions = []) => {
     if (!product) return null;
@@ -174,7 +59,7 @@ export const formatProductCard = async (product, promotions = []) => {
             images: normalizeImages(product.images || []),
         };
         variantsArray = calculateVariantPrices([legacyVariant], product, promotions);
-    } 
+    }
     // ❌ else no variants at all (product without variant fields)
 
     // 🔹 Display price logic
@@ -213,8 +98,6 @@ export const formatProductCard = async (product, promotions = []) => {
     };
 };
 
-
-
 // export const getRecommendations = async ({
 //     mode,
 //     productId,
@@ -226,6 +109,14 @@ export const formatProductCard = async (product, promotions = []) => {
 //     try {
 //         let products = [];
 //         let message = "";
+
+//         // 1️⃣ Active promotions
+//         const now = new Date();
+//         const promotions = await Promotion.find({
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now }
+//         }).lean();
 
 //         // 🔹 Trending products
 //         const getTrending = async () => {
@@ -267,12 +158,12 @@ export const formatProductCard = async (product, promotions = []) => {
 //             return await Product.find(filter).sort({ sales: -1 }).limit(Number(limit)).lean();
 //         };
 
+//         // 2️⃣ Mode-based logic
 //         switch (mode) {
 //             case "moreLikeThis": {
 //                 const product = await Product.findById(productId).lean();
 //                 if (!product) return { success: false, products: [], message: "Product not found" };
 
-//                 // Same brand + category
 //                 products = await Product.find({
 //                     _id: { $ne: product._id },
 //                     category: product.category,
@@ -286,7 +177,6 @@ export const formatProductCard = async (product, promotions = []) => {
 
 //                 let fallbackFrom = null;
 //                 if (!products.length) {
-//                     // Same category only
 //                     products = await Product.find({
 //                         _id: { $ne: product._id },
 //                         category: product.category,
@@ -368,7 +258,7 @@ export const formatProductCard = async (product, promotions = []) => {
 //                     .lean();
 //                 products = viewed
 //                     .map((v) => v.productId)
-//                     .filter((p) => p && p.isPublished); // 👈 filter only published
+//                     .filter((p) => p && p.isPublished);
 
 //                 let fallbackFrom = null;
 //                 if (!products.length && productId) {
@@ -407,11 +297,9 @@ export const formatProductCard = async (product, promotions = []) => {
 //                     if (cat) categoryIds = [cat._id];
 //                 }
 
-//                 // Category + skinType
 //                 products = await getSkinTypeProducts(skinType._id, categoryIds);
 
 //                 if (!products.length && categoryIds.length) {
-//                     // Only skinType
 //                     products = await getSkinTypeProducts(skinType._id);
 //                     fallbackFrom = `skin type: ${skinType.name}`;
 //                 }
@@ -464,17 +352,78 @@ export const formatProductCard = async (product, promotions = []) => {
 //             }
 //         }
 
-//         // 🔹 Format
-//         products = await Promise.all(products.map((p) => formatProductCard(p)));
+//         // 3️⃣ Enrich + normalize each product (same as getSingleProduct)
+//         const enrichedProducts = await Promise.all(
+//             products.map(async (p) => {
+//                 const enriched = enrichProductWithStockAndOptions(p, promotions);
 
-//         return { success: true, products, message };
+//                 // normalize variants
+//                 let normalizedVariants = [];
+//                 if (Array.isArray(enriched.variants) && enriched.variants.length > 0) {
+//                     normalizedVariants = calculateVariantPrices(enriched.variants, enriched, promotions);
+//                 } else if (enriched.variant && (!enriched.variants || !enriched.variants.length)) {
+//                     const legacyVariant = {
+//                         sku: enriched.sku ?? `${enriched._id}-default`,
+//                         shadeName: enriched.variant || "Default",
+//                         stock: enriched.quantity ?? 0,
+//                         originalPrice: enriched.mrp ?? enriched.price ?? 0,
+//                         displayPrice: enriched.price ?? 0,
+//                         discountPercent:
+//                             enriched.mrp && enriched.mrp > enriched.price
+//                                 ? Math.round(((enriched.mrp - enriched.price) / enriched.mrp) * 100)
+//                                 : 0,
+//                         message: enriched.quantity > 0 ? "In-stock" : "No stock available",
+//                         status: enriched.quantity > 0 ? "inStock" : "outOfStock",
+//                         images: normalizeImages(enriched.images || []),
+//                     };
+//                     normalizedVariants = calculateVariantPrices([legacyVariant], enriched, promotions);
+//                 } else {
+//                     normalizedVariants = calculateVariantPrices([getPseudoVariant(enriched)], enriched, promotions);
+//                 }
+
+//                 const displayVariant =
+//                     normalizedVariants.find((v) => v.stock > 0 && v.isActive) ||
+//                     normalizedVariants[0] ||
+//                     {};
+
+//                 const price = displayVariant.displayPrice ?? enriched.price ?? 0;
+//                 const mrp = displayVariant.originalPrice ?? enriched.mrp ?? enriched.price ?? 0;
+//                 const discountPercent = mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
+//                 const status = displayVariant.status || (enriched.quantity > 0 ? "inStock" : "outOfStock");
+//                 const message = displayVariant.message || (enriched.quantity > 0 ? "In-stock" : "No stock available");
+
+//                 return {
+//                     _id: enriched._id,
+//                     name: enriched.name,
+//                     brand: enriched.brand,
+//                     price,
+//                     mrp,
+//                     discountPercent,
+//                     discountAmount: mrp - price,
+//                     images: normalizeImages(enriched.images || []),
+//                     variants: normalizedVariants,
+//                     shadeOptions: normalizedVariants.map(v => ({
+//                         name: v.shadeName || "Default",
+//                         sku: v.sku,
+//                         image: Array.isArray(v.images) && v.images.length ? v.images[0] : (enriched.thumbnail || null),
+//                         price: v.displayPrice,
+//                         status: v.status || "inStock"
+//                     })),
+//                     status,
+//                     message,
+//                     inStock: displayVariant.stock > 0,
+//                     selectedVariant: displayVariant
+//                 };
+//             })
+//         );
+
+//         return { success: true, products: enrichedProducts, message };
+
 //     } catch (err) {
 //         console.error("❌ Recommendation service error:", err);
-//         return { success: false, products: [], message: "Server error" };
+//         return { success: false, products: [], message: "Server error", error: err.message };
 //     }
 // };
-
-
 export const getRecommendations = async ({
     mode,
     productId,
@@ -535,7 +484,7 @@ export const getRecommendations = async ({
             return await Product.find(filter).sort({ sales: -1 }).limit(Number(limit)).lean();
         };
 
-        // 2️⃣ Mode-based logic
+        // 2️⃣ Mode-based logic (unchanged)
         switch (mode) {
             case "moreLikeThis": {
                 const product = await Product.findById(productId).lean();
@@ -729,70 +678,8 @@ export const getRecommendations = async ({
             }
         }
 
-        // 3️⃣ Enrich + normalize each product (same as getSingleProduct)
-        const enrichedProducts = await Promise.all(
-            products.map(async (p) => {
-                const enriched = enrichProductWithStockAndOptions(p, promotions);
-
-                // normalize variants
-                let normalizedVariants = [];
-                if (Array.isArray(enriched.variants) && enriched.variants.length > 0) {
-                    normalizedVariants = calculateVariantPrices(enriched.variants, enriched, promotions);
-                } else if (enriched.variant && (!enriched.variants || !enriched.variants.length)) {
-                    const legacyVariant = {
-                        sku: enriched.sku ?? `${enriched._id}-default`,
-                        shadeName: enriched.variant || "Default",
-                        stock: enriched.quantity ?? 0,
-                        originalPrice: enriched.mrp ?? enriched.price ?? 0,
-                        displayPrice: enriched.price ?? 0,
-                        discountPercent:
-                            enriched.mrp && enriched.mrp > enriched.price
-                                ? Math.round(((enriched.mrp - enriched.price) / enriched.mrp) * 100)
-                                : 0,
-                        message: enriched.quantity > 0 ? "In-stock" : "No stock available",
-                        status: enriched.quantity > 0 ? "inStock" : "outOfStock",
-                        images: normalizeImages(enriched.images || []),
-                    };
-                    normalizedVariants = calculateVariantPrices([legacyVariant], enriched, promotions);
-                } else {
-                    normalizedVariants = calculateVariantPrices([getPseudoVariant(enriched)], enriched, promotions);
-                }
-
-                const displayVariant =
-                    normalizedVariants.find((v) => v.stock > 0 && v.isActive) ||
-                    normalizedVariants[0] ||
-                    {};
-
-                const price = displayVariant.displayPrice ?? enriched.price ?? 0;
-                const mrp = displayVariant.originalPrice ?? enriched.mrp ?? enriched.price ?? 0;
-                const discountPercent = mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
-                const status = displayVariant.status || (enriched.quantity > 0 ? "inStock" : "outOfStock");
-                const message = displayVariant.message || (enriched.quantity > 0 ? "In-stock" : "No stock available");
-
-                return {
-                    _id: enriched._id,
-                    name: enriched.name,
-                    brand: enriched.brand,
-                    price,
-                    mrp,
-                    discountPercent,
-                    discountAmount: mrp - price,
-                    images: normalizeImages(enriched.images || []),
-                    variants: normalizedVariants,
-                    shadeOptions: normalizedVariants.map(v => ({
-                        name: v.shadeName || "Default",
-                        sku: v.sku,
-                        image: Array.isArray(v.images) && v.images.length ? v.images[0] : (enriched.thumbnail || null),
-                        price: v.displayPrice,
-                        status: v.status || "inStock"
-                    })),
-                    status,
-                    message,
-                    inStock: displayVariant.stock > 0,
-                    selectedVariant: displayVariant
-                };
-            })
-        );
+        // 3️⃣ Use helper to enrich & normalize all products
+        const enrichedProducts = await enrichProductsUnified(products, promotions);
 
         return { success: true, products: enrichedProducts, message };
 
