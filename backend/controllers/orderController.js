@@ -322,6 +322,91 @@ export const getOrderSummary = async (req, res) => {
     }
 };
 
+// export const getOrderById = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+
+//         const order = await Order.findById(id)
+//             .populate("user", "name email phone")
+//             .populate("products.productId", "name brand category images price")
+//             .populate("affiliate", "name referralCode")
+//             .populate("discount", "code type value")
+//             .lean();
+
+//         if (!order) return res.status(404).json({ message: "Order not found" });
+
+//         const response = {
+//             // --- Summary ---
+//             _id: order._id,
+//             orderId: order.orderId,
+//             orderNumber: order.orderNumber,
+//             date: order.date,
+//             status: order.status,
+//             orderType: order.orderType,
+//             amount: order.amount,
+
+//             // --- Customer ---
+//             customer: {
+//                 id: order.user?._id,
+//                 name: order.user?.name || order.customerName,
+//                 email: order.user?.email,
+//                 phone: order.user?.phone,
+//             },
+
+//             // --- Products ---
+//             products: order.products.map(p => ({
+//                 id: p.productId?._id,
+//                 name: p.productId?.name,
+//                 brand: p.productId?.brand,
+//                 category: p.productId?.category,
+//                 image: p.productId?.images?.[0] || null,
+//                 quantity: p.quantity,
+//                 price: p.price,
+//                 total: p.quantity * p.price
+//             })),
+
+//             // --- Shipping & Payment ---
+//             shippingAddress: order.shippingAddress,
+//             courierName: order.courierName || null,
+//             trackingNumber: order.trackingNumber || null,
+//             expectedDelivery: order.expectedDelivery || null,
+//             payment: {
+//                 method: order.paymentMethod || "Manual",
+//                 status: order.paymentStatus || "Pending",
+//                 transactionId: order.transactionId || null,
+//                 amount: order.amount
+//             },
+
+//             // --- Discounts & Affiliates ---
+//             discount: {
+//                 code: order.discountCode,
+//                 discountAmount: order.discountAmount || 0,
+//                 buyerDiscountAmount: order.buyerDiscountAmount || 0,
+//             },
+//             affiliate: order.affiliate
+//                 ? { id: order.affiliate._id, name: order.affiliate.name, referralCode: order.affiliate.referralCode }
+//                 : null,
+
+//             // --- Timeline (for tracking UI) ---
+//             timeline: {
+//                 orderedAt: order.date,
+//                 confirmedAt: order.confirmedAt,
+//                 shippedAt: order.shippedAt,
+//                 outForDeliveryAt: order.outForDeliveryAt,
+//                 deliveredAt: order.deliveredAt,
+//                 returnInitiatedAt: order.returnInitiatedAt
+//             }
+//         };
+
+//         res.json(response);
+//     } catch (err) {
+//         console.error(err);
+//         res.status(500).json({ message: "Failed to fetch order", error: err.message });
+//     }
+// };
+
+
+// ✅ Admin: Update order status
 export const getOrderById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -335,6 +420,22 @@ export const getOrderById = async (req, res) => {
 
         if (!order) return res.status(404).json({ message: "Order not found" });
 
+        // --- Build timeline from trackingHistory & shipment ---
+        const timeline = (order.trackingHistory || []).map(t => ({
+            status: t.status,
+            timestamp: t.timestamp,
+            location: t.location || null
+        }));
+
+        // Include shipment status as a final step if available
+        if (order.shipment?.status) {
+            timeline.push({
+                status: order.shipment.status,
+                timestamp: order.shipment.assignedAt || null,
+                location: order.shipment.courier_name || null
+            });
+        }
+
         const response = {
             // --- Summary ---
             _id: order._id,
@@ -342,6 +443,7 @@ export const getOrderById = async (req, res) => {
             orderNumber: order.orderNumber,
             date: order.date,
             status: order.status,
+            currentStatus: order.orderStatus || order.shipment?.status || order.status,
             orderType: order.orderType,
             amount: order.amount,
 
@@ -367,9 +469,9 @@ export const getOrderById = async (req, res) => {
 
             // --- Shipping & Payment ---
             shippingAddress: order.shippingAddress,
-            courierName: order.courierName || null,
-            trackingNumber: order.trackingNumber || null,
-            expectedDelivery: order.expectedDelivery || null,
+            courierName: order.shipment?.courier_name || null,
+            trackingNumber: order.shipment?.awb_code || null,
+            expectedDelivery: null, // compute if you have ETA
             payment: {
                 method: order.paymentMethod || "Manual",
                 status: order.paymentStatus || "Pending",
@@ -387,15 +489,8 @@ export const getOrderById = async (req, res) => {
                 ? { id: order.affiliate._id, name: order.affiliate.name, referralCode: order.affiliate.referralCode }
                 : null,
 
-            // --- Timeline (for tracking UI) ---
-            timeline: {
-                orderedAt: order.date,
-                confirmedAt: order.confirmedAt,
-                shippedAt: order.shippedAt,
-                outForDeliveryAt: order.outForDeliveryAt,
-                deliveredAt: order.deliveredAt,
-                returnInitiatedAt: order.returnInitiatedAt
-            }
+            // --- Timeline (with status) ---
+            timeline
         };
 
         res.json(response);
@@ -405,8 +500,6 @@ export const getOrderById = async (req, res) => {
     }
 };
 
-
-// ✅ Admin: Update order status
 export const updateOrderStatus = async (req, res) => {
     try {
         const { id } = req.params;

@@ -22,6 +22,71 @@ function mapShipmentStatus(status) {
   return map[status] || status; // fallback to raw if unknown
 }
 
+// export const getUserOrders = async (req, res) => {
+//   try {
+//     const orders = await Order.find({ user: req.user._id })
+//       .populate("products.productId")
+//       .sort({ createdAt: -1 });
+
+//     const cleanedOrders = orders.map(order => {
+//       const shipmentStatus = mapShipmentStatus(order.shipment?.status);
+//       const combinedStatus = shipmentStatus || order.status;
+//       const statusLabel = shipmentStatus || order.status;
+
+//       return {
+//         orderId: order.orderId,
+//         orderNumber: order.orderNumber,
+//         date: order.date,
+//         status: order.status, // raw DB status
+//         shipmentStatus, // normalized
+//         combinedStatus,
+//         statusLabel,
+//         amount: order.amount,
+//         discountAmount: order.discountAmount || 0,
+//         discountCode: order.discountCode || null,
+//         buyerDiscountAmount: order.buyerDiscountAmount || 0,
+//         shippingAddress: order.shippingAddress || null,
+//         products: order.products.map(item => {
+//           const product = item.productId;
+//           return {
+//             productId: product?._id,
+//             name: product?.name || "Unknown Product",
+//             variant: product?.variant || null,
+//             brand: product?.brand || null,
+//             category: product?.category || null,
+//             image: product?.images?.[0] || null,
+//             quantity: item.quantity,
+//             price: item.price,
+//             total: item.quantity * item.price,
+//           };
+//         }),
+//         payment: {
+//           method: order.paymentMethod || "Manual",
+//           status: order.paymentStatus || "pending",
+//           transactionId: order.transactionId || null,
+//         },
+//         expectedDelivery:
+//           order.expectedDelivery ||
+//           new Date(order.date.getTime() + 5 * 24 * 60 * 60 * 1000), // +5 days fallback
+//         shipment: order.shipment
+//           ? {
+//             shipment_id: order.shipment.shipment_id,
+//             awb_code: order.shipment.awb_code,
+//             courier: order.shipment.courier,
+//             status: shipmentStatus,
+//             tracking_url: order.shipment.tracking_url || null,
+//             track_now: order.shipment.tracking_url || null,
+//           }
+//           : null,
+//       };
+//     });
+
+//     res.status(200).json({ orders: cleanedOrders });
+//   } catch (err) {
+//     console.error("🔥 Error fetching user orders:", err);
+//     res.status(500).json({ message: "Failed to fetch orders" });
+//   }
+// };
 export const getUserOrders = async (req, res) => {
   try {
     const orders = await Order.find({ user: req.user._id })
@@ -29,37 +94,34 @@ export const getUserOrders = async (req, res) => {
       .sort({ createdAt: -1 });
 
     const cleanedOrders = orders.map(order => {
-      const shipmentStatus = mapShipmentStatus(order.shipment?.status);
-      const combinedStatus = shipmentStatus || order.status;
-      const statusLabel = shipmentStatus || order.status;
+      // Combine shipment status with order status
+      const shipmentStatus = order.shipment?.status || null;
+      const combinedStatus = shipmentStatus || order.orderStatus || order.status;
 
       return {
+        _id: order._id, // ✅ MongoDB ObjectId
         orderId: order.orderId,
         orderNumber: order.orderNumber,
         date: order.date,
-        status: order.status, // raw DB status
-        shipmentStatus, // normalized
+        status: order.status,
+        shipmentStatus,
         combinedStatus,
-        statusLabel,
         amount: order.amount,
         discountAmount: order.discountAmount || 0,
         discountCode: order.discountCode || null,
         buyerDiscountAmount: order.buyerDiscountAmount || 0,
         shippingAddress: order.shippingAddress || null,
-        products: order.products.map(item => {
-          const product = item.productId;
-          return {
-            productId: product?._id,
-            name: product?.name || "Unknown Product",
-            variant: product?.variant || null,
-            brand: product?.brand || null,
-            category: product?.category || null,
-            image: product?.images?.[0] || null,
-            quantity: item.quantity,
-            price: item.price,
-            total: item.quantity * item.price,
-          };
-        }),
+        products: order.products.map(item => ({
+          productId: item.productId?._id,
+          name: item.productId?.name || "Unknown Product",
+          variant: item.productId?.variant || null,
+          brand: item.productId?.brand || null,
+          category: item.productId?.category || null,
+          image: item.productId?.images?.[0] || null,
+          quantity: item.quantity,
+          price: item.price,
+          total: item.quantity * item.price,
+        })),
         payment: {
           method: order.paymentMethod || "Manual",
           status: order.paymentStatus || "pending",
@@ -67,17 +129,7 @@ export const getUserOrders = async (req, res) => {
         },
         expectedDelivery:
           order.expectedDelivery ||
-          new Date(order.date.getTime() + 5 * 24 * 60 * 60 * 1000), // +5 days fallback
-        shipment: order.shipment
-          ? {
-            shipment_id: order.shipment.shipment_id,
-            awb_code: order.shipment.awb_code,
-            courier: order.shipment.courier,
-            status: shipmentStatus,
-            tracking_url: order.shipment.tracking_url || null,
-            track_now: order.shipment.tracking_url || null,
-          }
-          : null,
+          new Date(order.date.getTime() + 5 * 24 * 60 * 60 * 1000),
       };
     });
 
@@ -184,62 +236,144 @@ export const initiateOrderFromCart = async (req, res) => {
   }
 };
 
+// export const getOrderTracking = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+
+//     // Validate ObjectId upfront
+//     if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+//       return res.status(400).json({ message: "Invalid order ID" });
+//     }
+
+//     const order = await Order.findById(id).populate("products.productId");
+//     if (!order) {
+//       return res.status(404).json({ message: "Order not found" });
+//     }
+
+//     let liveTracking = null;
+
+//     // ✅ Fetch Shiprocket tracking only if AWB exists
+//     if (order.shipment?.awb_code) {
+//       try {
+//         const token = await getShiprocketToken();
+//         const trackRes = await axios.get(
+//           `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${order.shipment.awb_code}`,
+//           { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 } // ⏱ 10s safety timeout
+//         );
+//         liveTracking = trackRes.data;
+//       } catch (err) {
+//         console.error("❌ Shiprocket tracking fetch failed:", err.response?.data || err.message);
+//         // Still send response gracefully
+//         liveTracking = { tracking_data: { shipment_status: "Tracking Unavailable" } };
+//       }
+//     }
+
+//     // ✅ Always return something
+//     return res.json({
+//       orderId: order._id,
+//       status: order.orderStatus,
+//       shipment: {
+//         shipment_id: order.shipment?.shipment_id || null,
+//         awb_code: order.shipment?.awb_code || null,
+//         tracking_url: order.shipment?.tracking_url || null,
+//         courier_id: order.shipment?.courier_id || null,
+//         courier_name:
+//           liveTracking?.tracking_data?.courier_name || order.shipment?.courier_name || null,
+//         current_status:
+//           liveTracking?.tracking_data?.shipment_status ||
+//           order.shipment?.status ||
+//           "Created",
+//         checkpoints: liveTracking?.tracking_data?.shipment_track || [],
+//       },
+//       products: order.products.map((item) => ({
+//         name: item.productId.name,
+//         variant: item.productId.variant,
+//         price: item.price,
+//         quantity: item.quantity,
+//         image: item.productId.images[0],
+//         brand: item.productId.brand,
+//       })),
+//       amount: order.amount,
+//       payment: {
+//         transactionId: order.transactionId,
+//         method: order.paymentMethod,
+//         status: order.paymentStatus,
+//       },
+//       shippingAddress: order.shippingAddress,
+//       createdAt: order.createdAt,
+//     });
+//   } catch (err) {
+//     console.error("🔥 getOrderTracking failed:", err.message);
+//     return res.status(500).json({
+//       message: "Failed to fetch order tracking",
+//       error: err.message,
+//     });
+//   }
+// };
 export const getOrderTracking = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Validate ObjectId upfront
     if (!id || !mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ message: "Invalid order ID" });
     }
 
     const order = await Order.findById(id).populate("products.productId");
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" });
+    if (!order) return res.status(404).json({ message: "Order not found" });
+
+    // --- Build timeline from trackingHistory
+    const timeline = (order.trackingHistory || []).map(t => ({
+      status: t.status,
+      timestamp: t.timestamp,
+      location: t.location || null,
+    }));
+
+    // Include shipment as the last step
+    if (order.shipment?.status) {
+      timeline.push({
+        status: order.shipment.status,
+        timestamp: order.shipment.assignedAt || order.updatedAt || null,
+        location: order.shipment.courier_name || null,
+      });
     }
 
+    // --- Live Shiprocket tracking (optional) ---
     let liveTracking = null;
-
-    // ✅ Fetch Shiprocket tracking only if AWB exists
     if (order.shipment?.awb_code) {
       try {
         const token = await getShiprocketToken();
         const trackRes = await axios.get(
           `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${order.shipment.awb_code}`,
-          { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 } // ⏱ 10s safety timeout
+          { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
         );
         liveTracking = trackRes.data;
       } catch (err) {
         console.error("❌ Shiprocket tracking fetch failed:", err.response?.data || err.message);
-        // Still send response gracefully
         liveTracking = { tracking_data: { shipment_status: "Tracking Unavailable" } };
       }
     }
 
-    // ✅ Always return something
-    return res.json({
-      orderId: order._id,
-      status: order.orderStatus,
+    res.json({
+      _id: order._id, // ✅ MongoDB ObjectId
+      orderId: order.orderId,
+      status: order.orderStatus || order.status,
       shipment: {
         shipment_id: order.shipment?.shipment_id || null,
         awb_code: order.shipment?.awb_code || null,
-        tracking_url: order.shipment?.tracking_url || null,
         courier_id: order.shipment?.courier_id || null,
-        courier_name:
-          liveTracking?.tracking_data?.courier_name || order.shipment?.courier_name || null,
+        courier_name: liveTracking?.tracking_data?.courier_name || order.shipment?.courier_name || null,
         current_status:
-          liveTracking?.tracking_data?.shipment_status ||
-          order.shipment?.status ||
-          "Created",
-        checkpoints: liveTracking?.tracking_data?.shipment_track || [],
+          liveTracking?.tracking_data?.shipment_status || order.shipment?.status || "Created",
+        tracking_url: order.shipment?.tracking_url || null,
       },
       products: order.products.map((item) => ({
-        name: item.productId.name,
-        variant: item.productId.variant,
+        productId: item.productId?._id,
+        name: item.productId?.name,
+        variant: item.productId?.variant || null,
         price: item.price,
         quantity: item.quantity,
-        image: item.productId.images[0],
-        brand: item.productId.brand,
+        image: item.productId?.images?.[0] || null,
+        brand: item.productId?.brand || null,
       })),
       amount: order.amount,
       payment: {
@@ -249,6 +383,7 @@ export const getOrderTracking = async (req, res) => {
       },
       shippingAddress: order.shippingAddress,
       createdAt: order.createdAt,
+      timeline, // ✅ include all previous steps
     });
   } catch (err) {
     console.error("🔥 getOrderTracking failed:", err.message);
