@@ -11,7 +11,8 @@ router.post('/products/add-product', verifyAdminOrTeamMember,
     addProductController);
 router.get('/products', verifyAdminOrTeamMember, getAllProducts);
 router.get('/products/:id', verifyAdminOrTeamMember, getSingleProductById);
-router.patch('/products/:id', verifyAdminOrTeamMember, uploadProduct.array('images', 5), updateProductById);
+router.patch('/products/:id', verifyAdminOrTeamMember, uploadProduct.any(), // Accept any file dynamically
+    updateProductById);
 router.put('/products/:id/stock', verifyAdminOrTeamMember, updateProductStock);
 router.delete('/products/:id', verifyAdminOrTeamMember, deleteProduct);
 // Update images of a specific foundationVariant (by SKU)

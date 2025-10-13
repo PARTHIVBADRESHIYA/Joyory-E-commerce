@@ -2,204 +2,138 @@ import Order from '../models/Order.js';
 import User from '../models/User.js';
 import Review from '../models/Review.js';
 import dayjs from 'dayjs';
-import Affiliate from '../models/Affiliate.js';
 import Product from "../models/Product.js";
 
 export const getAnalyticsDashboard = async (req, res) => {
     try {
-        const orders = await Order.find({
-            status: { $in: ["Delivered", "Completed"] }
-        }).populate("products.productId").populate("promotionUsed.promotionId");
+        // 🔹 Fetch necessary data
+        const orders = await Order.find().populate("user").populate("products.productId").lean();
+        const products = await Product.find().populate("category", "name").lean();
+        const users = await User.find().lean();
 
-        const products = await Product.find();
-        const users = await User.find();
-        const affiliates = await Affiliate.find().populate('generatedLinks.product');
+        // 🕒 Define time ranges
+        const now = dayjs();
+        const lastWeekStart = now.subtract(7, "day");
+        const prevWeekStart = now.subtract(14, "day");
 
-        // 📌 Totals
-        let totalRevenue = 0, totalProfit = 0, totalPurchase = 0, totalSales = 0;
-        let totalAffiliatePayout = 0;
-
-        for (const order of orders) {
-            totalRevenue += order.amount;
-
-            for (const item of order.products) {
-                const product = item.productId;
-                if (!product) continue;
-
-                const cost = product.buyingPrice * item.quantity;
-                const revenue = item.price * item.quantity;
-
-                let commission = 0;
-                if (order.affiliate) {
-                    const affiliate = await Affiliate.findById(order.affiliate);
-                    commission = order.amount * (affiliate?.commissionRate || 0.15);
-                    totalAffiliatePayout += commission;
-                }
-
-                totalProfit += (revenue - cost - commission);
-                totalPurchase += cost;
-                totalSales += revenue;
-            }
-        }
-
-
-        const avgOrderValue = totalRevenue / (orders.length || 1);
-        const totalCustomers = new Set(orders.map(o => o.user?.toString())).size;
-
-        // 🔁 Repeat Customer Rate
-        const customerOrderMap = {};
-        orders.forEach(o => {
-            const uid = o.user?.toString();
-            if (uid) customerOrderMap[uid] = (customerOrderMap[uid] || 0) + 1;
-        });
-        const repeatCustomers = Object.values(customerOrderMap).filter(c => c > 1).length;
-        const repeatCustomerRate = ((repeatCustomers / totalCustomers) * 100).toFixed(2);
-
-        // 🏆 Best-Selling Products
-        const bestSellers = products
-            .sort((a, b) => b.sales - a.sales)
-            .slice(0, 5)
-            .map(p => ({
-                title: p.title,
-                productId: p.productID || p._id,
-                category: p.category,
-                remaining: `${p.stock || 0} ${p.unit || ''}`,
-                turnover: p.sales * p.sellingPrice,
-                increaseBy: `${(Math.random() * 3).toFixed(1)}%`
-            }));
-
-        // 📦 Best-Selling Categories
-        const categoryStats = {};
-        products.forEach(p => {
-            if (!categoryStats[p.category]) categoryStats[p.category] = { count: 0, turnover: 0 };
-            categoryStats[p.category].count += p.sales;
-            categoryStats[p.category].turnover += p.sales * p.sellingPrice;
-        });
-        const topCategories = Object.entries(categoryStats)
-            .map(([category, stats]) => ({ category, ...stats, increaseBy: `${(Math.random() * 3).toFixed(1)}%` }))
-            .sort((a, b) => b.turnover - a.turnover)
-            .slice(0, 5);
-
-        // 📈 Revenue Trends
-        const monthlyStats = {};
-        orders.forEach(o => {
-            const month = new Date(o.createdAt).toISOString().slice(0, 7);
-            if (!monthlyStats[month]) monthlyStats[month] = { orders: 0, revenue: 0 };
-            monthlyStats[month].orders += 1;
-            monthlyStats[month].revenue += o.amount;
-        });
-        const monthlyTrends = Object.entries(monthlyStats)
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([month, stats]) => ({ month, ...stats }));
-
-        // 💰 Revenue by Channel
-        const channelRevenue = { Online: 0, Affiliate: 0, Campaign: 0, Promotion: 0 };
-
-        for (const o of orders) {
-            const type = o.orderType || "Online";
-            channelRevenue[type] = (channelRevenue[type] || 0) + o.amount;
-
-            if (o.affiliate) {
-                channelRevenue.Affiliate += o.amount; // ✅ Add to Affiliate channel
-            }
-
-            if (o.promotionUsed?.promotionId) {
-                channelRevenue.Promotion += o.amount; // ✅ Existing logic
-            }
-        }
-
-
-        // 🤝 Affiliate Conversions
-        const topAffiliates = affiliates.flatMap(a => a.generatedLinks.map(link => ({
-            product: link.product?.title || "Deleted Product",
-            conversions: link.clicks,
-            revenue: link.clicks * (link.product?.sellingPrice || 0),
-            trend: `${(Math.random() * 5).toFixed(1)}%`
-        }))).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
-
-        // 📊 MoM & YoY Profit Logic
-        const startOfThisMonth = dayjs().startOf('month').toDate();
-        const endOfThisMonth = dayjs().endOf('month').toDate();
-        const startOfLastMonth = dayjs().subtract(1, 'month').startOf('month').toDate();
-        const endOfLastMonth = dayjs().subtract(1, 'month').endOf('month').toDate();
-
-        const startOfThisYear = dayjs().startOf('year').toDate();
-        const now = new Date();
-        const sameDayLastYear = dayjs().subtract(1, 'year').toDate();
-        const startOfLastYear = dayjs().subtract(1, 'year').startOf('year').toDate();
-
-        const thisMonthOrders = await Order.find({
-            status: { $in: ["Delivered", "Completed"] },
-            createdAt: { $gte: startOfThisMonth, $lte: endOfThisMonth }
-        }).populate("products.productId");
-
-        const lastMonthOrders = await Order.find({
-            status: { $in: ["Delivered", "Completed"] },
-            createdAt: { $gte: startOfLastMonth, $lte: endOfLastMonth }
-        }).populate("products.productId");
-
-        const thisYearOrders = await Order.find({
-            status: { $in: ["Delivered", "Completed"] },
-            createdAt: { $gte: startOfThisYear, $lte: now }
-        }).populate("products.productId");
-
-        const lastYearOrders = await Order.find({
-            status: { $in: ["Delivered", "Completed"] },
-            createdAt: { $gte: startOfLastYear, $lte: sameDayLastYear }
-        }).populate("products.productId");
-
-        const calcProfit = (orders) => {
-            let profit = 0;
-            orders.forEach(order => {
-                order.products.forEach(item => {
-                    const product = item.productId;
-                    if (product) {
-                        const cost = product.buyingPrice * item.quantity;
-                        const revenue = item.price * item.quantity;
-                        profit += (revenue - cost);
-                    }
-                });
-            });
-            return profit;
+        // Helper for simple growth
+        const calcSimpleGrowth = (current, previous) => {
+            if (previous === 0 && current === 0) return { value: current, changePercent: 0, trend: "neutral" };
+            if (previous === 0) return { value: current, changePercent: 100, trend: "up" };
+            const change = ((current - previous) / previous) * 100;
+            return {
+                value: current,
+                changePercent: Number(change.toFixed(1)),
+                trend: change > 0 ? "up" : change < 0 ? "down" : "neutral"
+            };
         };
 
-        const momProfit = calcProfit(lastMonthOrders) > 0
-            ? +(((calcProfit(thisMonthOrders) - calcProfit(lastMonthOrders)) / calcProfit(lastMonthOrders)) * 100).toFixed(2)
-            : calcProfit(thisMonthOrders) > 0 ? 100 : 0;
+        // --- 1. Summary metrics (last 7 days vs previous 7 days) ---
+        const getOrdersCount = (statusArr, start, end) =>
+            orders.filter(o => statusArr.includes(o.status) && dayjs(o.createdAt).isAfter(start) && dayjs(o.createdAt).isBefore(end)).length;
 
-        const yoyProfit = calcProfit(lastYearOrders) > 0
-            ? +(((calcProfit(thisYearOrders) - calcProfit(lastYearOrders)) / calcProfit(lastYearOrders)) * 100).toFixed(2)
-            : calcProfit(thisYearOrders) > 0 ? 100 : 0;
+        const getRevenue = (start, end) =>
+            orders.filter(o => dayjs(o.createdAt).isAfter(start) && dayjs(o.createdAt).isBefore(end))
+                  .reduce((sum, o) => sum + (o.amount || 0), 0);
 
-        res.status(200).json({
-            totals: {
-                totalProfit,
-                totalRevenue,
-                totalSales,
-                totalPurchase,
-                avgOrderValue,
-                totalOrders: orders.length,
-                totalCustomers,
-                repeatCustomerRate,
-                totalAffiliatePayout,
-                momProfit,
-                yoyProfit
-            },
-            bestSellers,
-            topCategories,
-            topAffiliates,
-            monthlyTrends,
-            channelRevenue
+        const getUsersCount = (start, end) =>
+            users.filter(u => dayjs(u.createdAt).isAfter(start) && dayjs(u.createdAt).isBefore(end)).length;
+
+        const lastWeekOrders = orders.filter(o => dayjs(o.createdAt).isAfter(lastWeekStart)).length;
+        const prevWeekOrders = orders.filter(o => dayjs(o.createdAt).isAfter(prevWeekStart) && dayjs(o.createdAt).isBefore(lastWeekStart)).length;
+
+        const lastWeekCompleted = getOrdersCount(["Delivered", "Completed"], lastWeekStart, now);
+        const prevWeekCompleted = getOrdersCount(["Delivered", "Completed"], prevWeekStart, lastWeekStart);
+
+        const lastWeekActive = getOrdersCount(["Pending", "Processing", "Shipped"], lastWeekStart, now);
+        const prevWeekActive = getOrdersCount(["Pending", "Processing", "Shipped"], prevWeekStart, lastWeekStart);
+
+        const lastWeekReturns = getOrdersCount(["Cancelled"], lastWeekStart, now);
+        const prevWeekReturns = getOrdersCount(["Cancelled"], prevWeekStart, lastWeekStart);
+
+        const lastWeekRevenue = getRevenue(lastWeekStart, now);
+        const prevWeekRevenue = getRevenue(prevWeekStart, lastWeekStart);
+
+        // Calculate growth for summary
+        const summary = {
+            totalOrders: calcSimpleGrowth(lastWeekOrders, prevWeekOrders),
+            completedOrders: calcSimpleGrowth(lastWeekCompleted, prevWeekCompleted),
+            activeOrders: calcSimpleGrowth(lastWeekActive, prevWeekActive),
+            returnOrders: calcSimpleGrowth(lastWeekReturns, prevWeekReturns),
+            totalRevenue: calcSimpleGrowth(lastWeekRevenue, prevWeekRevenue)
+        };
+
+        // --- 2. Sales Trends ---
+        const monthlyRevenueMap = {};
+        orders.forEach(o => {
+            const month = dayjs(o.createdAt).format("YYYY-MM");
+            monthlyRevenueMap[month] = (monthlyRevenueMap[month] || 0) + (o.amount || 0);
         });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({
-            message: "Analytics fetch failed",
-            error: err.message
+
+        const salesTrends = Object.entries(monthlyRevenueMap)
+            .map(([month, revenue]) => ({ month, revenue }))
+            .sort((a, b) => a.month.localeCompare(b.month));
+
+        // --- 3. Stock Alerts ---
+        const stockAlerts = [];
+        products.forEach(p => {
+            if (p.quantity <= 5) {
+                stockAlerts.push({ name: p.name, stock: p.quantity, price: p.price });
+            }
+            p.variants?.forEach(v => {
+                if (v.stock <= (v.thresholdValue || 5)) {
+                    stockAlerts.push({
+                        name: `${p.name} (${v.shadeName || "Variant"})`,
+                        stock: v.stock,
+                        price: v.discountedPrice || p.discountedPrice || p.price
+                    });
+                }
+            });
         });
+
+        // --- 4. Recent Orders ---
+        const recentOrders = orders
+            .sort((a, b) => b.createdAt - a.createdAt)
+            .slice(0, 6)
+            .map(o => ({
+                productName: o.products?.[0]?.productId?.name || "N/A",
+                orderId: o.orderId,
+                date: dayjs(o.createdAt).format("MMM D, YYYY"),
+                customerName: o.customerName || o.user?.name || "Guest",
+                status: o.status,
+                paymentMode: o.orderType,
+                amount: o.amount
+            }));
+
+        // --- 5. Top Products ---
+        const topSearches = [...products]
+            .sort((a, b) => (b.sales || 0) - (a.sales || 0))
+            .slice(0, 3)
+            .map((p, i) => ({ rank: i + 1, name: p.name, price: p.discountedPrice || p.price }));
+
+        // --- 6. Category Trends ---
+        const categoryStats = {};
+        products.forEach(p => {
+            if (!p.category) return;
+            const catName = p.category.name || "Unknown";
+            if (!categoryStats[catName]) categoryStats[catName] = { sales: 0, revenue: 0 };
+            categoryStats[catName].sales += p.sales || 0;
+            categoryStats[catName].revenue += (p.sales || 0) * (p.sellingPrice || 0);
+        });
+
+        const categoryTrends = Object.entries(categoryStats)
+            .map(([categoryName, stats]) => ({ category: categoryName, sales: stats.sales, revenue: stats.revenue }))
+            .sort((a, b) => b.sales - a.sales)
+            .slice(0, 5);
+
+        // ✅ Final Dashboard Response
+        res.status(200).json({ summary, salesTrends, stockAlerts, recentOrders, topSearches, categoryTrends });
+
+    } catch (error) {
+        console.error("🔥 Dashboard Error:", error);
+        res.status(500).json({ success: false, message: "Failed to load admin dashboard", error: error.message });
     }
 };
-
 
 export const getCustomerVolumeAnalytics = async () => {
     const totalCustomers = await User.countDocuments();

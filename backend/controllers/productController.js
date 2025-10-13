@@ -395,66 +395,133 @@ const updateProductStock = async (req, res) => {
     }
 };
 
+// const updateProductById = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const updateData = { ...req.body };
+
+//         // ✅ Numbers
+//         if (req.body.price) updateData.price = Number(req.body.price);
+//         if (req.body.buyingPrice) updateData.buyingPrice = Number(req.body.buyingPrice);
+//         if (req.body.quantity !== undefined) updateData.quantity = Number(req.body.quantity);
+//         if (req.body.thresholdValue !== undefined) updateData.thresholdValue = Number(req.body.thresholdValue);
+
+//         // ✅ Variants
+//         if (req.body.variants) {
+//             let rawVariants = req.body.variants;
+//             if (typeof rawVariants === "string") {
+//                 try { rawVariants = JSON.parse(rawVariants); } catch { rawVariants = []; }
+//             }
+
+//             if (Array.isArray(rawVariants)) {
+//                 rawVariants = rawVariants.map(v => ({
+//                     sku: v.sku,
+//                     shadeName: v.shadeName || null,
+//                     hex: v.hex || null,
+//                     images: v.images || [],
+//                     stock: Number(v.stock) || 0,
+//                     sales: Number(v.sales) || 0,
+//                     isActive: v.isActive !== false,
+//                     discountedPrice: v.discountedPrice !== undefined ? Number(v.discountedPrice) : undefined // ✅ Add discountedPrice
+//                 }));
+
+//                 updateData.variants = rawVariants;
+//                 updateData.shadeOptions = rawVariants.map(v => v.shadeName).filter(Boolean);
+//                 updateData.colorOptions = rawVariants.map(v => v.hex).filter(Boolean);
+
+//                 // 🔹 Auto recalc total stock & status
+//                 updateData.quantity = rawVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
+//                 const threshold = updateData.thresholdValue !== undefined
+//                     ? updateData.thresholdValue
+//                     : (await Product.findById(id))?.thresholdValue || 0;
+
+//                 updateData.status =
+//                     updateData.quantity === 0 ? "Out of stock" :
+//                         updateData.quantity < threshold ? "Low stock" :
+//                             "In-stock";
+//             }
+//         } else if (updateData.quantity !== undefined) {
+//             // 🔹 Non-variant product stock update
+//             const threshold = updateData.thresholdValue !== undefined
+//                 ? updateData.thresholdValue
+//                 : (await Product.findById(id))?.thresholdValue || 0;
+
+//             updateData.status =
+//                 updateData.quantity === 0 ? "Out of stock" :
+//                     updateData.quantity < threshold ? "Low stock" :
+//                         "In-stock";
+//         }
+
+//         // ✅ Images
+//         if (req.files?.length > 0) {
+//             updateData.images = req.files.map(f => f.path);
+//         }
+
+//         // ✅ Update product
+//         const updated = await Product.findByIdAndUpdate(id, updateData, { new: true });
+//         if (!updated) return res.status(404).json({ message: "❌ Product not found" });
+
+//         res.status(200).json({ message: "✅ Product updated successfully", product: updated });
+
+//     } catch (error) {
+//         console.error("❌ Product update error:", error);
+//         res.status(500).json({ message: "Failed to update product", error: error.message });
+//     }
+// };
 const updateProductById = async (req, res) => {
     try {
         const { id } = req.params;
         const updateData = { ...req.body };
 
-        // ✅ Numbers
+        // ---------------- Numbers ----------------
         if (req.body.price) updateData.price = Number(req.body.price);
         if (req.body.buyingPrice) updateData.buyingPrice = Number(req.body.buyingPrice);
         if (req.body.quantity !== undefined) updateData.quantity = Number(req.body.quantity);
         if (req.body.thresholdValue !== undefined) updateData.thresholdValue = Number(req.body.thresholdValue);
 
-        // ✅ Variants
-        if (req.body.variants) {
-            let rawVariants = req.body.variants;
-            if (typeof rawVariants === "string") {
-                try { rawVariants = JSON.parse(rawVariants); } catch { rawVariants = []; }
-            }
+        // ---------------- Variants ----------------
+        let rawVariants = req.body.variants || [];
+        if (typeof rawVariants === "string") {
+            try { rawVariants = JSON.parse(rawVariants); } catch { rawVariants = []; }
+        }
 
-            if (Array.isArray(rawVariants)) {
-                rawVariants = rawVariants.map(v => ({
-                    sku: v.sku,
-                    shadeName: v.shadeName || null,
-                    hex: v.hex || null,
-                    images: v.images || [],
-                    stock: Number(v.stock) || 0,
-                    sales: Number(v.sales) || 0,
-                    thresholdValue: Number(v.thresholdValue) || 0,
-                    isActive: v.isActive !== false,
-                    discountedPrice:
-                        v.discountedPrice !== undefined ? Number(v.discountedPrice) : undefined,
+        // ---------------- Handle uploaded images ----------------
+        const productImages = [];
+        const variantImagesMap = {}; // {0: [], 1: []} => index of variant
 
-                    // ✅ Include these fields
-                    familyKey: v.familyKey || null,
-                    toneKeys: Array.isArray(v.toneKeys) ? v.toneKeys : [],
-                    undertoneKeys: Array.isArray(v.undertoneKeys) ? v.undertoneKeys : [],
-                }));
+        if (req.files && req.files.length > 0) {
+            req.files.forEach(file => {
+                // Product-level images
+                if (file.fieldname === "images") productImages.push(file.path);
 
-                updateData.variants = rawVariants;
-                updateData.shadeOptions = rawVariants.map(v => v.shadeName).filter(Boolean);
-                updateData.colorOptions = rawVariants.map(v => v.hex).filter(Boolean);
+                // Variant images: expect fieldname = variants[0][images], variants[1][images], etc.
+                const variantMatch = file.fieldname.match(/variants\[(\d+)\]\[images\]/);
+                if (variantMatch) {
+                    const idx = Number(variantMatch[1]);
+                    if (!variantImagesMap[idx]) variantImagesMap[idx] = [];
+                    variantImagesMap[idx].push(file.path);
+                }
+            });
+        }
 
-                updateData.quantity = rawVariants.reduce(
-                    (sum, v) => sum + (v.stock || 0),
-                    0
-                );
+        if (rawVariants.length > 0) {
+            rawVariants = rawVariants.map((v, idx) => ({
+                sku: v.sku,
+                shadeName: v.shadeName || null,
+                hex: v.hex || null,
+                stock: Number(v.stock) || 0,
+                sales: Number(v.sales) || 0,
+                isActive: v.isActive !== false,
+                discountedPrice: v.discountedPrice !== undefined ? Number(v.discountedPrice) : undefined,
+                images: variantImagesMap[idx] || v.images || [],
+            }));
 
-                const threshold =
-                    updateData.thresholdValue !== undefined
-                        ? updateData.thresholdValue
-                        : (await Product.findById(id))?.thresholdValue || 0;
+            updateData.variants = rawVariants;
+            updateData.shadeOptions = rawVariants.map(v => v.shadeName).filter(Boolean);
+            updateData.colorOptions = rawVariants.map(v => v.hex).filter(Boolean);
 
-                updateData.status =
-                    updateData.quantity === 0
-                        ? "Out of stock"
-                        : updateData.quantity < threshold
-                            ? "Low stock"
-                            : "In-stock";
-            }
-        } else if (updateData.quantity !== undefined) {
-            // 🔹 Non-variant product stock update
+            // Recalculate total stock & status
+            updateData.quantity = rawVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
             const threshold = updateData.thresholdValue !== undefined
                 ? updateData.thresholdValue
                 : (await Product.findById(id))?.thresholdValue || 0;
@@ -465,12 +532,12 @@ const updateProductById = async (req, res) => {
                         "In-stock";
         }
 
-        // ✅ Images
-        if (req.files?.length > 0) {
-            updateData.images = req.files.map(f => f.path);
+        // Product-level images
+        if (productImages.length > 0) {
+            updateData.images = productImages;
         }
 
-        // ✅ Update product
+        // ---------------- Update product ----------------
         const updated = await Product.findByIdAndUpdate(id, updateData, { new: true });
         if (!updated) return res.status(404).json({ message: "❌ Product not found" });
 
