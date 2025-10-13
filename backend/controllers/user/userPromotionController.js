@@ -7,7 +7,7 @@ import { formatProductCard,getPseudoVariant} from "../../middlewares/utils/recom
 import { fetchProducts } from "../../middlewares/services/productQueryBuilder.js";
 import { normalizeFilters, applyDynamicFilters } from "../../controllers/user/userProductController.js";
 import { applyPromotions } from "../../middlewares/services/promotionEngine.js";
-import { enrichProductWithStockAndOptions } from "../../middlewares/services/productHelpers.js";
+import { enrichProductWithStockAndOptions, enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
 import { calculateVariantPrices } from "../../middlewares/services/promotionHelper.js";
 
 const ObjectId = mongoose.Types.ObjectId; // ✅ Fix for ReferenceError
@@ -212,6 +212,7 @@ export const getActivePromotionsForUsers = async (req, res) => {
 //             .lean();
 //         if (!promo) return res.status(404).json({ message: "Promotion not found" });
 
+//         // 🔹 Base filter
 //         const baseMatch = { isPublished: true };
 //         if (promo.scope === "category" && promo.categories?.length) {
 //             const catIds = promo.categories
@@ -236,6 +237,7 @@ export const getActivePromotionsForUsers = async (req, res) => {
 //         const dynamicFilters = applyDynamicFilters(filters);
 //         const finalFilter = { ...baseMatch, ...dynamicFilters };
 
+//         // 🔹 Fetch products
 //         const total = await Product.countDocuments(finalFilter);
 //         const rawProducts = await Product.find(finalFilter)
 //             .sort(
@@ -248,32 +250,34 @@ export const getActivePromotionsForUsers = async (req, res) => {
 //             .limit(limit)
 //             .lean();
 
+//         // 🔹 Active promotions
 //         const now = new Date();
-//         const promotions = await Promotion.find({
+//         const activePromotions = await Promotion.find({
 //             status: "active",
 //             startDate: { $lte: now },
 //             endDate: { $gte: now }
 //         }).lean();
 
+//         // 🔹 Enrich products & calculate variants
 //         const products = await Promise.all(rawProducts.map(async p => {
-//             const enrichedProduct = enrichProductWithStockAndOptions(p, promotions);
+//             const enrichedProduct = enrichProductWithStockAndOptions(p, activePromotions);
 
-//             // 🔹 Use helper to calculate variants
-//             const variants = calculateVariantPrices(enrichedProduct.variants, enrichedProduct, [promo, ...promotions]);
+//             // ⚡ Keep legacy variant intact
+//             const variantsArray = enrichedProduct.variants && enrichedProduct.variants.length
+//                 ? calculateVariantPrices(enrichedProduct.variants, enrichedProduct, [promo, ...activePromotions])
+//                 : calculateVariantPrices([getPseudoVariant(enrichedProduct)], enrichedProduct, [promo, ...activePromotions]);
 
-//             const card = await formatProductCard({ ...enrichedProduct, variants });
+//             const card = await formatProductCard({ ...enrichedProduct, variants: variantsArray }, [promo, ...activePromotions]);
 
-//             let badge = null, promoMessage = null;
-//             const maxDiscountPercent = Math.max(...variants.map(v => v.discountPercent));
-//             if (maxDiscountPercent > 0) {
-//                 badge = `${maxDiscountPercent}% Off`;
-//                 promoMessage = `Save ${badge} on this product`;
-//             }
+//             // 🔹 Promo badge
+//             const maxDiscountPercent = Math.max(...variantsArray.map(v => v.discountPercent));
+//             let badge = maxDiscountPercent > 0 ? `${maxDiscountPercent}% Off` : null;
+//             let promoMessage = badge ? `Save ${badge} on this product` : null;
 
 //             return {
 //                 ...card,
 //                 brand: p.brand ? await Brand.findById(p.brand).select("_id name slug").lean() : null,
-//                 variants,
+//                 variants: variantsArray,
 //                 badge,
 //                 promoMessage
 //             };
@@ -359,30 +363,15 @@ export const getPromotionProducts = async (req, res) => {
             endDate: { $gte: now }
         }).lean();
 
-        // 🔹 Enrich products & calculate variants
-        const products = await Promise.all(rawProducts.map(async p => {
-            const enrichedProduct = enrichProductWithStockAndOptions(p, activePromotions);
+        // 🔹 Enrich products using the unified helper
+        const products = await enrichProductsUnified(rawProducts, [promo, ...activePromotions]);
 
-            // ⚡ Keep legacy variant intact
-            const variantsArray = enrichedProduct.variants && enrichedProduct.variants.length
-                ? calculateVariantPrices(enrichedProduct.variants, enrichedProduct, [promo, ...activePromotions])
-                : calculateVariantPrices([getPseudoVariant(enrichedProduct)], enrichedProduct, [promo, ...activePromotions]);
-
-            const card = await formatProductCard({ ...enrichedProduct, variants: variantsArray }, [promo, ...activePromotions]);
-
-            // 🔹 Promo badge
-            const maxDiscountPercent = Math.max(...variantsArray.map(v => v.discountPercent));
-            let badge = maxDiscountPercent > 0 ? `${maxDiscountPercent}% Off` : null;
-            let promoMessage = badge ? `Save ${badge} on this product` : null;
-
-            return {
-                ...card,
-                brand: p.brand ? await Brand.findById(p.brand).select("_id name slug").lean() : null,
-                variants: variantsArray,
-                badge,
-                promoMessage
-            };
-        }));
+        // 🔹 Optional: add promo badge
+        products.forEach(p => {
+            const maxDiscountPercent = Math.max(...(p.variants?.map(v => v.discountPercent) || [0]));
+            p.badge = maxDiscountPercent > 0 ? `${maxDiscountPercent}% Off` : null;
+            p.promoMessage = p.badge ? `Save ${p.badge} on this product` : null;
+        });
 
         return res.json({
             products,

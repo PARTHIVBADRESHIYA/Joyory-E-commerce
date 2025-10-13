@@ -8,7 +8,6 @@ import {
     getProductWithRelated,
     getTopCategories,
     getProductsBySkinType,
-    getTopSellingProductsByCategory ,
     getAllSkinTypes,
     getFilterMetadata
 } from "../../controllers/user/userProductController.js";
@@ -40,7 +39,6 @@ router.get(
 router.get("/filters", getFilterMetadata);
 
 // ✅ Top sellers & top categories (static routes first!)
-router.get("/top-selling-by-category", getTopSellingProductsByCategory);
 router.get("/skin-types", getAllSkinTypes);
 router.get("/top-sellers", getTopSellingProducts);
 router.get("/top-categories", getTopCategories);
