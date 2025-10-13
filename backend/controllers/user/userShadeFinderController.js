@@ -3,12 +3,9 @@ import Tone from "../../models/shade/Tone.js";
 import Undertone from "../../models/shade/Undertone.js";
 import Family from "../../models/shade/Family.js";
 import Promotion from "../../models/Promotion.js";
-import Review from "../../models/Review.js";
 import Product from "../../models/Product.js";
 import Formulation from "../../models/shade/Formulation.js"; // <-- add this
-import { buildOptions, normalizeImages } from "../user/userProductController.js";
-import { enrichProductWithStockAndOptions, enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
-import { calculateVariantPrices } from "../../middlewares/services/promotionHelper.js";
+import { enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
 
 import mongoose from "mongoose";
 
@@ -18,21 +15,21 @@ export const buildMessage = ({ step, familyKey, toneKey, undertoneKey, formulati
         case "exact":
             return "✅ We found exact matches for your selection!";
         case "formulation":
-            return `❌ No exact matches in ${formulationLabel ? `"${formulationLabel}"` : "this formulation"} with ${undertoneKey} undertone. Showing other formulations.`;
+            return ` No exact matches in ${formulationLabel ? `"${formulationLabel}"` : "this formulation"} with ${undertoneKey} undertone. Showing other formulations.`;
         case "family-formulation":
-            return `❌ No products in family "${familyKey}" with ${formulationLabel ? `"${formulationLabel}"` : "this formulation"}. Showing other families.`;
+            return ` No products in family "${familyKey}" with ${formulationLabel ? `"${formulationLabel}"` : "this formulation"}. Showing other families.`;
         case "family":
-            return `❌ No products in family "${familyKey}". Showing matches from other families.`;
+            return ` No products in family "${familyKey}". Showing matches from other families.`;
         case "tone-formulation":
-            return `❌ No undertone matches in ${formulationLabel ? `"${formulationLabel}"` : "this formulation"}. Showing tone-only matches.`;
+            return ` No undertone matches in ${formulationLabel ? `"${formulationLabel}"` : "this formulation"}. Showing tone-only matches.`;
         case "tone":
-            return `❌ No undertone matches found. Showing tone-only alternatives for "${toneKey}".`;
+            return ` No undertone matches found. Showing tone-only alternatives for "${toneKey}".`;
         case "undertone-formulation":
-            return `❌ No tone matches in ${formulationLabel ? `"${formulationLabel}"` : "this formulation"}. Showing undertone-only matches.`;
+            return ` No tone matches in ${formulationLabel ? `"${formulationLabel}"` : "this formulation"}. Showing undertone-only matches.`;
         case "undertone":
-            return `❌ No tone matches found. Showing undertone-only alternatives for "${undertoneKey}".`;
+            return ` No tone matches found. Showing undertone-only alternatives for "${undertoneKey}".`;
         default:
-            return "❌ No exact or related products found. Please try adjusting your selection.";
+            return " No exact or related products found. Please try adjusting your selection.";
     }
 };
 
@@ -115,6 +112,151 @@ export const getFormulations = async (req, res) => {
     }
 };
 
+// export const getRecommendations = async (req, res) => {
+//     try {
+//         const { familyKey, toneKey, undertoneKey } = req.query;
+//         let formulation = req.query.formulation || req.query.formulations;
+//         let formulationLabel = null;
+
+//         if (!familyKey || !toneKey || !undertoneKey) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "familyKey, toneKey, and undertoneKey are required",
+//             });
+//         }
+
+//         // ✅ Resolve formulation
+//         if (formulation) {
+//             if (mongoose.Types.ObjectId.isValid(formulation)) {
+//                 const fDoc = await Formulation.findById(formulation).select("name key");
+//                 if (fDoc) {
+//                     formulationLabel = fDoc.name || fDoc.key;
+//                     formulation = fDoc._id;
+//                 } else formulation = null;
+//             } else {
+//                 const fDoc = await Formulation.findOne({
+//                     key: { $regex: `^${formulation}$`, $options: "i" },
+//                 }).select("name key");
+//                 if (fDoc) {
+//                     formulationLabel = fDoc.name || fDoc.key;
+//                     formulation = fDoc._id;
+//                 } else formulation = null;
+//             }
+//         }
+
+//         const makeQuery = (extra = {}) => ({
+//             isPublished: true,
+//             status: { $ne: "Out of stock" },
+//             "variants.isActive": true,
+//             ...extra,
+//         });
+
+//         const makeInsensitive = (filter) => {
+//             const mapped = {};
+//             for (let [key, value] of Object.entries(filter)) {
+//                 if (
+//                     ["variants.familyKey", "variants.toneKeys", "variants.undertoneKeys"].includes(key)
+//                 ) {
+//                     mapped[key] = { $regex: `^${value}$`, $options: "i" };
+//                 } else {
+//                     mapped[key] = value;
+//                 }
+//             }
+//             return mapped;
+//         };
+
+//         // 🔹 1. Load active promotions
+//         const now = new Date();
+//         const promotions = await Promotion.find({
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now },
+//         }).lean();
+
+//         // 🔹 2. Step helper
+//         const runStep = async (filter) => {
+//             const found = await Product.find(makeQuery(makeInsensitive(filter)))
+//                 .populate("category", "name slug")
+//                 .populate("brand", "name")
+//                 .select("_id name price mrp quantity images summary status category brand variant variants")
+//                 .lean();
+
+//             if (!found.length) return [];
+
+//             // ✅ Await the helper so ratings, variants, etc. are computed properly
+//             return await enrichProductsUnified(found, promotions);
+//         };
+
+//         // 🔹 3. Try different matching levels
+//         let enrichedProducts = [];
+
+//         const matchSteps = [
+//             {
+//                 filter: {
+//                     "variants.familyKey": familyKey,
+//                     "variants.toneKeys": toneKey,
+//                     "variants.undertoneKeys": undertoneKey,
+//                     ...(formulation && { formulation }),
+//                 },
+//             },
+//             formulation && {
+//                 filter: {
+//                     "variants.familyKey": familyKey,
+//                     "variants.toneKeys": toneKey,
+//                     "variants.undertoneKeys": undertoneKey,
+//                 },
+//             },
+//             formulation && {
+//                 filter: {
+//                     "variants.toneKeys": toneKey,
+//                     "variants.undertoneKeys": undertoneKey,
+//                     formulation,
+//                 },
+//             },
+//             {
+//                 filter: {
+//                     "variants.toneKeys": toneKey,
+//                     "variants.undertoneKeys": undertoneKey,
+//                 },
+//             },
+//             formulation && {
+//                 filter: {
+//                     "variants.toneKeys": toneKey,
+//                     formulation,
+//                 },
+//             },
+//             {
+//                 filter: { "variants.toneKeys": toneKey },
+//             },
+//             formulation && {
+//                 filter: {
+//                     "variants.undertoneKeys": undertoneKey,
+//                     formulation,
+//                 },
+//             },
+//             { filter: { "variants.undertoneKeys": undertoneKey } },
+//         ].filter(Boolean);
+
+//         for (const { filter } of matchSteps) {
+//             enrichedProducts = await runStep(filter); // <-- IMPORTANT: await
+//             if (enrichedProducts.length) break;
+//         }
+
+//         // 🔹 4. Final Response
+//         res.json({
+//             success: true,
+//             count: enrichedProducts.length,
+//             products: enrichedProducts,
+//             filters: { familyKey, toneKey, undertoneKey, formulation: formulationLabel },
+//             message: enrichedProducts.length
+//                 ? "Recommendations fetched successfully"
+//                 : "No matching recommendations found",
+//         });
+//     } catch (err) {
+//         console.error("getRecommendations error:", err);
+//         res.status(500).json({ success: false, message: err.message });
+//     }
+// };
 export const getRecommendations = async (req, res) => {
     try {
         const { familyKey, toneKey, undertoneKey } = req.query;
@@ -130,21 +272,14 @@ export const getRecommendations = async (req, res) => {
 
         // ✅ Resolve formulation
         if (formulation) {
-            if (mongoose.Types.ObjectId.isValid(formulation)) {
-                const fDoc = await Formulation.findById(formulation).select("name key");
-                if (fDoc) {
-                    formulationLabel = fDoc.name || fDoc.key;
-                    formulation = fDoc._id;
-                } else formulation = null;
-            } else {
-                const fDoc = await Formulation.findOne({
-                    key: { $regex: `^${formulation}$`, $options: "i" },
-                }).select("name key");
-                if (fDoc) {
-                    formulationLabel = fDoc.name || fDoc.key;
-                    formulation = fDoc._id;
-                } else formulation = null;
-            }
+            const fDoc = mongoose.Types.ObjectId.isValid(formulation)
+                ? await Formulation.findById(formulation).select("name key")
+                : await Formulation.findOne({ key: { $regex: `^${formulation}$`, $options: "i" } }).select("name key");
+
+            if (fDoc) {
+                formulationLabel = fDoc.name || fDoc.key;
+                formulation = fDoc._id;
+            } else formulation = null;
         }
 
         const makeQuery = (extra = {}) => ({
@@ -157,9 +292,7 @@ export const getRecommendations = async (req, res) => {
         const makeInsensitive = (filter) => {
             const mapped = {};
             for (let [key, value] of Object.entries(filter)) {
-                if (
-                    ["variants.familyKey", "variants.toneKeys", "variants.undertoneKeys"].includes(key)
-                ) {
+                if (["variants.familyKey", "variants.toneKeys", "variants.undertoneKeys"].includes(key)) {
                     mapped[key] = { $regex: `^${value}$`, $options: "i" };
                 } else {
                     mapped[key] = value;
@@ -168,7 +301,7 @@ export const getRecommendations = async (req, res) => {
             return mapped;
         };
 
-        // 🔹 1. Load active promotions
+        // 🔹 Load active promotions
         const now = new Date();
         const promotions = await Promotion.find({
             status: "active",
@@ -176,84 +309,43 @@ export const getRecommendations = async (req, res) => {
             endDate: { $gte: now },
         }).lean();
 
-        // 🔹 2. Step helper
         const runStep = async (filter) => {
             const found = await Product.find(makeQuery(makeInsensitive(filter)))
                 .populate("category", "name slug")
                 .populate("brand", "name")
                 .select("_id name price mrp quantity images summary status category brand variant variants")
                 .lean();
-
-            if (!found.length) return [];
-
-            // ✅ Use central helper instead of duplicating enrichment logic
-            return enrichProductsUnified(found, promotions);
+            return found.length ? await enrichProductsUnified(found, promotions) : [];
         };
 
-        // 🔹 3. Try different matching levels
+        // 🔹 Stepwise fallback order
+        const steps = [
+            { step: "exact", filter: { "variants.toneKeys": toneKey, "variants.undertoneKeys": undertoneKey, "variants.familyKey": familyKey, formulation } },
+            { step: "formulation", filter: { "variants.toneKeys": toneKey, "variants.undertoneKeys": undertoneKey, "variants.familyKey": familyKey } },
+            { step: "tone-formulation", filter: { "variants.toneKeys": toneKey, "variants.undertoneKeys": undertoneKey, formulation } },
+            { step: "tone", filter: { "variants.toneKeys": toneKey, "variants.undertoneKeys": undertoneKey } },
+            { step: "tone", filter: { "variants.toneKeys": toneKey, formulation } },
+            { step: "undertone-formulation", filter: { "variants.undertoneKeys": undertoneKey, formulation } },
+            { step: "undertone", filter: { "variants.undertoneKeys": undertoneKey } },
+        ].filter(s => s.filter); // remove any null
+
         let enrichedProducts = [];
+        let matchedStep = "default";
 
-        const matchSteps = [
-            {
-                filter: {
-                    "variants.familyKey": familyKey,
-                    "variants.toneKeys": toneKey,
-                    "variants.undertoneKeys": undertoneKey,
-                    ...(formulation && { formulation }),
-                },
-            },
-            formulation && {
-                filter: {
-                    "variants.familyKey": familyKey,
-                    "variants.toneKeys": toneKey,
-                    "variants.undertoneKeys": undertoneKey,
-                },
-            },
-            formulation && {
-                filter: {
-                    "variants.toneKeys": toneKey,
-                    "variants.undertoneKeys": undertoneKey,
-                    formulation,
-                },
-            },
-            {
-                filter: {
-                    "variants.toneKeys": toneKey,
-                    "variants.undertoneKeys": undertoneKey,
-                },
-            },
-            formulation && {
-                filter: {
-                    "variants.toneKeys": toneKey,
-                    formulation,
-                },
-            },
-            {
-                filter: { "variants.toneKeys": toneKey },
-            },
-            formulation && {
-                filter: {
-                    "variants.undertoneKeys": undertoneKey,
-                    formulation,
-                },
-            },
-            { filter: { "variants.undertoneKeys": undertoneKey } },
-        ].filter(Boolean);
-
-        for (const { filter } of matchSteps) {
+        for (const { step, filter } of steps) {
             enrichedProducts = await runStep(filter);
-            if (enrichedProducts.length) break;
+            if (enrichedProducts.length) {
+                matchedStep = step;
+                break;
+            }
         }
 
-        // 🔹 4. Final Response
         res.json({
             success: true,
             count: enrichedProducts.length,
             products: enrichedProducts,
             filters: { familyKey, toneKey, undertoneKey, formulation: formulationLabel },
-            message: enrichedProducts.length
-                ? "Recommendations fetched successfully"
-                : "No matching recommendations found",
+            message: buildMessage({ step: matchedStep, familyKey, toneKey, undertoneKey, formulationLabel }),
         });
     } catch (err) {
         console.error("getRecommendations error:", err);

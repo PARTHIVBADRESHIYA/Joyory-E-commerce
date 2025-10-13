@@ -3,12 +3,9 @@ import Promotion from "../../models/Promotion.js";
 import Product from "../../models/Product.js";
 import Brand from "../../models/Brand.js";
 import mongoose from "mongoose";
-import { formatProductCard,getPseudoVariant} from "../../middlewares/utils/recommendationService.js";
-import { fetchProducts } from "../../middlewares/services/productQueryBuilder.js";
 import { normalizeFilters, applyDynamicFilters } from "../../controllers/user/userProductController.js";
 import { applyPromotions } from "../../middlewares/services/promotionEngine.js";
-import { enrichProductWithStockAndOptions, enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
-import { calculateVariantPrices } from "../../middlewares/services/promotionHelper.js";
+import {  enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
 
 const ObjectId = mongoose.Types.ObjectId; // ✅ Fix for ReferenceError
 
@@ -195,111 +192,6 @@ export const getActivePromotionsForUsers = async (req, res) => {
     }
 };
 
-// export const getPromotionProducts = async (req, res) => {
-//     try {
-//         const { id } = req.params;
-//         if (!isObjectId(id)) return res.status(400).json({ message: "Invalid promotion id" });
-
-//         const page = Math.max(1, parseInt(req.query.page ?? "1", 10));
-//         const rawLimit = parseInt(req.query.limit ?? "12", 10);
-//         const limit = Math.min(Math.max(1, rawLimit), 12);
-//         const search = (req.query.search ?? "").toString().trim();
-//         const sort = (req.query.sort ?? "recent").toString().trim();
-
-//         const promo = await Promotion.findById(id)
-//             .populate("categories.category", "_id name slug")
-//             .populate("products", "_id name category")
-//             .lean();
-//         if (!promo) return res.status(404).json({ message: "Promotion not found" });
-
-//         // 🔹 Base filter
-//         const baseMatch = { isPublished: true };
-//         if (promo.scope === "category" && promo.categories?.length) {
-//             const catIds = promo.categories
-//                 .map(c => c?.category?._id ?? c)
-//                 .filter(Boolean)
-//                 .map(id => new mongoose.Types.ObjectId(id));
-//             if (catIds.length) baseMatch.category = { $in: catIds };
-//         } else if (promo.scope === "product" && promo.products?.length) {
-//             const prodIds = promo.products.map(p => p._id ?? p).filter(Boolean).map(id => new mongoose.Types.ObjectId(id));
-//             if (prodIds.length) baseMatch._id = { $in: prodIds };
-//         } else if (promo.scope === "brand" && promo.brands?.length) {
-//             const brandIds = promo.brands
-//                 .map(b => b?.brand?._id ?? b._id ?? b)
-//                 .filter(Boolean)
-//                 .map(id => new mongoose.Types.ObjectId(id));
-//             if (brandIds.length) baseMatch.brand = { $in: brandIds };
-//         }
-
-//         if (search) baseMatch.name = { $regex: escapeRegex(search), $options: "i" };
-
-//         const filters = normalizeFilters(req.query);
-//         const dynamicFilters = applyDynamicFilters(filters);
-//         const finalFilter = { ...baseMatch, ...dynamicFilters };
-
-//         // 🔹 Fetch products
-//         const total = await Product.countDocuments(finalFilter);
-//         const rawProducts = await Product.find(finalFilter)
-//             .sort(
-//                 sort === "price_asc" ? { price: 1 } :
-//                 sort === "price_desc" ? { price: -1 } :
-//                 sort === "discount" ? { discountPercent: -1 } :
-//                 { createdAt: -1 }
-//             )
-//             .skip((page - 1) * limit)
-//             .limit(limit)
-//             .lean();
-
-//         // 🔹 Active promotions
-//         const now = new Date();
-//         const activePromotions = await Promotion.find({
-//             status: "active",
-//             startDate: { $lte: now },
-//             endDate: { $gte: now }
-//         }).lean();
-
-//         // 🔹 Enrich products & calculate variants
-//         const products = await Promise.all(rawProducts.map(async p => {
-//             const enrichedProduct = enrichProductWithStockAndOptions(p, activePromotions);
-
-//             // ⚡ Keep legacy variant intact
-//             const variantsArray = enrichedProduct.variants && enrichedProduct.variants.length
-//                 ? calculateVariantPrices(enrichedProduct.variants, enrichedProduct, [promo, ...activePromotions])
-//                 : calculateVariantPrices([getPseudoVariant(enrichedProduct)], enrichedProduct, [promo, ...activePromotions]);
-
-//             const card = await formatProductCard({ ...enrichedProduct, variants: variantsArray }, [promo, ...activePromotions]);
-
-//             // 🔹 Promo badge
-//             const maxDiscountPercent = Math.max(...variantsArray.map(v => v.discountPercent));
-//             let badge = maxDiscountPercent > 0 ? `${maxDiscountPercent}% Off` : null;
-//             let promoMessage = badge ? `Save ${badge} on this product` : null;
-
-//             return {
-//                 ...card,
-//                 brand: p.brand ? await Brand.findById(p.brand).select("_id name slug").lean() : null,
-//                 variants: variantsArray,
-//                 badge,
-//                 promoMessage
-//             };
-//         }));
-
-//         return res.json({
-//             products,
-//             pagination: {
-//                 page,
-//                 limit,
-//                 total,
-//                 totalPages: Math.ceil(total / limit),
-//                 hasMore: page < Math.ceil(total / limit)
-//             },
-//             promoMeta: promo
-//         });
-
-//     } catch (err) {
-//         console.error("getPromotionProducts error:", err);
-//         return res.status(500).json({ message: "Failed to fetch promotion products", error: err.message });
-//     }
-// };
 export const getPromotionProducts = async (req, res) => {
     try {
         const { id } = req.params;

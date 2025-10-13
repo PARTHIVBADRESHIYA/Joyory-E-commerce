@@ -377,6 +377,7 @@ const variantSchema = new mongoose.Schema({
     familyKey: { type: String },
     toneKeys: [{ type: String }],
     undertoneKeys: [{ type: String }],
+    formulation: { type: mongoose.Schema.Types.ObjectId, ref: "Formulation", index: true },
     lab: { L: Number, a: Number, b: Number }
 }, { _id: false });
 

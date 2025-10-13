@@ -2,20 +2,16 @@ import Product from '../../models/Product.js';
 import ProductViewLog from "../../models/ProductViewLog.js";
 import Promotion from '../../models/Promotion.js';
 import User from '../../models/User.js';
-import Review from '../../models/Review.js';
 import Order from '../../models/Order.js';
 import Brand from '../../models/Brand.js';
 import SkinType from '../../models/SkinType.js';
 import Formulation from "../../models/shade/Formulation.js";
 import Category from '../../models/Category.js';
-import { getDescendantCategoryIds, getCategoryFallbackChain } from '../../middlewares/utils/categoryUtils.js';
+import { getDescendantCategoryIds } from '../../middlewares/utils/categoryUtils.js';
 import { getRecommendations } from '../../middlewares/utils/recommendationService.js';
-import { formatProductCard, getPseudoVariant } from '../../middlewares/utils/recommendationService.js';
-import { calculateVariantPrices } from "../../middlewares/services/promotionHelper.js";
+import { formatProductCard } from '../../middlewares/utils/recommendationService.js';
 
 import { enrichProductWithStockAndOptions,enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
-import { applyFlatDiscount, asMoney, productMatchesPromo } from '../../controllers/user/userPromotionController.js'; // reuse helpers
-import { fetchProducts } from "../../middlewares/services/productQueryBuilder.js";
 import mongoose from 'mongoose';
 
 // 🔧 Centralized helper for shades/colors
