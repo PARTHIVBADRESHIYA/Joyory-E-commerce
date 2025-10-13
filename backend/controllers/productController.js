@@ -421,24 +421,37 @@ const updateProductById = async (req, res) => {
                     images: v.images || [],
                     stock: Number(v.stock) || 0,
                     sales: Number(v.sales) || 0,
+                    thresholdValue: Number(v.thresholdValue) || 0,
                     isActive: v.isActive !== false,
-                    discountedPrice: v.discountedPrice !== undefined ? Number(v.discountedPrice) : undefined // ✅ Add discountedPrice
+                    discountedPrice:
+                        v.discountedPrice !== undefined ? Number(v.discountedPrice) : undefined,
+
+                    // ✅ Include these fields
+                    familyKey: v.familyKey || null,
+                    toneKeys: Array.isArray(v.toneKeys) ? v.toneKeys : [],
+                    undertoneKeys: Array.isArray(v.undertoneKeys) ? v.undertoneKeys : [],
                 }));
 
                 updateData.variants = rawVariants;
                 updateData.shadeOptions = rawVariants.map(v => v.shadeName).filter(Boolean);
                 updateData.colorOptions = rawVariants.map(v => v.hex).filter(Boolean);
 
-                // 🔹 Auto recalc total stock & status
-                updateData.quantity = rawVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
-                const threshold = updateData.thresholdValue !== undefined
-                    ? updateData.thresholdValue
-                    : (await Product.findById(id))?.thresholdValue || 0;
+                updateData.quantity = rawVariants.reduce(
+                    (sum, v) => sum + (v.stock || 0),
+                    0
+                );
+
+                const threshold =
+                    updateData.thresholdValue !== undefined
+                        ? updateData.thresholdValue
+                        : (await Product.findById(id))?.thresholdValue || 0;
 
                 updateData.status =
-                    updateData.quantity === 0 ? "Out of stock" :
-                        updateData.quantity < threshold ? "Low stock" :
-                            "In-stock";
+                    updateData.quantity === 0
+                        ? "Out of stock"
+                        : updateData.quantity < threshold
+                            ? "Low stock"
+                            : "In-stock";
             }
         } else if (updateData.quantity !== undefined) {
             // 🔹 Non-variant product stock update

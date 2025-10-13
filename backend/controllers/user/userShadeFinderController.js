@@ -2,9 +2,14 @@
 import Tone from "../../models/shade/Tone.js";
 import Undertone from "../../models/shade/Undertone.js";
 import Family from "../../models/shade/Family.js";
+import Promotion from "../../models/Promotion.js";
+import Review from "../../models/Review.js";
 import Product from "../../models/Product.js";
 import Formulation from "../../models/shade/Formulation.js"; // <-- add this
 import { buildOptions, normalizeImages } from "../user/userProductController.js";
+import { enrichProductWithStockAndOptions } from "../../middlewares/services/productHelpers.js";
+import { calculateVariantPrices } from "../../middlewares/services/promotionHelper.js";
+
 import mongoose from "mongoose";
 
 // helpers/messageBuilder.js
@@ -113,234 +118,7 @@ export const getFormulations = async (req, res) => {
 // export const getRecommendations = async (req, res) => {
 //     try {
 //         const { familyKey, toneKey, undertoneKey } = req.query;
-//         let formulation = req.query.formulation || req.query.formulations; // ✅ support both
-
-//         if (!familyKey || !toneKey || !undertoneKey) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: "familyKey, toneKey, and undertoneKey are required",
-//             });
-//         }
-
-
-//         // ✅ Resolve formulation string → ObjectId
-//         if (formulation) {
-//             if (mongoose.Types.ObjectId.isValid(formulation)) {
-//                 // already ObjectId
-//                 formulation = formulation;
-//             } else {
-//                 const fDoc = await Formulation.findOne({
-//                     key: { $regex: `^${formulation}$`, $options: "i" },
-//                 });
-//                 if (fDoc) {
-//                     formulation = fDoc._id;
-//                 } else {
-//                     // No matching formulation found → ignore it
-//                     formulation = null;
-//                 }
-//             }
-//         }
-
-//         const makeQuery = (extra = {}) => ({
-//             status: { $ne: "Out of stock" },
-//             "variants.isActive": true,
-//             ...extra,
-//         });
-
-//         const mapProduct = (p) => {
-//             const { shadeOptions, colorOptions } = buildOptions(p);
-//             return {
-//                 _id: p._id,
-//                 name: p.name,
-//                 variant: p.variant,
-//                 price: p.price,
-//                 category: p.category
-//                     ? { _id: p.category._id, name: p.category.name, slug: p.category.slug }
-//                     : null,
-//                 brand: p.brand ? { _id: p.brand._id, name: p.brand.name } : null,
-//                 summary: p.summary || "",
-//                 status: p.status,
-//                 image: p.images?.length ? normalizeImages(p.images)[0] : null,
-//                 shadeOptions,
-//                 colorOptions,
-//                 commentsCount: p.commentsCount || 0,
-//                 avgRating: p.avgRating || 0,
-//             };
-//         };
-
-//         let products = [];
-//         let suggestions = [];
-//         let message = "";
-
-//         // 🔹 Step helper
-//         const runStep = async (filter, failMessage, type) => {
-//             const found = await Product.find(makeQuery(filter))
-//                 .populate("category", "name slug")
-//                 .populate("brand", "name")
-//                 .select(
-//                     "_id name price images summary status category brand variant variants"
-//                 );
-
-//             if (found.length > 0) {
-//                 if (!products.length) {
-//                     suggestions.push({
-//                         type,
-//                         message: failMessage,
-//                         products: found.map(mapProduct),
-//                     });
-//                     message = failMessage;
-//                 }
-//                 return true;
-//             }
-//             return false;
-//         };
-
-//         // ---------------------------
-//         // Step 1 → exact match (family + tone + undertone + formulation)
-//         // ---------------------------
-//         let query = makeQuery({
-//             "variants.familyKey": familyKey,
-//             "variants.toneKeys": toneKey,
-//             "variants.undertoneKeys": undertoneKey,
-//             ...(formulation && { formulation }),
-//         });
-
-//         products = await Product.find(query)
-//             .populate("category", "name slug")
-//             .populate("brand", "name")
-//             .select("_id name price images summary status category brand variant variants");
-
-//         products = products.map(mapProduct);
-
-//         if (products.length > 0) {
-//             message = "✅ Exact matches found";
-//         }
-
-//         // ---------------------------
-//         // Step 2 → ignore formulation
-//         // ---------------------------
-//         if (products.length === 0 && formulation) {
-//             await runStep(
-//                 {
-//                     "variants.familyKey": familyKey,
-//                     "variants.toneKeys": toneKey,
-//                     "variants.undertoneKeys": undertoneKey,
-//                 },
-//                 `❌ No exact match in formulation "${formulation}", showing other formulations.`,
-//                 "formulation"
-//             );
-//         }
-
-//         // ---------------------------
-//         // Step 3 → ignore family, keep tone + undertone + formulation
-//         // ---------------------------
-//         if (products.length === 0 && suggestions.length === 0 && formulation) {
-//             await runStep(
-//                 {
-//                     "variants.toneKeys": toneKey,
-//                     "variants.undertoneKeys": undertoneKey,
-//                     formulation,
-//                 },
-//                 `❌ No products in family "${familyKey}" with formulation "${formulation}", showing other families.`,
-//                 "family-formulation"
-//             );
-//         }
-
-//         // ---------------------------
-//         // Step 4 → ignore family & formulation, keep tone + undertone
-//         // ---------------------------
-//         if (products.length === 0 && suggestions.length === 0) {
-//             await runStep(
-//                 {
-//                     "variants.toneKeys": toneKey,
-//                     "variants.undertoneKeys": undertoneKey,
-//                 },
-//                 `❌ No products in family "${familyKey}", showing other families.`,
-//                 "family"
-//             );
-//         }
-
-//         // ---------------------------
-//         // Step 5 → ignore undertone, keep tone + formulation
-//         // ---------------------------
-//         if (products.length === 0 && suggestions.length === 0 && formulation) {
-//             await runStep(
-//                 {
-//                     "variants.toneKeys": toneKey,
-//                     formulation,
-//                 },
-//                 `❌ No undertone match in formulation "${formulation}", showing tone-only matches.`,
-//                 "tone-formulation"
-//             );
-//         }
-
-//         // ---------------------------
-//         // Step 6 → ignore undertone, keep tone
-//         // ---------------------------
-//         if (products.length === 0 && suggestions.length === 0) {
-//             await runStep(
-//                 {
-//                     "variants.toneKeys": toneKey,
-//                 },
-//                 `❌ No undertone match, showing tone-only alternatives.`,
-//                 "tone"
-//             );
-//         }
-
-//         // ---------------------------
-//         // Step 7 → ignore tone, keep undertone + formulation
-//         // ---------------------------
-//         if (products.length === 0 && suggestions.length === 0 && formulation) {
-//             await runStep(
-//                 {
-//                     "variants.undertoneKeys": undertoneKey,
-//                     formulation,
-//                 },
-//                 `❌ No tone match in formulation "${formulation}", showing undertone-only matches.`,
-//                 "undertone-formulation"
-//             );
-//         }
-
-//         // ---------------------------
-//         // Step 8 → ignore tone, keep undertone
-//         // ---------------------------
-//         if (products.length === 0 && suggestions.length === 0) {
-//             await runStep(
-//                 {
-//                     "variants.undertoneKeys": undertoneKey,
-//                 },
-//                 `❌ No tone match, showing undertone-only alternatives.`,
-//                 "undertone"
-//             );
-//         }
-
-//         // ---------------------------
-//         // Final fallback
-//         // ---------------------------
-//         if (products.length === 0 && suggestions.length === 0) {
-//             message =
-//                 "❌ No exact or related products found, please try adjusting your selection.";
-//         }
-
-//         res.json({
-//             success: true,
-//             count: products.length,
-//             products,
-//             filters: { familyKey, toneKey, undertoneKey, formulation },
-//             message,
-//             suggestions,
-//         });
-//     } catch (err) {
-//         console.error("getRecommendations error:", err);
-//         res.status(500).json({ success: false, message: err.message });
-//     }
-// };
-
-
-// export const getRecommendations = async (req, res) => {
-//     try {
-//         const { familyKey, toneKey, undertoneKey } = req.query;
-//         let formulation = req.query.formulation || req.query.formulations; // ✅ support both
+//         let formulation = req.query.formulation || req.query.formulations;
 //         let formulationLabel = null;
 
 //         if (!familyKey || !toneKey || !undertoneKey) {
@@ -350,16 +128,14 @@ export const getFormulations = async (req, res) => {
 //             });
 //         }
 
-//         // ✅ Resolve formulation string → ObjectId + label
+//         // ✅ Resolve formulation
 //         if (formulation) {
 //             if (mongoose.Types.ObjectId.isValid(formulation)) {
 //                 const fDoc = await Formulation.findById(formulation).select("name key");
 //                 if (fDoc) {
 //                     formulationLabel = fDoc.name || fDoc.key;
 //                     formulation = fDoc._id;
-//                 } else {
-//                     formulation = null;
-//                 }
+//                 } else formulation = null;
 //             } else {
 //                 const fDoc = await Formulation.findOne({
 //                     key: { $regex: `^${formulation}$`, $options: "i" },
@@ -367,205 +143,123 @@ export const getFormulations = async (req, res) => {
 //                 if (fDoc) {
 //                     formulationLabel = fDoc.name || fDoc.key;
 //                     formulation = fDoc._id;
-//                 } else {
-//                     formulation = null;
-//                 }
+//                 } else formulation = null;
 //             }
 //         }
 
 //         const makeQuery = (extra = {}) => ({
+//             isPublished: true,
 //             status: { $ne: "Out of stock" },
 //             "variants.isActive": true,
 //             ...extra,
 //         });
 
-//         const mapProduct = (p) => {
-//             const { shadeOptions, colorOptions } = buildOptions(p);
-//             return {
-//                 _id: p._id,
-//                 name: p.name,
-//                 variant: p.variant,
-//                 price: p.price,
-//                 category: p.category
-//                     ? { _id: p.category._id, name: p.category.name, slug: p.category.slug }
-//                     : null,
-//                 brand: p.brand ? { _id: p.brand._id, name: p.brand.name } : null,
-//                 summary: p.summary || "",
-//                 status: p.status,
-//                 image: p.images?.length ? normalizeImages(p.images)[0] : null,
-//                 shadeOptions,
-//                 colorOptions,
-//                 commentsCount: p.commentsCount || 0,
-//                 avgRating: p.avgRating || 0,
-//             };
+//         const makeInsensitive = (filter) => {
+//             const mapped = {};
+//             for (let [key, value] of Object.entries(filter)) {
+//                 if (
+//                     ["variants.familyKey", "variants.toneKeys", "variants.undertoneKeys"].includes(key)
+//                 ) {
+//                     mapped[key] = { $regex: `^${value}$`, $options: "i" };
+//                 } else {
+//                     mapped[key] = value;
+//                 }
+//             }
+//             return mapped;
 //         };
 
-//         let products = [];
-//         let suggestions = [];
-//         let message = "";
+//         // 🔹 1. Load active promotions
+//         const now = new Date();
+//         const promotions = await Promotion.find({
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now },
+//         }).lean();
 
-//         // 🔹 Step helper
+//         // 🔹 2. Step helper
 //         const runStep = async (filter, step) => {
-//             const found = await Product.find(makeQuery(filter))
+//             const found = await Product.find(makeQuery(makeInsensitive(filter)))
 //                 .populate("category", "name slug")
 //                 .populate("brand", "name")
-//                 .select("_id name price images summary status category brand variant variants");
+//                 .select("_id name price mrp quantity images summary status category brand variant variants")
+//                 .lean();
 
-//             if (found.length > 0) {
-//                 if (!products.length) {
-//                     const failMessage = buildMessage({
-//                         step,
-//                         familyKey,
-//                         toneKey,
-//                         undertoneKey,
-//                         formulationLabel,
-//                     });
+//             if (!found.length) return [];
 
-//                     suggestions.push({
-//                         type: step,
-//                         message: failMessage,
-//                         products: found.map(mapProduct),
-//                     });
-
-//                     message = failMessage;
-//                 }
-//                 return true;
-//             }
-//             return false;
+//             return await enrichProducts(found, promotions);
 //         };
 
-//         // ---------------------------
-//         // Step 1 → exact match
-//         // ---------------------------
-//         let query = makeQuery({
-//             "variants.familyKey": familyKey,
-//             "variants.toneKeys": toneKey,
-//             "variants.undertoneKeys": undertoneKey,
-//             ...(formulation && { formulation }),
-//         });
+//         // 🔹 3. Try different matching levels
+//         let enrichedProducts = [];
 
-//         products = await Product.find(query)
-//             .populate("category", "name slug")
-//             .populate("brand", "name")
-//             .select("_id name price images summary status category brand variant variants");
-
-//         products = products.map(mapProduct);
-
-//         if (products.length > 0) {
-//             message = buildMessage({
+//         const matchSteps = [
+//             {
+//                 filter: {
+//                     "variants.familyKey": familyKey,
+//                     "variants.toneKeys": toneKey,
+//                     "variants.undertoneKeys": undertoneKey,
+//                     ...(formulation && { formulation }),
+//                 },
 //                 step: "exact",
-//                 familyKey,
-//                 toneKey,
-//                 undertoneKey,
-//                 formulationLabel,
-//             });
-//         }
-
-//         // ---------------------------
-//         // Step 2 → ignore formulation
-//         // ---------------------------
-//         if (products.length === 0 && formulation) {
-//             await runStep(
-//                 {
+//             },
+//             formulation && {
+//                 filter: {
 //                     "variants.familyKey": familyKey,
 //                     "variants.toneKeys": toneKey,
 //                     "variants.undertoneKeys": undertoneKey,
 //                 },
-//                 "formulation"
-//             );
-//         }
-
-//         // ---------------------------
-//         // Step 3 → ignore family, keep tone + undertone + formulation
-//         // ---------------------------
-//         if (products.length === 0 && suggestions.length === 0 && formulation) {
-//             await runStep(
-//                 {
+//                 step: "ignore-formulation",
+//             },
+//             formulation && {
+//                 filter: {
 //                     "variants.toneKeys": toneKey,
 //                     "variants.undertoneKeys": undertoneKey,
 //                     formulation,
 //                 },
-//                 "family-formulation"
-//             );
-//         }
-
-//         // ---------------------------
-//         // Step 4 → ignore family & formulation, keep tone + undertone
-//         // ---------------------------
-//         if (products.length === 0 && suggestions.length === 0) {
-//             await runStep(
-//                 {
+//                 step: "ignore-family",
+//             },
+//             {
+//                 filter: {
 //                     "variants.toneKeys": toneKey,
 //                     "variants.undertoneKeys": undertoneKey,
 //                 },
-//                 "family"
-//             );
-//         }
-
-//         // ---------------------------
-//         // Step 5 → ignore undertone, keep tone + formulation
-//         // ---------------------------
-//         if (products.length === 0 && suggestions.length === 0 && formulation) {
-//             await runStep(
-//                 {
+//                 step: "ignore-family-formulation",
+//             },
+//             formulation && {
+//                 filter: {
 //                     "variants.toneKeys": toneKey,
 //                     formulation,
 //                 },
-//                 "tone-formulation"
-//             );
-//         }
-
-//         // ---------------------------
-//         // Step 6 → ignore undertone, keep tone
-//         // ---------------------------
-//         if (products.length === 0 && suggestions.length === 0) {
-//             await runStep(
-//                 {
-//                     "variants.toneKeys": toneKey,
-//                 },
-//                 "tone"
-//             );
-//         }
-
-//         // ---------------------------
-//         // Step 7 → ignore tone, keep undertone + formulation
-//         // ---------------------------
-//         if (products.length === 0 && suggestions.length === 0 && formulation) {
-//             await runStep(
-//                 {
+//                 step: "tone-formulation",
+//             },
+//             {
+//                 filter: { "variants.toneKeys": toneKey },
+//                 step: "tone",
+//             },
+//             formulation && {
+//                 filter: {
 //                     "variants.undertoneKeys": undertoneKey,
 //                     formulation,
 //                 },
-//                 "undertone-formulation"
-//             );
+//                 step: "undertone-formulation",
+//             },
+//             { filter: { "variants.undertoneKeys": undertoneKey }, step: "undertone" },
+//         ].filter(Boolean);
+
+//         for (const { filter } of matchSteps) {
+//             enrichedProducts = await runStep(filter);
+//             if (enrichedProducts.length) break;
 //         }
 
-//         // ---------------------------
-//         // Step 8 → ignore tone, keep undertone
-//         // ---------------------------
-//         if (products.length === 0 && suggestions.length === 0) {
-//             await runStep(
-//                 {
-//                     "variants.undertoneKeys": undertoneKey,
-//                 },
-//                 "undertone"
-//             );
-//         }
-
-//         // ---------------------------
-//         // Final fallback
-//         // ---------------------------
-//         if (products.length === 0 && suggestions.length === 0) {
-//             message = buildMessage({ step: "default" });
-//         }
-
+//         // 🔹 4. Build response
 //         res.json({
 //             success: true,
-//             count: products.length,
-//             products,
+//             count: enrichedProducts.length,
+//             products: enrichedProducts,
 //             filters: { familyKey, toneKey, undertoneKey, formulation: formulationLabel },
-//             message,
-//             suggestions,
+//             message: enrichedProducts.length
+//                 ? "Recommendations fetched successfully"
+//                 : "No matching recommendations found",
 //         });
 //     } catch (err) {
 //         console.error("getRecommendations error:", err);
@@ -573,10 +267,113 @@ export const getFormulations = async (req, res) => {
 //     }
 // };
 
+// // 🔹 Helper: identical to logic in getProductsByCategory
+// async function enrichProducts(products, promotions) {
+//     return Promise.all(
+//         products.map(async (p) => {
+//             const enriched = enrichProductWithStockAndOptions(p, promotions);
+
+//             // ✅ Normalize variants
+//             let normalizedVariants = [];
+//             if (Array.isArray(enriched.variants) && enriched.variants.length > 0) {
+//                 normalizedVariants = calculateVariantPrices(enriched.variants, enriched, promotions);
+//             } else if (enriched.variant && (!enriched.variants || !enriched.variants.length)) {
+//                 const legacyVariant = {
+//                     sku: enriched.sku ?? `${enriched._id}-default`,
+//                     shadeName: enriched.variant || "Default",
+//                     hex: null,
+//                     images: normalizeImages(enriched.images || []),
+//                     stock: enriched.quantity ?? 0,
+//                     sales: enriched.sales ?? 0,
+//                     thresholdValue: 0,
+//                     isActive: true,
+//                     toneKeys: [],
+//                     undertoneKeys: [],
+//                     originalPrice: enriched.mrp ?? enriched.price ?? 0,
+//                     discountedPrice: enriched.price ?? 0,
+//                     displayPrice: enriched.price ?? 0,
+//                     discountAmount:
+//                         enriched.mrp && enriched.price ? enriched.mrp - enriched.price : 0,
+//                     discountPercent:
+//                         enriched.mrp && enriched.mrp > enriched.price
+//                             ? Math.round(((enriched.mrp - enriched.price) / enriched.mrp) * 100)
+//                             : 0,
+//                     createdAt: new Date(),
+//                     status: enriched.quantity > 0 ? "inStock" : "outOfStock",
+//                     message: enriched.quantity > 0 ? "In-stock" : "No stock available",
+//                 };
+
+//                 await Product.updateOne(
+//                     { _id: enriched._id, "variants.sku": { $ne: legacyVariant.sku } },
+//                     { $push: { variants: legacyVariant } }
+//                 );
+
+//                 normalizedVariants = calculateVariantPrices([legacyVariant], enriched, promotions);
+//             } else {
+//                 normalizedVariants = calculateVariantPrices(
+//                     [getPseudoVariant(enriched)],
+//                     enriched,
+//                     promotions
+//                 );
+//             }
+
+//             enriched.variants = normalizedVariants;
+
+//             // ✅ Shade options
+//             enriched.shadeOptions = normalizedVariants.map((v) => ({
+//                 name: v.shadeName || enriched.variant || "Default",
+//                 sku: v.sku,
+//                 image:
+//                     Array.isArray(v.images) && v.images.length
+//                         ? v.images[0]
+//                         : enriched.thumbnail || null,
+//                 price: v.displayPrice,
+//                 status: v.status || "inStock",
+//             }));
+
+//             // ✅ Compute prices
+//             const displayVariant = normalizedVariants?.[0] || {};
+//             const price = displayVariant.displayPrice ?? enriched.price ?? 0;
+//             const mrp = displayVariant.originalPrice ?? enriched.mrp ?? enriched.price ?? 0;
+//             const discountPercent = mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
+//             const status =
+//                 displayVariant.status || (enriched.quantity > 0 ? "inStock" : "outOfStock");
+//             const message =
+//                 displayVariant.message || (enriched.quantity > 0 ? "In-stock" : "No stock available");
+
+//             // ✅ Rating info
+//             const [{ avg = 0, count = 0 } = {}] = await Review.aggregate([
+//                 { $match: { productId: enriched._id, status: "Active" } },
+//                 { $group: { _id: "$productId", avg: { $avg: "$rating" }, count: { $sum: 1 } } },
+//             ]);
+//             const avgRating = Math.round((avg || 0) * 10) / 10;
+
+//             return {
+//                 _id: enriched._id,
+//                 name: enriched.name,
+//                 brand: enriched.brand || null,
+//                 mrp,
+//                 price,
+//                 discountPercent,
+//                 discountAmount: mrp - price,
+//                 images: normalizeImages(enriched.images || []),
+//                 variants: normalizedVariants,
+//                 shadeOptions: enriched.shadeOptions || [],
+//                 status,
+//                 message,
+//                 avgRating,
+//                 totalRatings: count || 0,
+//                 inStock: displayVariant.stock > 0 || enriched.quantity > 0,
+//             };
+//         })
+//     );
+// }
+
+
 export const getRecommendations = async (req, res) => {
     try {
         const { familyKey, toneKey, undertoneKey } = req.query;
-        let formulation = req.query.formulation || req.query.formulations; // ✅ support both
+        let formulation = req.query.formulation || req.query.formulations;
         let formulationLabel = null;
 
         if (!familyKey || !toneKey || !undertoneKey) {
@@ -586,16 +383,14 @@ export const getRecommendations = async (req, res) => {
             });
         }
 
-        // ✅ Resolve formulation string → ObjectId + label
+        // ✅ Resolve formulation
         if (formulation) {
             if (mongoose.Types.ObjectId.isValid(formulation)) {
                 const fDoc = await Formulation.findById(formulation).select("name key");
                 if (fDoc) {
                     formulationLabel = fDoc.name || fDoc.key;
                     formulation = fDoc._id;
-                } else {
-                    formulation = null;
-                }
+                } else formulation = null;
             } else {
                 const fDoc = await Formulation.findOne({
                     key: { $regex: `^${formulation}$`, $options: "i" },
@@ -603,13 +398,12 @@ export const getRecommendations = async (req, res) => {
                 if (fDoc) {
                     formulationLabel = fDoc.name || fDoc.key;
                     formulation = fDoc._id;
-                } else {
-                    formulation = null;
-                }
+                } else formulation = null;
             }
         }
 
         const makeQuery = (extra = {}) => ({
+            isPublished: true,
             status: { $ne: "Out of stock" },
             "variants.isActive": true,
             ...extra,
@@ -619,9 +413,7 @@ export const getRecommendations = async (req, res) => {
             const mapped = {};
             for (let [key, value] of Object.entries(filter)) {
                 if (
-                    ["variants.familyKey", "variants.toneKeys", "variants.undertoneKeys"].includes(
-                        key
-                    )
+                    ["variants.familyKey", "variants.toneKeys", "variants.undertoneKeys"].includes(key)
                 ) {
                     mapped[key] = { $regex: `^${value}$`, $options: "i" };
                 } else {
@@ -631,198 +423,203 @@ export const getRecommendations = async (req, res) => {
             return mapped;
         };
 
-        const mapProduct = (p) => {
-            const { shadeOptions, colorOptions } = buildOptions(p);
-            return {
-                _id: p._id,
-                name: p.name,
-                variant: p.variant,
-                price: p.price,
-                category: p.category
-                    ? { _id: p.category._id, name: p.category.name, slug: p.category.slug }
-                    : null,
-                brand: p.brand ? { _id: p.brand._id, name: p.brand.name } : null,
-                summary: p.summary || "",
-                status: p.status,
-                image: p.images?.length ? normalizeImages(p.images)[0] : null,
-                shadeOptions,
-                colorOptions,
-                commentsCount: p.commentsCount || 0,
-                avgRating: p.avgRating || 0,
-            };
-        };
+        // 🔹 1. Load active promotions
+        const now = new Date();
+        const promotions = await Promotion.find({
+            status: "active",
+            startDate: { $lte: now },
+            endDate: { $gte: now },
+        }).lean();
 
-        let products = [];
-        let suggestions = [];
-        let message = "";
-
-        // 🔹 Step helper
+        // 🔹 2. Step helper
         const runStep = async (filter, step) => {
             const found = await Product.find(makeQuery(makeInsensitive(filter)))
                 .populate("category", "name slug")
                 .populate("brand", "name")
-                .select("_id name price images summary status category brand variant variants");
+                .select("_id name price mrp quantity images summary status category brand variant variants")
+                .lean();
 
-            if (found.length > 0) {
-                if (!products.length) {
-                    const failMessage = buildMessage({
-                        step,
-                        familyKey,
-                        toneKey,
-                        undertoneKey,
-                        formulationLabel,
-                    });
+            if (!found.length) return [];
 
-                    suggestions.push({
-                        type: step,
-                        message: failMessage,
-                        products: found.map(mapProduct),
-                    });
-
-                    message = failMessage;
-                }
-                return true;
-            }
-            return false;
+            return await enrichProducts(found, promotions);
         };
 
-        // ---------------------------
-        // Step 1 → exact match
-        // ---------------------------
-        let query = makeQuery(
-            makeInsensitive({
-                "variants.familyKey": familyKey,
-                "variants.toneKeys": toneKey,
-                "variants.undertoneKeys": undertoneKey,
-                ...(formulation && { formulation }),
-            })
-        );
+        // 🔹 3. Try different matching levels
+        let enrichedProducts = [];
 
-        products = await Product.find(query)
-            .populate("category", "name slug")
-            .populate("brand", "name")
-            .select("_id name price images summary status category brand variant variants");
-
-        products = products.map(mapProduct);
-
-        if (products.length > 0) {
-            message = buildMessage({
+        const matchSteps = [
+            {
+                filter: {
+                    "variants.familyKey": familyKey,
+                    "variants.toneKeys": toneKey,
+                    "variants.undertoneKeys": undertoneKey,
+                    ...(formulation && { formulation }),
+                },
                 step: "exact",
-                familyKey,
-                toneKey,
-                undertoneKey,
-                formulationLabel,
-            });
-        }
-
-        // ---------------------------
-        // Step 2 → ignore formulation
-        // ---------------------------
-        if (products.length === 0 && formulation) {
-            await runStep(
-                {
+            },
+            formulation && {
+                filter: {
                     "variants.familyKey": familyKey,
                     "variants.toneKeys": toneKey,
                     "variants.undertoneKeys": undertoneKey,
                 },
-                "formulation"
-            );
-        }
-
-        // ---------------------------
-        // Step 3 → ignore family, keep tone + undertone + formulation
-        // ---------------------------
-        if (products.length === 0 && suggestions.length === 0 && formulation) {
-            await runStep(
-                {
+                step: "ignore-formulation",
+            },
+            formulation && {
+                filter: {
                     "variants.toneKeys": toneKey,
                     "variants.undertoneKeys": undertoneKey,
                     formulation,
                 },
-                "family-formulation"
-            );
-        }
-
-        // ---------------------------
-        // Step 4 → ignore family & formulation, keep tone + undertone
-        // ---------------------------
-        if (products.length === 0 && suggestions.length === 0) {
-            await runStep(
-                {
+                step: "ignore-family",
+            },
+            {
+                filter: {
                     "variants.toneKeys": toneKey,
                     "variants.undertoneKeys": undertoneKey,
                 },
-                "family"
-            );
-        }
-
-        // ---------------------------
-        // Step 5 → ignore undertone, keep tone + formulation
-        // ---------------------------
-        if (products.length === 0 && suggestions.length === 0 && formulation) {
-            await runStep(
-                {
+                step: "ignore-family-formulation",
+            },
+            formulation && {
+                filter: {
                     "variants.toneKeys": toneKey,
                     formulation,
                 },
-                "tone-formulation"
-            );
-        }
-
-        // ---------------------------
-        // Step 6 → ignore undertone, keep tone
-        // ---------------------------
-        if (products.length === 0 && suggestions.length === 0) {
-            await runStep(
-                {
-                    "variants.toneKeys": toneKey,
-                },
-                "tone"
-            );
-        }
-
-        // ---------------------------
-        // Step 7 → ignore tone, keep undertone + formulation
-        // ---------------------------
-        if (products.length === 0 && suggestions.length === 0 && formulation) {
-            await runStep(
-                {
+                step: "tone-formulation",
+            },
+            {
+                filter: { "variants.toneKeys": toneKey },
+                step: "tone",
+            },
+            formulation && {
+                filter: {
                     "variants.undertoneKeys": undertoneKey,
                     formulation,
                 },
-                "undertone-formulation"
-            );
+                step: "undertone-formulation",
+            },
+            { filter: { "variants.undertoneKeys": undertoneKey }, step: "undertone" },
+        ].filter(Boolean);
+
+        for (const { filter } of matchSteps) {
+            enrichedProducts = await runStep(filter);
+            if (enrichedProducts.length) break;
         }
 
-        // ---------------------------
-        // Step 8 → ignore tone, keep undertone
-        // ---------------------------
-        if (products.length === 0 && suggestions.length === 0) {
-            await runStep(
-                {
-                    "variants.undertoneKeys": undertoneKey,
-                },
-                "undertone"
-            );
-        }
-
-        // ---------------------------
-        // Final fallback
-        // ---------------------------
-        if (products.length === 0 && suggestions.length === 0) {
-            message = buildMessage({ step: "default" });
-        }
-
+        // 🔹 4. Final Response
         res.json({
             success: true,
-            count: products.length,
-            products,
+            count: enrichedProducts.length,
+            products: enrichedProducts,
             filters: { familyKey, toneKey, undertoneKey, formulation: formulationLabel },
-            message,
-            suggestions,
+            message: enrichedProducts.length
+                ? "Recommendations fetched successfully"
+                : "No matching recommendations found",
         });
     } catch (err) {
         console.error("getRecommendations error:", err);
         res.status(500).json({ success: false, message: err.message });
     }
 };
+
+// ✅ Helper identical to getProductsByCategory enrichment
+async function enrichProducts(products, promotions) {
+    return Promise.all(
+        products.map(async (p) => {
+            const enriched = enrichProductWithStockAndOptions(p, promotions);
+
+            // 🔹 Normalize variants
+            let normalizedVariants = [];
+            if (Array.isArray(enriched.variants) && enriched.variants.length > 0) {
+                normalizedVariants = calculateVariantPrices(enriched.variants, enriched, promotions);
+            } else if (enriched.variant && (!enriched.variants || !enriched.variants.length)) {
+                const legacyVariant = {
+                    sku: enriched.sku ?? `${enriched._id}-default`,
+                    shadeName: enriched.variant || "Default",
+                    hex: null,
+                    images: normalizeImages(enriched.images || []),
+                    stock: enriched.quantity ?? 0,
+                    sales: enriched.sales ?? 0,
+                    thresholdValue: 0,
+                    isActive: true,
+                    toneKeys: [],
+                    undertoneKeys: [],
+                    originalPrice: enriched.mrp ?? enriched.price ?? 0,
+                    discountedPrice: enriched.price ?? 0,
+                    displayPrice: enriched.price ?? 0,
+                    discountAmount:
+                        enriched.mrp && enriched.price ? enriched.mrp - enriched.price : 0,
+                    discountPercent:
+                        enriched.mrp && enriched.mrp > enriched.price
+                            ? Math.round(((enriched.mrp - enriched.price) / enriched.mrp) * 100)
+                            : 0,
+                    createdAt: new Date(),
+                    status: enriched.quantity > 0 ? "inStock" : "outOfStock",
+                    message: enriched.quantity > 0 ? "In-stock" : "No stock available",
+                };
+
+                await Product.updateOne(
+                    { _id: enriched._id, "variants.sku": { $ne: legacyVariant.sku } },
+                    { $push: { variants: legacyVariant } }
+                );
+
+                normalizedVariants = calculateVariantPrices([legacyVariant], enriched, promotions);
+            } else {
+                normalizedVariants = calculateVariantPrices(
+                    [getPseudoVariant(enriched)],
+                    enriched,
+                    promotions
+                );
+            }
+
+            enriched.variants = normalizedVariants;
+
+            // 🔹 Shade options
+            enriched.shadeOptions = normalizedVariants.map((v) => ({
+                name: v.shadeName || enriched.variant || "Default",
+                sku: v.sku,
+                image:
+                    Array.isArray(v.images) && v.images.length
+                        ? v.images[0]
+                        : enriched.thumbnail || null,
+                price: v.displayPrice,
+                status: v.status || "inStock",
+            }));
+
+            // 🔹 Compute pricing + stock status
+            const displayVariant = normalizedVariants?.[0] || {};
+            const price = displayVariant.displayPrice ?? enriched.price ?? 0;
+            const mrp = displayVariant.originalPrice ?? enriched.mrp ?? enriched.price ?? 0;
+            const discountPercent = mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
+            const status =
+                displayVariant.status || (enriched.quantity > 0 ? "inStock" : "outOfStock");
+            const message =
+                displayVariant.message || (enriched.quantity > 0 ? "In-stock" : "No stock available");
+
+            // 🔹 Ratings
+            const [{ avg = 0, count = 0 } = {}] = await Review.aggregate([
+                { $match: { productId: enriched._id, status: "Active" } },
+                { $group: { _id: "$productId", avg: { $avg: "$rating" }, count: { $sum: 1 } } },
+            ]);
+            const avgRating = Math.round((avg || 0) * 10) / 10;
+
+            return {
+                _id: enriched._id,
+                name: enriched.name,
+                brand: enriched.brand || null,
+                mrp,
+                price,
+                discountPercent,
+                discountAmount: mrp - price,
+                images: normalizeImages(enriched.images || []),
+                variants: normalizedVariants,
+                shadeOptions: enriched.shadeOptions || [],
+                status,
+                message,
+                avgRating,
+                totalRatings: count || 0,
+                inStock: displayVariant.stock > 0 || enriched.quantity > 0,
+            };
+        })
+    );
+}
