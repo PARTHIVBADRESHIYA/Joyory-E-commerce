@@ -466,7 +466,7 @@ const addProductController = async (req, res) => {
                     const uploadedImages = [];
 
                     // ✅ Upload variant-specific files
-                    const variantFiles = req.files?.filter(f => f.fieldname === `variantImages_${i}`) || [];
+                    const variantFiles = req.files?.filter(f => f.fieldname === `variants[${i}][images]`) || [];
                     for (const file of variantFiles) {
                         const result = await cloudinary.uploader.upload(file.path, { folder: "products/variants" });
                         uploadedImages.push(result.secure_url);
@@ -561,6 +561,7 @@ const addProductController = async (req, res) => {
         res.status(500).json({ message: "❌ Product placement failed", error: error.message });
     }
 };
+
 const updateProductById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -584,7 +585,7 @@ const updateProductById = async (req, res) => {
         // ---------- Parse removed images ----------
         let removedImages = [];
         if (req.body.removedImages) {
-            try { removedImages = JSON.parse(req.body.removedImages); } 
+            try { removedImages = JSON.parse(req.body.removedImages); }
             catch { removedImages = []; }
         }
 
@@ -618,7 +619,7 @@ const updateProductById = async (req, res) => {
                 // Handle removed images for variant (if frontend sends removedVariantImages)
                 let removedVariantImages = [];
                 if (v.removedImages) {
-                    try { removedVariantImages = JSON.parse(v.removedImages); } 
+                    try { removedVariantImages = JSON.parse(v.removedImages); }
                     catch { removedVariantImages = []; }
                 }
 
