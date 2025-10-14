@@ -2,7 +2,7 @@
 import cron from "node-cron";
 import Promotion from "../../../models/Promotion.js";
 
-cron.schedule("* * * * *", async () => {
+cron.schedule("5 * * * *", async () => {
     const now = new Date();
     // console.log("⏰ Promotion scheduler running:", now.toISOString());
 

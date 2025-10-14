@@ -358,6 +358,209 @@ export const resolveFormulationId = async (input) => {
 // };
 
 // ---------------------- CREATE PRODUCT ----------------------
+// const addProductController = async (req, res) => {
+//     try {
+//         const {
+//             name,
+//             variant,
+//             summary,
+//             description,
+//             ingredients,
+//             features,
+//             howToUse,
+//             price,
+//             buyingPrice,
+//             brand,
+//             category,
+//             categories,
+//             quantity,
+//             expiryDate,
+//             scheduledAt,
+//             productTags: rawTags,
+//             variants: rawVariants,
+//             thresholdValue: rawThresholdValue,
+//             formulation,
+//             seller,
+//         } = req.body;
+
+//         if (!name) return res.status(400).json({ message: "Product name is required" });
+//         const existingProduct = await Product.findOne({ name: name.trim() });
+//         if (existingProduct) return res.status(400).json({ message: `Product with name "${name}" already exists` });
+
+//         if (!category && (!categories || categories.length === 0)) {
+//             return res.status(400).json({ message: "Category is required" });
+//         }
+
+//         // --------------- Handle Scheduling ---------------
+//         let isPublished = true;
+//         let scheduleDate = null;
+//         if (scheduledAt) {
+//             const parsedDateIST = moment.tz(scheduledAt, "YYYY-MM-DD HH:mm", "Asia/Kolkata");
+//             if (!parsedDateIST.isValid()) {
+//                 return res.status(400).json({ message: "❌ Invalid scheduledAt date format. Use YYYY-MM-DD HH:mm (IST)" });
+//             }
+//             const parsedDateUTC = parsedDateIST.toDate();
+//             if (parsedDateUTC > new Date()) {
+//                 isPublished = false;
+//                 scheduleDate = parsedDateUTC;
+//             }
+//         }
+
+//         // --------------- Resolve Categories ---------------
+//         let finalCategories = categories && categories.length
+//             ? (Array.isArray(categories) ? categories : [categories])
+//             : [category];
+
+//         const resolvedCategories = [];
+//         for (let cat of finalCategories) {
+//             if (!cat) continue;
+//             const trimmed = String(cat).trim();
+//             if (mongoose.Types.ObjectId.isValid(trimmed)) {
+//                 resolvedCategories.push(trimmed);
+//             } else {
+//                 const foundCat = await Category.findOne({ name: { $regex: `^${trimmed}$`, $options: "i" } });
+//                 if (!foundCat) return res.status(400).json({ message: `Category "${trimmed}" not found` });
+//                 resolvedCategories.push(foundCat._id);
+//             }
+//         }
+
+//         const foundCategories = await Category.find({ _id: { $in: resolvedCategories } });
+//         if (foundCategories.length !== resolvedCategories.length)
+//             return res.status(400).json({ message: "One or more category IDs are invalid" });
+
+//         // --------------- Build Hierarchy ---------------
+//         const buildCategoryHierarchy = async (leafId) => {
+//             const hierarchy = [];
+//             let current = await Category.findById(leafId);
+//             while (current) {
+//                 hierarchy.unshift(current._id);
+//                 if (!current.parent) break;
+//                 current = await Category.findById(current.parent);
+//             }
+//             return hierarchy;
+//         };
+//         const categoryHierarchy = await buildCategoryHierarchy(resolvedCategories[0]);
+
+//         // --------------- Parse Tags ---------------
+//         let productTags = [];
+//         try {
+//             productTags = rawTags ? (typeof rawTags === "string" ? JSON.parse(rawTags) : rawTags) : [];
+//         } catch {
+//             productTags = [];
+//         }
+
+//         const parsedPrice = Number(price);
+//         const parsedBuyingPrice = Number(buyingPrice);
+//         if (isNaN(parsedPrice) || isNaN(parsedBuyingPrice))
+//             return res.status(400).json({ message: "❌ Invalid numeric values for price or buyingPrice" });
+
+//         // --------------- Variants ----------------
+//         let variants = [];
+//         let shadeOptions = [];
+//         let colorOptions = [];
+
+//         try {
+//             let variantArray = rawVariants ? (typeof rawVariants === "string" ? JSON.parse(rawVariants) : rawVariants) : [];
+//             if (Array.isArray(variantArray) && variantArray.length > 0) {
+//                 variants = await Promise.all(variantArray.map(async (v, i) => {
+//                     const uploadedImages = [];
+
+//                     // ✅ Upload variant-specific files
+//                     const variantFiles = req.files?.filter(f => f.fieldname === `variants[${i}][images]`) || [];
+//                     for (const file of variantFiles) {
+//                         const result = await cloudinary.uploader.upload(file.path, { folder: "products/variants" });
+//                         uploadedImages.push(result.secure_url);
+//                     }
+
+//                     const combinedImages = [
+//                         ...(Array.isArray(v.images) ? v.images : []),
+//                         ...uploadedImages
+//                     ];
+
+//                     return {
+//                         ...v,
+//                         stock: Number(v.stock) || 0,
+//                         sales: Number(v.sales) || 0,
+//                         thresholdValue: Number(v.thresholdValue) || 0,
+//                         discountedPrice: v.discountedPrice !== undefined ? Number(v.discountedPrice) : null,
+//                         images: combinedImages.slice(-8), // limit to last 8
+//                         isActive: v.isActive !== false,
+//                         createdAt: new Date()
+//                     };
+//                 }));
+
+//                 shadeOptions = variants.map(v => v.shadeName).filter(Boolean);
+//                 colorOptions = variants.map(v => v.hex).filter(Boolean);
+//             }
+//         } catch (err) {
+//             console.error("❌ Variants parsing error:", err);
+//             return res.status(400).json({ message: "Invalid variants data", error: err.message });
+//         }
+
+//         // --------------- Validate Quantity ----------------
+//         if (variants.length === 0) {
+//             if (quantity === undefined) return res.status(400).json({ message: "❌ quantity is required for non-variant products" });
+//             if (rawThresholdValue === undefined) return res.status(400).json({ message: "❌ thresholdValue is required for non-variant products" });
+//         }
+
+//         // --------------- Upload Main Images ----------------
+//         const images = [];
+
+//         // Uploaded files
+//         const mainFiles = req.files?.filter(f => f.fieldname === "images") || [];
+//         for (const file of mainFiles) {
+//             const result = await cloudinary.uploader.upload(file.path, { folder: "products" });
+//             images.push(result.secure_url);
+//         }
+
+//         // URLs if any
+//         if (req.body.imageUrls) {
+//             let urls = typeof req.body.imageUrls === "string" ? JSON.parse(req.body.imageUrls) : req.body.imageUrls;
+//             for (const url of urls) images.push(url);
+//         }
+
+//         // --------------- Compute Stock Status ----------------
+//         const totalQuantity = variants.length > 0 ? variants.reduce((sum, v) => sum + (v.stock || 0), 0) : Number(quantity);
+//         let status = totalQuantity === 0 ? "Out of stock" :
+//             totalQuantity < Number(rawThresholdValue) ? "Low stock" : "In-stock";
+
+//         // --------------- Create Product ----------------
+//         const product = new Product({
+//             name,
+//             variant,
+//             summary,
+//             description,
+//             ingredients,
+//             features,
+//             howToUse,
+//             price: parsedPrice,
+//             buyingPrice: parsedBuyingPrice,
+//             quantity: variants.length > 0 ? undefined : Number(quantity),
+//             thresholdValue: variants.length > 0 ? undefined : Number(rawThresholdValue),
+//             expiryDate,
+//             images,
+//             brand,
+//             category: resolvedCategories[0],
+//             categories: resolvedCategories,
+//             categoryHierarchy,
+//             status,
+//             productTags,
+//             shadeOptions,
+//             colorOptions,
+//             variants,
+//             isPublished,
+//             scheduledAt: scheduleDate,
+//             seller: seller || null,
+//         });
+
+//         await product.save();
+//         res.status(201).json({ message: "✅ Product created successfully", product });
+
+//     } catch (error) {
+//         console.error("❌ Product placement error:", util.inspect(error, { showHidden: false, depth: null }));
+//         res.status(500).json({ message: "❌ Product placement failed", error: error.message });
+//     }
+// };
 const addProductController = async (req, res) => {
     try {
         const {
@@ -461,11 +664,30 @@ const addProductController = async (req, res) => {
 
         try {
             let variantArray = rawVariants ? (typeof rawVariants === "string" ? JSON.parse(rawVariants) : rawVariants) : [];
-            if (Array.isArray(variantArray) && variantArray.length > 0) {
-                variants = await Promise.all(variantArray.map(async (v, i) => {
-                    const uploadedImages = [];
 
-                    // ✅ Upload variant-specific files
+            if (variantArray.length > 0) {
+                // ✅ VARIANT PRODUCT RULES
+                if (quantity || rawThresholdValue || req.body.images || req.body.imageUrls) {
+                    return res.status(400).json({
+                        message: "❌ For variant products, do NOT provide global quantity, thresholdValue or images. Use variants only."
+                    });
+                }
+
+                // Validate each variant
+                const skuSet = new Set();
+                variants = await Promise.all(variantArray.map(async (v, i) => {
+                    if (!v.sku) return res.status(400).json({ message: `Variant ${i + 1} is missing SKU` });
+                    if (skuSet.has(v.sku)) return res.status(400).json({ message: `Duplicate SKU "${v.sku}" found` });
+                    skuSet.add(v.sku);
+
+                    if (v.stock === undefined || isNaN(Number(v.stock)))
+                        return res.status(400).json({ message: `Variant ${v.sku} must have valid stock` });
+                    if (v.thresholdValue === undefined || isNaN(Number(v.thresholdValue)))
+                        return res.status(400).json({ message: `Variant ${v.sku} must have thresholdValue` });
+                    if (!v.images || v.images.length === 0)
+                        return res.status(400).json({ message: `Variant ${v.sku} must have at least one image` });
+
+                    const uploadedImages = [];
                     const variantFiles = req.files?.filter(f => f.fieldname === `variants[${i}][images]`) || [];
                     for (const file of variantFiles) {
                         const result = await cloudinary.uploader.upload(file.path, { folder: "products/variants" });
@@ -479,11 +701,11 @@ const addProductController = async (req, res) => {
 
                     return {
                         ...v,
-                        stock: Number(v.stock) || 0,
+                        stock: Number(v.stock),
                         sales: Number(v.sales) || 0,
-                        thresholdValue: Number(v.thresholdValue) || 0,
+                        thresholdValue: Number(v.thresholdValue),
                         discountedPrice: v.discountedPrice !== undefined ? Number(v.discountedPrice) : null,
-                        images: combinedImages.slice(-8), // limit to last 8
+                        images: combinedImages.slice(-8),
                         isActive: v.isActive !== false,
                         createdAt: new Date()
                     };
@@ -491,32 +713,27 @@ const addProductController = async (req, res) => {
 
                 shadeOptions = variants.map(v => v.shadeName).filter(Boolean);
                 colorOptions = variants.map(v => v.hex).filter(Boolean);
+            } else {
+                // ✅ NON-VARIANT PRODUCT RULES
+                if (quantity === undefined) return res.status(400).json({ message: "❌ quantity is required for non-variant products" });
+                if (rawThresholdValue === undefined) return res.status(400).json({ message: "❌ thresholdValue is required for non-variant products" });
+
+                // Images must exist
+                const images = [];
+                const mainFiles = req.files?.filter(f => f.fieldname === "images") || [];
+                for (const file of mainFiles) {
+                    const result = await cloudinary.uploader.upload(file.path, { folder: "products" });
+                    images.push(result.secure_url);
+                }
+                if (req.body.imageUrls) {
+                    let urls = typeof req.body.imageUrls === "string" ? JSON.parse(req.body.imageUrls) : req.body.imageUrls;
+                    for (const url of urls) images.push(url);
+                }
+                if (images.length === 0) return res.status(400).json({ message: "❌ Non-variant products must have at least one global image" });
             }
         } catch (err) {
             console.error("❌ Variants parsing error:", err);
             return res.status(400).json({ message: "Invalid variants data", error: err.message });
-        }
-
-        // --------------- Validate Quantity ----------------
-        if (variants.length === 0) {
-            if (quantity === undefined) return res.status(400).json({ message: "❌ quantity is required for non-variant products" });
-            if (rawThresholdValue === undefined) return res.status(400).json({ message: "❌ thresholdValue is required for non-variant products" });
-        }
-
-        // --------------- Upload Main Images ----------------
-        const images = [];
-
-        // Uploaded files
-        const mainFiles = req.files?.filter(f => f.fieldname === "images") || [];
-        for (const file of mainFiles) {
-            const result = await cloudinary.uploader.upload(file.path, { folder: "products" });
-            images.push(result.secure_url);
-        }
-
-        // URLs if any
-        if (req.body.imageUrls) {
-            let urls = typeof req.body.imageUrls === "string" ? JSON.parse(req.body.imageUrls) : req.body.imageUrls;
-            for (const url of urls) images.push(url);
         }
 
         // --------------- Compute Stock Status ----------------
@@ -538,7 +755,7 @@ const addProductController = async (req, res) => {
             quantity: variants.length > 0 ? undefined : Number(quantity),
             thresholdValue: variants.length > 0 ? undefined : Number(rawThresholdValue),
             expiryDate,
-            images,
+            images: variants.length > 0 ? undefined : req.body.images,
             brand,
             category: resolvedCategories[0],
             categories: resolvedCategories,
@@ -562,6 +779,7 @@ const addProductController = async (req, res) => {
     }
 };
 
+
 const updateProductById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -573,8 +791,6 @@ const updateProductById = async (req, res) => {
         // ---------- Numeric fields ----------
         if (req.body.price) updateData.price = Number(req.body.price);
         if (req.body.buyingPrice) updateData.buyingPrice = Number(req.body.buyingPrice);
-        if (req.body.quantity !== undefined) updateData.quantity = Number(req.body.quantity);
-        if (req.body.thresholdValue !== undefined) updateData.thresholdValue = Number(req.body.thresholdValue);
 
         // ---------- Parse variants ----------
         let rawVariants = req.body.variants || [];
@@ -610,36 +826,45 @@ const updateProductById = async (req, res) => {
             }
         }
 
-        // ---------- Update variants ----------
+        // ---------- Validate variant vs non-variant rules ----------
         if (rawVariants.length > 0) {
+            // VARIANT PRODUCT RULES
+            if (req.body.quantity || req.body.thresholdValue || req.body.images || req.body.imageUrls) {
+                return res.status(400).json({
+                    message: "❌ For variant products, do NOT provide global quantity, thresholdValue, or images. Use variants only."
+                });
+            }
+
+            // Validate each variant
+            const skuSet = new Set();
             rawVariants = rawVariants.map((v, idx) => {
+                if (!v.sku) throw new Error(`Variant at index ${idx + 1} is missing SKU`);
+                if (skuSet.has(v.sku)) throw new Error(`Duplicate SKU "${v.sku}" found`);
+                skuSet.add(v.sku);
+
+                if (v.stock === undefined || isNaN(Number(v.stock))) throw new Error(`Variant ${v.sku} must have valid stock`);
+                if (v.thresholdValue === undefined || isNaN(Number(v.thresholdValue))) throw new Error(`Variant ${v.sku} must have thresholdValue`);
+
                 const oldVariant = existingProduct.variants.find(x => x.sku === v.sku);
                 const oldImages = oldVariant ? oldVariant.images || [] : [];
 
-                // Handle removed images for variant (if frontend sends removedVariantImages)
                 let removedVariantImages = [];
                 if (v.removedImages) {
-                    try { removedVariantImages = JSON.parse(v.removedImages); }
-                    catch { removedVariantImages = []; }
+                    try { removedVariantImages = JSON.parse(v.removedImages); } catch { }
                 }
 
-                // Keep old images except removed ones
                 const filteredOld = oldImages.filter(img => !removedVariantImages.includes(img));
-
-                // Combine remaining + existing + uploaded
-                const finalImages = [...new Set([
-                    ...filteredOld,
-                    ...(v.images || []),
-                    ...(variantImagesMap[idx] || [])
-                ])];
+                const finalImages = [...new Set([...(v.images || []), ...filteredOld, ...(variantImagesMap[idx] || [])])];
+                if (finalImages.length === 0) throw new Error(`Variant ${v.sku} must have at least one image`);
 
                 return {
                     ...v,
-                    stock: Number(v.stock) || 0,
+                    stock: Number(v.stock),
                     sales: Number(v.sales) || 0,
-                    isActive: v.isActive !== false,
+                    thresholdValue: Number(v.thresholdValue),
                     discountedPrice: v.discountedPrice !== undefined ? Number(v.discountedPrice) : undefined,
                     images: finalImages,
+                    isActive: v.isActive !== false
                 };
             });
 
@@ -647,24 +872,29 @@ const updateProductById = async (req, res) => {
             updateData.shadeOptions = rawVariants.map(v => v.shadeName).filter(Boolean);
             updateData.colorOptions = rawVariants.map(v => v.hex).filter(Boolean);
             updateData.quantity = rawVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
+            updateData.thresholdValue = undefined; // Global threshold not allowed
+        } else {
+            // NON-VARIANT PRODUCT RULES
+            if (req.body.variants && req.body.variants.length > 0) {
+                return res.status(400).json({ message: "❌ Non-variant products cannot have variants" });
+            }
+
+            if (req.body.quantity === undefined && existingProduct.quantity === undefined) {
+                return res.status(400).json({ message: "❌ quantity is required for non-variant products" });
+            }
+            if (req.body.thresholdValue === undefined && existingProduct.thresholdValue === undefined) {
+                return res.status(400).json({ message: "❌ thresholdValue is required for non-variant products" });
+            }
+
+            // Ensure at least one image exists
+            let finalImages = [...(existingProduct.images || [])];
+            if (removedImages.length > 0) finalImages = finalImages.filter(img => !removedImages.includes(img));
+            if (productImages.length > 0) finalImages.push(...productImages);
+            finalImages = [...new Set(finalImages)];
+
+            if (finalImages.length === 0) return res.status(400).json({ message: "❌ Non-variant products must have at least one global image" });
+            updateData.images = finalImages;
         }
-
-        // ---------- Main product images ----------
-        let finalImages = [...(existingProduct.images || [])];
-
-        // Remove unwanted images (if frontend removed some)
-        if (removedImages.length > 0) {
-            finalImages = finalImages.filter(img => !removedImages.includes(img));
-        }
-
-        // Append newly uploaded product images
-        if (productImages.length > 0) {
-            finalImages.push(...productImages);
-        }
-
-        // Remove duplicates
-        finalImages = [...new Set(finalImages)];
-        updateData.images = finalImages;
 
         // ---------- Save update ----------
         const updated = await Product.findByIdAndUpdate(id, updateData, { new: true });
@@ -672,9 +902,124 @@ const updateProductById = async (req, res) => {
 
     } catch (error) {
         console.error("❌ Product update error:", error);
-        res.status(500).json({ message: "Failed to update product", error: error.message });
+        res.status(400).json({ message: error.message || "Failed to update product", error: error.message });
     }
 };
+
+
+// const updateProductById = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const existingProduct = await Product.findById(id);
+//         if (!existingProduct) return res.status(404).json({ message: "❌ Product not found" });
+
+//         const updateData = { ...req.body };
+
+//         // ---------- Numeric fields ----------
+//         if (req.body.price) updateData.price = Number(req.body.price);
+//         if (req.body.buyingPrice) updateData.buyingPrice = Number(req.body.buyingPrice);
+//         if (req.body.quantity !== undefined) updateData.quantity = Number(req.body.quantity);
+//         if (req.body.thresholdValue !== undefined) updateData.thresholdValue = Number(req.body.thresholdValue);
+
+//         // ---------- Parse variants ----------
+//         let rawVariants = req.body.variants || [];
+//         if (typeof rawVariants === "string") {
+//             try { rawVariants = JSON.parse(rawVariants); } catch { rawVariants = []; }
+//         }
+
+//         // ---------- Parse removed images ----------
+//         let removedImages = [];
+//         if (req.body.removedImages) {
+//             try { removedImages = JSON.parse(req.body.removedImages); }
+//             catch { removedImages = []; }
+//         }
+
+//         // ---------- Cloudinary uploads ----------
+//         const productImages = [];
+//         const variantImagesMap = {}; // {0: [urls], 1: [urls]}
+
+//         if (req.files && req.files.length > 0) {
+//             for (const file of req.files) {
+//                 const result = await cloudinary.uploader.upload(file.path, { folder: "products" });
+
+//                 if (file.fieldname === "images") {
+//                     productImages.push(result.secure_url);
+//                 } else {
+//                     const match = file.fieldname.match(/variants\[(\d+)\]\[images\]/);
+//                     if (match) {
+//                         const idx = Number(match[1]);
+//                         if (!variantImagesMap[idx]) variantImagesMap[idx] = [];
+//                         variantImagesMap[idx].push(result.secure_url);
+//                     }
+//                 }
+//             }
+//         }
+
+//         // ---------- Update variants ----------
+//         if (rawVariants.length > 0) {
+//             rawVariants = rawVariants.map((v, idx) => {
+//                 const oldVariant = existingProduct.variants.find(x => x.sku === v.sku);
+//                 const oldImages = oldVariant ? oldVariant.images || [] : [];
+
+//                 // Handle removed images for variant (if frontend sends removedVariantImages)
+//                 let removedVariantImages = [];
+//                 if (v.removedImages) {
+//                     try { removedVariantImages = JSON.parse(v.removedImages); }
+//                     catch { removedVariantImages = []; }
+//                 }
+
+//                 // Keep old images except removed ones
+//                 const filteredOld = oldImages.filter(img => !removedVariantImages.includes(img));
+
+//                 // Combine remaining + existing + uploaded
+//                 const finalImages = [...new Set([
+//                     ...filteredOld,
+//                     ...(v.images || []),
+//                     ...(variantImagesMap[idx] || [])
+//                 ])];
+
+//                 return {
+//                     ...v,
+//                     stock: Number(v.stock) || 0,
+//                     sales: Number(v.sales) || 0,
+//                     isActive: v.isActive !== false,
+//                     discountedPrice: v.discountedPrice !== undefined ? Number(v.discountedPrice) : undefined,
+//                     images: finalImages,
+//                 };
+//             });
+
+//             updateData.variants = rawVariants;
+//             updateData.shadeOptions = rawVariants.map(v => v.shadeName).filter(Boolean);
+//             updateData.colorOptions = rawVariants.map(v => v.hex).filter(Boolean);
+//             updateData.quantity = rawVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
+//         }
+
+//         // ---------- Main product images ----------
+//         let finalImages = [...(existingProduct.images || [])];
+
+//         // Remove unwanted images (if frontend removed some)
+//         if (removedImages.length > 0) {
+//             finalImages = finalImages.filter(img => !removedImages.includes(img));
+//         }
+
+//         // Append newly uploaded product images
+//         if (productImages.length > 0) {
+//             finalImages.push(...productImages);
+//         }
+
+//         // Remove duplicates
+//         finalImages = [...new Set(finalImages)];
+//         updateData.images = finalImages;
+
+//         // ---------- Save update ----------
+//         const updated = await Product.findByIdAndUpdate(id, updateData, { new: true });
+//         res.status(200).json({ message: "✅ Product updated successfully", product: updated });
+
+//     } catch (error) {
+//         console.error("❌ Product update error:", error);
+//         res.status(500).json({ message: "Failed to update product", error: error.message });
+//     }
+// };
 
 // ---------------------- UPDATE PRODUCT ----------------------
 // const updateProductById = async (req, res) => {
