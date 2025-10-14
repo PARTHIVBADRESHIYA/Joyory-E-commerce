@@ -6,6 +6,8 @@ const adminSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     role: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminRole' },
+    profileImage: { type: String },
+    profileImageId: { type: String },
 
     loginAttempts: {
         type: Number,
@@ -15,10 +17,10 @@ const adminSchema = new mongoose.Schema({
         type: Date
     },
     otp: {
-    code: { type: String },
-    expiresAt: { type: Date }
-},
-otpRequests: [{ type: Date }]
+        code: { type: String },
+        expiresAt: { type: Date }
+    },
+    otpRequests: [{ type: Date }]
 
 
 
