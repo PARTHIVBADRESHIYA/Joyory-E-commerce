@@ -561,9 +561,6 @@ const addProductController = async (req, res) => {
         res.status(500).json({ message: "❌ Product placement failed", error: error.message });
     }
 };
-
-
-// ---------------------- UPDATE PRODUCT ----------------------
 const updateProductById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -572,6 +569,7 @@ const updateProductById = async (req, res) => {
 
         const updateData = { ...req.body };
 
+        // ---------- Numeric fields ----------
         if (req.body.price) updateData.price = Number(req.body.price);
         if (req.body.buyingPrice) updateData.buyingPrice = Number(req.body.buyingPrice);
         if (req.body.quantity !== undefined) updateData.quantity = Number(req.body.quantity);
@@ -583,7 +581,14 @@ const updateProductById = async (req, res) => {
             try { rawVariants = JSON.parse(rawVariants); } catch { rawVariants = []; }
         }
 
-        // ---------- Image handling ----------
+        // ---------- Parse removed images ----------
+        let removedImages = [];
+        if (req.body.removedImages) {
+            try { removedImages = JSON.parse(req.body.removedImages); } 
+            catch { removedImages = []; }
+        }
+
+        // ---------- Cloudinary uploads ----------
         const productImages = [];
         const variantImagesMap = {}; // {0: [urls], 1: [urls]}
 
@@ -610,11 +615,22 @@ const updateProductById = async (req, res) => {
                 const oldVariant = existingProduct.variants.find(x => x.sku === v.sku);
                 const oldImages = oldVariant ? oldVariant.images || [] : [];
 
-                const newImages = [
-                    ...oldImages,
+                // Handle removed images for variant (if frontend sends removedVariantImages)
+                let removedVariantImages = [];
+                if (v.removedImages) {
+                    try { removedVariantImages = JSON.parse(v.removedImages); } 
+                    catch { removedVariantImages = []; }
+                }
+
+                // Keep old images except removed ones
+                const filteredOld = oldImages.filter(img => !removedVariantImages.includes(img));
+
+                // Combine remaining + existing + uploaded
+                const finalImages = [...new Set([
+                    ...filteredOld,
                     ...(v.images || []),
                     ...(variantImagesMap[idx] || [])
-                ];
+                ])];
 
                 return {
                     ...v,
@@ -622,22 +638,34 @@ const updateProductById = async (req, res) => {
                     sales: Number(v.sales) || 0,
                     isActive: v.isActive !== false,
                     discountedPrice: v.discountedPrice !== undefined ? Number(v.discountedPrice) : undefined,
-                    images: [...new Set(newImages)], // remove duplicates
+                    images: finalImages,
                 };
             });
 
             updateData.variants = rawVariants;
             updateData.shadeOptions = rawVariants.map(v => v.shadeName).filter(Boolean);
             updateData.colorOptions = rawVariants.map(v => v.hex).filter(Boolean);
-
             updateData.quantity = rawVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
         }
 
-        // ---------- Append main product images ----------
-        if (productImages.length > 0) {
-            updateData.images = [...(existingProduct.images || []), ...productImages];
+        // ---------- Main product images ----------
+        let finalImages = [...(existingProduct.images || [])];
+
+        // Remove unwanted images (if frontend removed some)
+        if (removedImages.length > 0) {
+            finalImages = finalImages.filter(img => !removedImages.includes(img));
         }
 
+        // Append newly uploaded product images
+        if (productImages.length > 0) {
+            finalImages.push(...productImages);
+        }
+
+        // Remove duplicates
+        finalImages = [...new Set(finalImages)];
+        updateData.images = finalImages;
+
+        // ---------- Save update ----------
         const updated = await Product.findByIdAndUpdate(id, updateData, { new: true });
         res.status(200).json({ message: "✅ Product updated successfully", product: updated });
 
@@ -646,6 +674,90 @@ const updateProductById = async (req, res) => {
         res.status(500).json({ message: "Failed to update product", error: error.message });
     }
 };
+
+// ---------------------- UPDATE PRODUCT ----------------------
+// const updateProductById = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const existingProduct = await Product.findById(id);
+//         if (!existingProduct) return res.status(404).json({ message: "❌ Product not found" });
+
+//         const updateData = { ...req.body };
+
+//         if (req.body.price) updateData.price = Number(req.body.price);
+//         if (req.body.buyingPrice) updateData.buyingPrice = Number(req.body.buyingPrice);
+//         if (req.body.quantity !== undefined) updateData.quantity = Number(req.body.quantity);
+//         if (req.body.thresholdValue !== undefined) updateData.thresholdValue = Number(req.body.thresholdValue);
+
+//         // ---------- Parse variants ----------
+//         let rawVariants = req.body.variants || [];
+//         if (typeof rawVariants === "string") {
+//             try { rawVariants = JSON.parse(rawVariants); } catch { rawVariants = []; }
+//         }
+
+//         // ---------- Image handling ----------
+//         const productImages = [];
+//         const variantImagesMap = {}; // {0: [urls], 1: [urls]}
+
+//         if (req.files && req.files.length > 0) {
+//             for (const file of req.files) {
+//                 const result = await cloudinary.uploader.upload(file.path, { folder: "products" });
+
+//                 if (file.fieldname === "images") {
+//                     productImages.push(result.secure_url);
+//                 } else {
+//                     const match = file.fieldname.match(/variants\[(\d+)\]\[images\]/);
+//                     if (match) {
+//                         const idx = Number(match[1]);
+//                         if (!variantImagesMap[idx]) variantImagesMap[idx] = [];
+//                         variantImagesMap[idx].push(result.secure_url);
+//                     }
+//                 }
+//             }
+//         }
+
+//         // ---------- Update variants ----------
+//         if (rawVariants.length > 0) {
+//             rawVariants = rawVariants.map((v, idx) => {
+//                 const oldVariant = existingProduct.variants.find(x => x.sku === v.sku);
+//                 const oldImages = oldVariant ? oldVariant.images || [] : [];
+
+//                 const newImages = [
+//                     ...oldImages,
+//                     ...(v.images || []),
+//                     ...(variantImagesMap[idx] || [])
+//                 ];
+
+//                 return {
+//                     ...v,
+//                     stock: Number(v.stock) || 0,
+//                     sales: Number(v.sales) || 0,
+//                     isActive: v.isActive !== false,
+//                     discountedPrice: v.discountedPrice !== undefined ? Number(v.discountedPrice) : undefined,
+//                     images: [...new Set(newImages)], // remove duplicates
+//                 };
+//             });
+
+//             updateData.variants = rawVariants;
+//             updateData.shadeOptions = rawVariants.map(v => v.shadeName).filter(Boolean);
+//             updateData.colorOptions = rawVariants.map(v => v.hex).filter(Boolean);
+
+//             updateData.quantity = rawVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
+//         }
+
+//         // ---------- Append main product images ----------
+//         if (productImages.length > 0) {
+//             updateData.images = [...(existingProduct.images || []), ...productImages];
+//         }
+
+//         const updated = await Product.findByIdAndUpdate(id, updateData, { new: true });
+//         res.status(200).json({ message: "✅ Product updated successfully", product: updated });
+
+//     } catch (error) {
+//         console.error("❌ Product update error:", error);
+//         res.status(500).json({ message: "Failed to update product", error: error.message });
+//     }
+// };
 
 const getAllProducts = async (req, res) => {
     try {
