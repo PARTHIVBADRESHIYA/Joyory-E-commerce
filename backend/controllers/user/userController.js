@@ -706,9 +706,36 @@ const trackProductView = async (req, res) => {
 };
 
 // controllers/authController.js
+// const logoutUser = (req, res) => {
+//     res.clearCookie('token'); // removes the JWT cookie
+//     return res.status(200).json({ message: 'Logged out successfully' });
+// };
 const logoutUser = (req, res) => {
-    res.clearCookie('token'); // removes the JWT cookie
-    return res.status(200).json({ message: 'Logged out successfully' });
+    try {
+        // 1️⃣ Clear the token cookie
+        res.cookie("token", "", {
+            httpOnly: true, // prevent JS access
+            secure: process.env.NODE_ENV === "production", // HTTPS only in production
+            sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+            path: "/", // match login path
+            expires: new Date(0) // immediately expire
+        });
+
+        // 2️⃣ Prevent caching of sensitive pages
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate"); // HTTP 1.1
+        res.setHeader("Pragma", "no-cache"); // HTTP 1.0
+        res.setHeader("Expires", "0"); // Proxies
+
+        // 3️⃣ Return success message
+        return res.status(200).json({
+            message: "You have been logged out successfully."
+        });
+    } catch (err) {
+        console.error("❌ Logout error:", err);
+        return res.status(500).json({
+            message: "Something went wrong during logout. Please try again later."
+        });
+    }
 };
 
 // @desc Delete account permanently
