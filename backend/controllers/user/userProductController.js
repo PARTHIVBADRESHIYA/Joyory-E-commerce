@@ -261,94 +261,6 @@ export const getFilterMetadata = async (req, res) => {
 
 const toObjectId = (id) => mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null;
 
-// export const normalizeFilters = (query) => ({
-//     search: query.search || undefined,
-//     brandIds: query.brandIds ? query.brandIds.split(",") : [],
-//     categoryIds: query.categoryIds ? query.categoryIds.split(",") : [],
-//     skinTypes: query.skinTypes ? query.skinTypes.split(",") : [],
-//     formulations: query.formulations ? query.formulations.split(",") : [],
-//     finishes: query.finishes ? query.finishes.split(",") : [],
-//     minPrice: query.minPrice ? Number(query.minPrice) : undefined,
-//     maxPrice: query.maxPrice ? Number(query.maxPrice) : undefined,
-//     discountMin: query.discountMin ? Number(query.discountMin) : undefined,
-//     ratingMin: query.ratingMin ? Number(query.ratingMin) : undefined,
-// });
-
-// export const applyDynamicFilters = async (filters = {}) => {
-//     const f = { isPublished: true };
-
-//     const resolveIds = async (Model, values) => {
-//         if (!values?.length) return [];
-//         const objectIds = values.map(toObjectId).filter(Boolean);
-//         if (objectIds.length) return objectIds;
-
-//         // include `key` lookup for Formulation
-//         const query = [
-//             { slug: { $in: values } },
-//             { name: { $in: values } }
-//         ];
-//         if (Model.modelName === "Formulation") query.push({ key: { $in: values } });
-
-//         const docs = await Model.find({ $or: query }).select("_id").lean();
-//         return docs.map(d => d._id);
-//     };
-
-//     // 🔹 Brand filter
-//     if (filters.brandIds?.length) {
-//         const brandIds = await resolveIds(Brand, filters.brandIds);
-//         if (brandIds.length) f.brand = { $in: brandIds };
-//     }
-
-//     // 🔹 Category filter
-//     if (filters.categoryIds?.length) {
-//         const categoryIds = await resolveIds(Category, filters.categoryIds);
-//         if (categoryIds.length) f.category = { $in: categoryIds };
-//     }
-
-//     // 🔹 Price Range filter (supports variants)
-//     if (filters.minPrice || filters.maxPrice) {
-//         const priceFilter = {};
-//         if (filters.minPrice) priceFilter.$gte = filters.minPrice;
-//         if (filters.maxPrice) priceFilter.$lte = filters.maxPrice;
-
-//         // Merge with category if exists to avoid overriding
-//         if (f.category) {
-//             f.$and = [
-//                 { category: f.category },
-//                 { $or: [{ price: priceFilter }, { "variants.price": priceFilter }] }
-//             ];
-//             delete f.category;
-//         } else {
-//             f.$or = [{ price: priceFilter }, { "variants.price": priceFilter }];
-//         }
-//     }
-
-//     // 🔹 Skin type & formulation filters
-//     // 🔹 Skin type & formulation filters
-//     if (filters.skinTypes?.length) {
-//         const ids = await resolveIds(SkinType, filters.skinTypes);
-//         if (ids.length) f.skinTypes = { $in: ids };
-//     }
-
-//     if (filters.formulations?.length) {
-//         const ids = await resolveIds(Formulation, filters.formulations);
-//         if (ids.length) f.formulation = { $in: ids }; // 👈 singular!
-//     }
-
-//     // 🔹 Finish filter
-//     if (filters.finishes?.length) {
-//         f.finish = { $in: filters.finishes.map(v => new RegExp(`^${v}$`, "i")) };
-//     }
-
-//     // 🔹 Discount & Rating
-//     if (filters.discountMin) f.discountPercent = { $gte: filters.discountMin };
-//     if (filters.ratingMin) f.avgRating = { $gte: filters.ratingMin };
-
-//     // 🔹 Text search
-//     if (filters.search) f.$text = { $search: filters.search };
-
-//     return f;
-// };
 export const normalizeFilters = (query = {}) => ({
     search: query.search || undefined,
 
@@ -394,12 +306,12 @@ export const applyDynamicFilters = async (filters = {}) => {
     const resolveIds = async (Model, values) => {
         if (!values?.length) return [];
 
-        // Filter valid ObjectId strings first
+        // ✅ Convert valid ObjectId strings
         const objectIds = values
             .filter(v => mongoose.Types.ObjectId.isValid(v))
             .map(v => new mongoose.Types.ObjectId(v));
 
-        // For any non-ObjectId strings, lookup in DB (slug or name)
+        // Lookup non-ObjectId strings in DB
         const stringsToResolve = values.filter(v => !mongoose.Types.ObjectId.isValid(v));
         let resolvedFromDB = [];
         if (stringsToResolve.length) {
@@ -412,16 +324,18 @@ export const applyDynamicFilters = async (filters = {}) => {
         return [...objectIds, ...resolvedFromDB];
     };
 
+    const andFilters = [];
+
     // Brand
     if (filters.brandIds?.length) {
         const ids = await resolveIds(Brand, filters.brandIds);
-        if (ids.length) f.brand = { $in: ids };
+        if (ids.length) andFilters.push({ brand: { $in: ids } });
     }
 
     // Category
     if (filters.categoryIds?.length) {
         const ids = await resolveIds(Category, filters.categoryIds);
-        if (ids.length) f.category = { $in: ids };
+        if (ids.length) andFilters.push({ category: { $in: ids } });
     }
 
     // Price
@@ -429,45 +343,42 @@ export const applyDynamicFilters = async (filters = {}) => {
         const priceFilter = {};
         if (filters.minPrice) priceFilter.$gte = filters.minPrice;
         if (filters.maxPrice) priceFilter.$lte = filters.maxPrice;
-
-        if (f.category) {
-            f.$and = [
-                { category: f.category },
-                { $or: [{ price: priceFilter }, { "variants.price": priceFilter }] }
-            ];
-            delete f.category;
-        } else {
-            f.$or = [{ price: priceFilter }, { "variants.price": priceFilter }];
-        }
+        andFilters.push({ $or: [{ price: priceFilter }, { "variants.price": priceFilter }] });
     }
 
-    // ✅ SkinTypes (resolve strings to ObjectId)
+    // SkinTypes
     if (filters.skinTypes?.length) {
         const ids = await resolveIds(SkinType, filters.skinTypes);
-        if (ids.length) f.skinTypes = { $in: ids };
+        if (ids.length) {
+            const objectIds = ids.map(id => new mongoose.Types.ObjectId(id));
+            andFilters.push({ skinTypes: { $in: objectIds } });
+        }
     }
 
     // Formulations
     if (filters.formulations?.length) {
         const ids = await resolveIds(Formulation, filters.formulations);
-        if (ids.length) f.formulation = { $in: ids };
+        if (ids.length) andFilters.push({ formulation: { $in: ids } });
     }
 
     // Finishes
     if (filters.finishes?.length) {
-        f.finish = { $in: filters.finishes.map(v => new RegExp(`^${v}$`, "i")) };
+        andFilters.push({ finish: { $in: filters.finishes.map(v => new RegExp(`^${v}$`, "i")) } });
     }
 
     // Discount & Rating
-    if (filters.discountMin) f.discountPercent = { $gte: filters.discountMin };
-    if (filters.ratingMin) f.avgRating = { $gte: filters.ratingMin };
+    if (filters.discountMin) andFilters.push({ discountPercent: { $gte: filters.discountMin } });
+    if (filters.ratingMin) andFilters.push({ avgRating: { $gte: filters.ratingMin } });
 
     // Text search
-    if (filters.search) f.$text = { $search: filters.search };
+    if (filters.search) andFilters.push({ $text: { $search: filters.search } });
 
+    // Apply all filters together using $and
+    if (andFilters.length) {
+        f.$and = andFilters;
+    }
     return f;
 };
-
 
 export const normalizeImages = (images = []) => {
     return images.map(img =>
