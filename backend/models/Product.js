@@ -394,7 +394,7 @@ const productSchema = new mongoose.Schema({
         required: function () {
             return !this.variants || this.variants.length === 0;
         }
-    },
+    },  
 
     brand: { type: mongoose.Schema.Types.ObjectId, ref: "Brand" },
     category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },

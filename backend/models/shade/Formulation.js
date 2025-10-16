@@ -8,3 +8,4 @@ const formulationSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 export default mongoose.model("Formulation", formulationSchema);
+    
