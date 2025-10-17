@@ -7,6 +7,7 @@ import bcrypt from 'bcryptjs';
 import { generateOTP } from '../../middlewares/utils/generateOTP.js';
 import { sendEmail } from '../../middlewares/utils/emailService.js';
 import { sendSms } from '../../middlewares/utils/sendSms.js';
+import {mergeGuestCart } from '../../controllers/user/userCartController.js';
 // import { notifyMainAdmins } from '../middlewares/utils/notifyMainAdmins.js'; // ✅ Make sure this path is correct
 
 // JWT Token Generator
@@ -436,6 +437,193 @@ const generateToken = (user) => {
 //     }
 // };
 
+// const userSignup = async (req, res) => {
+//     try {
+//         const { name, email, password, phone, preferredOtpMethod, referralCode } = req.body;
+
+//         if (!name || !email || !password) {
+//             return res.status(400).json({ message: "name, email and password are required" });
+//         }
+
+//         const existing = await User.findOne({ email });
+//         if (existing) return res.status(400).json({ message: "Email already registered" });
+
+//         const method = (preferredOtpMethod && ["email", "sms"].includes(preferredOtpMethod.toLowerCase()))
+//             ? preferredOtpMethod.toLowerCase()
+//             : "email";
+
+//         const actualMethod = method === "sms" && phone ? "sms" : "email";
+
+//         // Generate OTP & hash password
+//         const plainOtp = generateOTP();
+//         const hashedOtp = await bcrypt.hash(plainOtp, 10);
+//         const hashedPassword = await bcrypt.hash(password, 10);
+
+//         const myReferralCode = await generateUniqueReferralCode();
+
+//         // Create user object
+//         const user = new User({
+//             name,
+//             email,
+//             phone,
+//             password: hashedPassword,
+//             role: "user",
+//             isManual: true,
+//             isVerified: false,
+//             preferredOtpMethod: actualMethod,
+//             otp: { code: hashedOtp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) },
+//             referralCode: myReferralCode,
+//         });
+
+//         // Handle referral
+//         let referrer = null;
+//         if (referralCode) {
+//             referrer = await User.findOne({ referralCode: referralCode.toUpperCase() });
+//             if (!referrer) return res.status(400).json({ message: "Invalid referral code" });
+//             if (referrer.email === email) return res.status(400).json({ message: "Cannot use own referral code" });
+//             user.referredBy = referrer._id;
+//         }
+
+//         await user.save();
+
+//         if (referrer) {
+//             await Referral.create({
+//                 referrer: referrer._id,
+//                 referee: user._id,
+//                 status: "pending",
+//                 rewardForReferrer: 200,
+//                 rewardForReferee: 200,
+//                 minOrderAmount: 100,
+//             });
+//         }
+
+//         // Send OTP via chosen method
+//         try {
+//             if (actualMethod === "sms") {
+//                 await sendSms(phone, `Your verification OTP is: ${plainOtp}`);
+//             } else {
+//                 await sendEmail(
+//                     email,
+//                     "Verify your account",
+//                     `<p>Your verification OTP is: <b>${plainOtp}</b></p>`
+//                 );
+//             }
+//         } catch (err) {
+//             console.error("❌ OTP sending failed:", err);
+//             return res.status(500).json({
+//                 message: "Signup succeeded but sending OTP failed. Please request OTP again.",
+//                 error: err.message,
+//             });
+//         }
+
+//         return res.status(201).json({
+//             message: "Signup successful. OTP sent.",
+//             otpSent: true,
+//             method: actualMethod,
+//             email: user.email,
+//             referralCode: user.referralCode,
+//             referralLink: `${process.env.APP_URL || "https://yourdomain.com"}/signup?ref=${user.referralCode}`,
+//         });
+
+//     } catch (err) {
+//         console.error("🔥 Signup error:", err);
+//         res.status(500).json({ message: "Signup failed", error: err.message });
+//     }
+// };
+
+
+// const userLogin = async (req, res) => {
+//     try {
+//         const { email, password } = req.body;
+
+//         // 1) Validate input
+//         if (!email || !password) {
+//             return res.status(400).json({
+//                 message: "Please enter both your email and password to log in."
+//             });
+//         }
+
+//         // 2) Check user exists & role
+//         const user = await User.findOne({ email });
+//         if (!user || user.role !== "user") {
+//             return res.status(401).json({
+//                 message: "No account found with this email. Please check your email or sign up to continue."
+//             });
+//         }
+
+//         // 3) Email verification check
+//         if (!user.isVerified) {
+//             return res.status(403).json({
+//                 message: "Your email is not verified yet. Please verify your email before logging in."
+//             });
+//         }
+
+//         // 4) Lockout check
+//         if (user.lockUntil && user.lockUntil > new Date()) {
+//             const remaining = user.lockUntil - new Date();
+//             const m = Math.floor((remaining % 3600000) / 60000);
+//             const s = Math.floor((remaining % 60000) / 1000);
+//             return res.status(403).json({
+//                 message: `Your account has been temporarily locked due to multiple failed login attempts. Please try again in ${m}m ${s}s.`
+//             });
+//         }
+
+//         // 5) Password check
+//         const isMatch = await user.matchPassword(password);
+//         if (!isMatch) {
+//             user.loginAttempts = (user.loginAttempts || 0) + 1;
+
+//             if (user.loginAttempts >= 5) {
+//                 user.lockUntil = new Date(Date.now() + 5 * 60 * 1000); // lock 5 mins
+//                 user.loginAttempts = 0;
+
+//                 await user.save();
+//                 return res.status(403).json({
+//                     message: "Too many failed attempts. Your account has been locked for 5 minutes."
+//                 });
+//             }
+
+//             await user.save();
+//             return res.status(401).json({
+//                 message: `The password you entered is incorrect. You have ${5 - user.loginAttempts} attempts left.`
+//             });
+//         }
+
+//         // 6) Success
+//         user.loginAttempts = 0;
+//         user.lockUntil = undefined;
+//         await user.save();
+
+//         const token = generateToken(user);
+
+//         res.cookie("token", token, {
+//             httpOnly: true, // JS cannot access it → prevents XSS
+//             secure: process.env.NODE_ENV === "production", // HTTPS only in production
+//             sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax", // cross-domain only in prod
+//             maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+//         });
+
+//         return res.status(200).json({
+//             message: `Welcome back, ${user.name}!`,
+//             user: {
+//                 id: user._id,
+//                 name: user.name,
+//                 role: user.role
+//             }
+//         });
+
+
+
+//     } catch (err) {
+//         console.error("❌ Login error:", err);
+//         return res.status(500).json({
+//             message: "Something went wrong while trying to log you in. Please try again later."
+//         });
+//     }
+// };
+
+
+// =================== USER SIGNUP ===================
 const userSignup = async (req, res) => {
     try {
         const { name, email, password, phone, preferredOtpMethod, referralCode } = req.body;
@@ -450,7 +638,6 @@ const userSignup = async (req, res) => {
         const method = (preferredOtpMethod && ["email", "sms"].includes(preferredOtpMethod.toLowerCase()))
             ? preferredOtpMethod.toLowerCase()
             : "email";
-
         const actualMethod = method === "sms" && phone ? "sms" : "email";
 
         // Generate OTP & hash password
@@ -496,7 +683,14 @@ const userSignup = async (req, res) => {
             });
         }
 
-        // Send OTP via chosen method
+        // 🔥 Merge guest cart from session
+        const guestCart = req.session?.guestCart || [];
+        if (guestCart.length) {
+            await mergeGuestCart(user._id, guestCart);
+            req.session.guestCart = []; // clear after merging
+        }
+
+        // Send OTP
         try {
             if (actualMethod === "sms") {
                 await sendSms(phone, `Your verification OTP is: ${plainOtp}`);
@@ -522,6 +716,7 @@ const userSignup = async (req, res) => {
             email: user.email,
             referralCode: user.referralCode,
             referralLink: `${process.env.APP_URL || "https://yourdomain.com"}/signup?ref=${user.referralCode}`,
+            mergedCart: guestCart.length > 0
         });
 
     } catch (err) {
@@ -530,97 +725,85 @@ const userSignup = async (req, res) => {
     }
 };
 
-
+// =================== USER LOGIN ===================
 const userLogin = async (req, res) => {
     try {
         const { email, password } = req.body;
 
-        // 1) Validate input
         if (!email || !password) {
             return res.status(400).json({
                 message: "Please enter both your email and password to log in."
             });
         }
 
-        // 2) Check user exists & role
         const user = await User.findOne({ email });
         if (!user || user.role !== "user") {
-            return res.status(401).json({
-                message: "No account found with this email. Please check your email or sign up to continue."
-            });
+            return res.status(401).json({ message: "No account found with this email. Please check your email or sign up." });
         }
 
-        // 3) Email verification check
         if (!user.isVerified) {
-            return res.status(403).json({
-                message: "Your email is not verified yet. Please verify your email before logging in."
-            });
+            return res.status(403).json({ message: "Your email is not verified yet. Please verify your email before logging in." });
         }
 
-        // 4) Lockout check
         if (user.lockUntil && user.lockUntil > new Date()) {
             const remaining = user.lockUntil - new Date();
             const m = Math.floor((remaining % 3600000) / 60000);
             const s = Math.floor((remaining % 60000) / 1000);
             return res.status(403).json({
-                message: `Your account has been temporarily locked due to multiple failed login attempts. Please try again in ${m}m ${s}s.`
+                message: `Your account is temporarily locked due to multiple failed login attempts. Try again in ${m}m ${s}s.`
             });
         }
 
-        // 5) Password check
         const isMatch = await user.matchPassword(password);
         if (!isMatch) {
             user.loginAttempts = (user.loginAttempts || 0) + 1;
-
             if (user.loginAttempts >= 5) {
-                user.lockUntil = new Date(Date.now() + 5 * 60 * 1000); // lock 5 mins
+                user.lockUntil = new Date(Date.now() + 5 * 60 * 1000);
                 user.loginAttempts = 0;
-
                 await user.save();
-                return res.status(403).json({
-                    message: "Too many failed attempts. Your account has been locked for 5 minutes."
-                });
+                return res.status(403).json({ message: "Too many failed attempts. Account locked for 5 minutes." });
             }
-
             await user.save();
             return res.status(401).json({
-                message: `The password you entered is incorrect. You have ${5 - user.loginAttempts} attempts left.`
+                message: `Incorrect password. You have ${5 - user.loginAttempts} attempts left.`
             });
         }
 
-        // 6) Success
+        // Success
         user.loginAttempts = 0;
         user.lockUntil = undefined;
         await user.save();
 
-        const token = generateToken(user);
+        // 🔥 Merge guest cart from session
+        const guestCart = req.session?.guestCart || [];
+        if (guestCart.length) {
+            await mergeGuestCart(user._id, guestCart);
+            req.session.guestCart = []; // clear after merging
+        }
 
+        const token = generateToken(user);
         res.cookie("token", token, {
-            httpOnly: true, // JS cannot access it → prevents XSS
-            secure: process.env.NODE_ENV === "production", // HTTPS only in production
-            sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax", // cross-domain only in prod
-            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+            maxAge: 7 * 24 * 60 * 60 * 1000
         });
 
         return res.status(200).json({
             message: `Welcome back, ${user.name}!`,
-            user: {
-                id: user._id,
-                name: user.name,
-                role: user.role
-            }
+            user: { id: user._id, name: user.name, role: user.role },
+            mergedCart: guestCart.length > 0
         });
-
-
 
     } catch (err) {
         console.error("❌ Login error:", err);
         return res.status(500).json({
-            message: "Something went wrong while trying to log you in. Please try again later."
+            message: "Something went wrong while logging in. Please try again later."
         });
     }
 };
 
+export default userLogin;
 
 // @desc    User Login (5 attempts → 5min lock)
 // const userLogin = async (req, res) => {

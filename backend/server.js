@@ -408,6 +408,8 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import http from "http";
+import session from "express-session";
+import MongoStore from "connect-mongo";
 import { Server } from "socket.io";
 import bodyParser from "body-parser";
 import connectDB from "./config/db.js";
@@ -514,6 +516,27 @@ app.use(
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser()); // ✅ add this
 
+
+
+// ================= SESSION =================
+app.use(
+    session({
+        name: "sessionId",
+        secret: process.env.SESSION_SECRET || "supersecretkey",
+        resave: false,
+        saveUninitialized: true,   // 👈 change to false
+        store: MongoStore.create({
+            mongoUrl: process.env.MONGO_URI,
+            collectionName: "sessions",
+        }),
+        cookie: {
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+            httpOnly: true,
+            secure: false,  // must be false for localhost
+            sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+        },
+    })
+);
 
 // ================= SOCKET.IO =================
 const server = http.createServer(app);
