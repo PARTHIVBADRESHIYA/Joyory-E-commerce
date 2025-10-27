@@ -217,6 +217,7 @@ export const getAllBrands = async (req, res) => {
 // };
 
 
+
 export const getBrandCategoryProducts = async (req, res) => {
     try {
         const { brandSlug, categorySlug } = req.params;
@@ -259,8 +260,11 @@ export const getBrandCategoryProducts = async (req, res) => {
         };
 
         const total = await Product.countDocuments(finalFilter);
+
         const products = await Product.find(finalFilter)
             .populate("category", "name slug banner isActive")
+            .populate("formulation", "name slug isActive")
+            .populate("skinTypes", "name slug isActive")
             .sort(sortOptions[sort] || { createdAt: -1 })
             .skip((page - 1) * limit)
             .limit(limit)
@@ -283,19 +287,20 @@ export const getBrandCategoryProducts = async (req, res) => {
             endDate: { $gte: now }
         }).lean();
 
-        // 🔹 Enrich first
         const enrichedProducts = await enrichProductsUnified(products, promotions);
 
-        // 🔹 Then reattach category data to each product
-        const productsWithCategory = enrichedProducts.map((prod, i) => ({
+        // ✅ Reattach category, skinTypes & formulation to each enriched product
+        const productsWithRelations = enrichedProducts.map((prod, i) => ({
             ...prod,
-            category: products[i].category || null
+            category: products[i].category || null,
+            formulation: products[i].formulation || null,
+            skinTypes: products[i].skinTypes || []
         }));
 
         return res.status(200).json({
             brand,
             category,
-            products: productsWithCategory,
+            products: productsWithRelations,
             pagination: {
                 page,
                 limit,
@@ -313,7 +318,7 @@ export const getBrandCategoryProducts = async (req, res) => {
 };
 
 
-// 🔹 BRAND LANDING
+
 export const getBrandLanding = async (req, res) => {
     try {
         const { brandSlug } = req.params;
@@ -347,8 +352,11 @@ export const getBrandLanding = async (req, res) => {
         };
 
         const total = await Product.countDocuments(finalFilter);
+
         const products = await Product.find(finalFilter)
             .populate("category", "name slug banner isActive")
+            .populate("formulation", "name slug isActive")
+            .populate("skinTypes", "name slug isActive")
             .sort(sortOptions[sort] || { createdAt: -1 })
             .skip((page - 1) * limit)
             .limit(limit)
@@ -363,10 +371,12 @@ export const getBrandLanding = async (req, res) => {
 
         const enrichedProducts = await enrichProductsUnified(products, promotions);
 
-        // ✅ Attach category data again (after enrichment)
-        const productsWithCategory = enrichedProducts.map((prod, i) => ({
+        // ✅ Reattach category, skinTypes & formulation again
+        const productsWithRelations = enrichedProducts.map((prod, i) => ({
             ...prod,
-            category: products[i].category || null
+            category: products[i].category || null,
+            formulation: products[i].formulation || null,
+            skinTypes: products[i].skinTypes || []
         }));
 
         const uniqueCategoryIds = await Product.distinct("category", { brand: brand._id, isPublished: true });
@@ -377,7 +387,7 @@ export const getBrandLanding = async (req, res) => {
         return res.status(200).json({
             brandBanner: brand.banner || null,
             brand: { _id: brand._id, name: brand.name, logo: brand.logo },
-            products: productsWithCategory,
+            products: productsWithRelations,
             categories,
             pagination: {
                 page,
@@ -394,3 +404,183 @@ export const getBrandLanding = async (req, res) => {
         res.status(500).json({ message: "Failed to fetch brand details", error: err.message });
     }
 };
+
+
+
+
+// export const getBrandCategoryProducts = async (req, res) => {
+//     try {
+//         const { brandSlug, categorySlug } = req.params;
+//         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
+//         page = Number(page) || 1;
+//         limit = Number(limit) || 12;
+
+//         const brand = await Brand.findOne({ slug: brandSlug, isActive: true }).lean();
+//         if (!brand) return res.status(404).json({ message: "Brand not found" });
+
+//         const category = await Category.findOne({ slug: categorySlug, isActive: true }).lean();
+//         if (!category) return res.status(404).json({ message: "Category not found" });
+
+//         if (req.user?.id) {
+//             await User.findByIdAndUpdate(req.user.id, { $pull: { recentBrands: brand._id } });
+//             await User.findByIdAndUpdate(req.user.id, {
+//                 $push: { recentBrands: { $each: [brand._id], $position: 0, $slice: 20 } }
+//             });
+//         }
+
+//         const filters = normalizeFilters(queryFilters);
+//         if (filters.skinTypes?.length) {
+//             const skinDocs = await SkinType.find({
+//                 name: { $in: filters.skinTypes.map(s => new RegExp(`^${s}$`, "i")) }
+//             }).select("_id").lean();
+//             filters.skinTypes = skinDocs.map(s => s._id.toString());
+//         }
+
+//         filters.brandIds = [brand._id.toString()];
+//         filters.categoryIds = [category._id.toString()];
+
+//         const finalFilter = await applyDynamicFilters(filters);
+//         finalFilter.isPublished = true;
+
+//         const sortOptions = {
+//             recent: { createdAt: -1 },
+//             priceLowToHigh: { price: 1 },
+//             priceHighToLow: { price: -1 },
+//             rating: { avgRating: -1 }
+//         };
+
+//         const total = await Product.countDocuments(finalFilter);
+//         const products = await Product.find(finalFilter)
+//             .populate("category", "name slug banner isActive")
+//             .sort(sortOptions[sort] || { createdAt: -1 })
+//             .skip((page - 1) * limit)
+//             .limit(limit)
+//             .lean();
+
+//         if (!products.length) {
+//             return res.status(200).json({
+//                 brand,
+//                 category,
+//                 products: [],
+//                 pagination: { page, limit, total: 0, totalPages: 0, hasMore: false },
+//                 message: "No products available for this brand and category at the moment."
+//             });
+//         }
+
+//         const now = new Date();
+//         const promotions = await Promotion.find({
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now }
+//         }).lean();
+
+//         // 🔹 Enrich first
+//         const enrichedProducts = await enrichProductsUnified(products, promotions);
+
+//         // 🔹 Then reattach category data to each product
+//         const productsWithCategory = enrichedProducts.map((prod, i) => ({
+//             ...prod,
+//             category: products[i].category || null
+//         }));
+
+//         return res.status(200).json({
+//             brand,
+//             category,
+//             products: productsWithCategory,
+//             pagination: {
+//                 page,
+//                 limit,
+//                 total,
+//                 totalPages: Math.ceil(total / limit),
+//                 hasMore: page < Math.ceil(total / limit)
+//             },
+//             message: null
+//         });
+
+//     } catch (err) {
+//         console.error("🔥 Error in getBrandCategoryProducts:", err);
+//         res.status(500).json({ message: "Failed to fetch category products", error: err.message });
+//     }
+// };
+
+// // 🔹 BRAND LANDING
+// export const getBrandLanding = async (req, res) => {
+//     try {
+//         const { brandSlug } = req.params;
+//         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
+//         page = Number(page) || 1;
+//         limit = Number(limit) || 12;
+
+//         const brand = await Brand.findOne({ slug: brandSlug, isActive: true })
+//             .select("banner name logo slug")
+//             .lean();
+//         if (!brand) return res.status(404).json({ message: "Brand not found" });
+
+//         const filters = normalizeFilters(queryFilters);
+//         if (filters.skinTypes?.length) {
+//             const skinDocs = await SkinType.find({
+//                 name: { $in: filters.skinTypes.map(s => new RegExp(`^${s}$`, "i")) }
+//             }).select("_id").lean();
+//             filters.skinTypes = skinDocs.map(s => s._id.toString());
+//         }
+
+//         filters.brandIds = [brand._id.toString()];
+
+//         const finalFilter = await applyDynamicFilters(filters);
+//         finalFilter.isPublished = true;
+
+//         const sortOptions = {
+//             recent: { createdAt: -1 },
+//             priceLowToHigh: { price: 1 },
+//             priceHighToLow: { price: -1 },
+//             rating: { avgRating: -1 }
+//         };
+
+//         const total = await Product.countDocuments(finalFilter);
+//         const products = await Product.find(finalFilter)
+//             .populate("category", "name slug banner isActive")
+//             .sort(sortOptions[sort] || { createdAt: -1 })
+//             .skip((page - 1) * limit)
+//             .limit(limit)
+//             .lean();
+
+//         const now = new Date();
+//         const promotions = await Promotion.find({
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now }
+//         }).lean();
+
+//         const enrichedProducts = await enrichProductsUnified(products, promotions);
+
+//         // ✅ Attach category data again (after enrichment)
+//         const productsWithCategory = enrichedProducts.map((prod, i) => ({
+//             ...prod,
+//             category: products[i].category || null
+//         }));
+
+//         const uniqueCategoryIds = await Product.distinct("category", { brand: brand._id, isPublished: true });
+//         const categories = await Category.find({ _id: { $in: uniqueCategoryIds }, isActive: true })
+//             .select("name slug")
+//             .lean();
+
+//         return res.status(200).json({
+//             brandBanner: brand.banner || null,
+//             brand: { _id: brand._id, name: brand.name, logo: brand.logo },
+//             products: productsWithCategory,
+//             categories,
+//             pagination: {
+//                 page,
+//                 limit,
+//                 total,
+//                 totalPages: Math.ceil(total / limit),
+//                 hasMore: page < Math.ceil(total / limit)
+//             },
+//             message: products.length ? `Showing products for ${brand.name}.` : `No products available for ${brand.name}.`
+//         });
+
+//     } catch (err) {
+//         console.error("🔥 Error in getBrandLanding:", err);
+//         res.status(500).json({ message: "Failed to fetch brand details", error: err.message });
+//     }
+// };
