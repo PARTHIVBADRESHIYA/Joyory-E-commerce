@@ -122,7 +122,6 @@
 // export const uploadSeller = makeCloudinaryUploader("sellers", 100);
 
 
-
 // upload.js
 import multer from 'multer';
 import { CloudinaryStorage } from 'multer-storage-cloudinary';
@@ -143,7 +142,7 @@ const fileFilter = (req, file, cb) => {
   cb(null, true);
 };
 
-// -------------------- Generic Cloudinary Uploader --------------------
+// -------------------- Generic Cloudinary Uploader (Original Size) --------------------
 const makeCloudinaryUploader = (folder, maxFiles) =>
   multer({
     storage: new CloudinaryStorage({
@@ -151,18 +150,18 @@ const makeCloudinaryUploader = (folder, maxFiles) =>
       params: {
         folder,
         allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
-        transformation: [{ quality: 'auto:none' }], // ✅ keep original quality
-        resource_type: 'image'
+        resource_type: 'image', // keep as image
+        // NO transformation => original size and quality preserved
       }
     }),
     fileFilter,
     limits: {
-      fileSize: 5 * 1024 * 1024, // increased limit to 5MB
+      fileSize: 1 * 1024 * 1024, // max 10MB
       files: maxFiles
     }
   });
 
-// -------------------- PDF Upload (Buffer or Multer) --------------------
+// -------------------- PDF Upload --------------------
 export const uploadPdfBuffer = (buffer, filename) => {
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
@@ -206,25 +205,25 @@ const makeCloudinaryPdfUploader = (folder, maxFiles) =>
       cb(null, true);
     },
     limits: {
-      fileSize: 10 * 1024 * 1024, // 10MB
+      fileSize: 1 * 1024 * 1024, // max 20MB
       files: maxFiles,
     },
   });
 
-// -------------------- Product Variant Uploader --------------------
+// -------------------- Product Variant Uploader (Original Size) --------------------
 export const uploadProductWithVariants = multer({
   storage: new CloudinaryStorage({
     cloudinary,
     params: {
       folder: "products",
       allowed_formats: ["jpg", "jpeg", "png", "webp"],
-      transformation: [{ quality: 'auto:none' }], // ✅ original quality
-      resource_type: "image",
+      resource_type: "image", // original size
+      // NO transformation => exact original file stored
     },
   }),
   fileFilter,
   limits: {
-    fileSize: 1 * 1024 * 1024, // 1 MB each
+    fileSize: 1 * 1024 * 1024, // 10MB per image
     files: 50,
   },
 }).any();

@@ -2932,7 +2932,7 @@ const razorpay = new Razorpay({
 
 /**
  * 🧾 Create Razorpay Order
- */
+ */ 
 export const createRazorpayOrder = async (req, res) => {
     try {
         const { orderId } = req.body;
@@ -3025,8 +3025,6 @@ export const createRazorpayOrder = async (req, res) => {
         });
     }
 };
-
-// -------------------- VERIFY RAZORPAY PAYMENT (FIXED PERSISTENCE) --------------------
 
 // production-ready verifyRazorpayPayment (variant-aware, transaction-safe)
 export const verifyRazorpayPayment = async (req, res) => {
