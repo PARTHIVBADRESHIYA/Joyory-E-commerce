@@ -330,48 +330,223 @@ export const mergeGuestCart = async (userId, guestCart = []) => {
 //   }
 // };
 
+// export const addToCart = async (req, res) => {
+//   try {
+//     const { productId, variants = [], quantity: qty = 1 } = req.body;
+//     const product = await Product.findById(productId);
+//     if (!product) return res.status(404).json({ message: "Product not found" });
+
+//     let cart;
+//     if (req.user?._id) {
+//       // Logged-in user flow
+//       const user = await User.findById(req.user._id);
+//       cart = await handleCart(user.cart, product, variants, qty);
+//       user.cart = cart;
+//       await user.save();
+//     } else {
+//       // Guest flow
+//       cart = await handleCart(req.session.guestCart, product, variants, qty);
+//       req.session.guestCart = cart;
+//       await new Promise((resolve, reject) => {
+//         req.session.save(err => (err ? reject(err) : resolve()));
+//       });
+//     }
+
+//     res.status(200).json({ message: "✅ Added to cart", cart });
+//   } catch (err) {
+//     console.error("addToCart error:", err);
+//     res.status(500).json({ message: "Something went wrong", error: err.message });
+//   }
+// };
+
+// // Helper to add/update cart items
+// async function handleCart(cart, product, variants, qty) {
+//   if (!Array.isArray(cart)) cart = [];
+
+//   // 🧩 CASE 1 — Non-variant product
+//   if (variants.length === 0) {
+//     const stock = Number(product.quantity ?? 0);
+
+//     if (qty > stock) {
+//       throw new Error(`Only ${stock} items available in stock`);
+//     }
+
+//     const existing = cart.find(
+//       item => item.product.toString() === product._id.toString() && !item.selectedVariant
+//     );
+
+//     if (existing) {
+//       if (existing.quantity + qty > stock) {
+//         throw new Error(`You can only add ${stock - existing.quantity} more items for this product`);
+//       }
+//       existing.quantity += qty;
+//     } else {
+//       cart.push({ product: product._id, quantity: qty, selectedVariant: null });
+//     }
+
+//     return cart;
+//   }
+
+//   // 🧩 CASE 2 — Variant product
+//   for (const { variantSku, quantity } of variants) {
+//     if (!quantity || quantity <= 0) continue;
+
+//     const variant = product.variants.find(v => v.sku === variantSku);
+//     if (!variant) throw new Error(`Variant not found for SKU: ${variantSku}`);
+
+//     const stock = Number(variant.stock ?? 0);
+
+//     // 🛑 Stock check — prevent adding beyond available
+//     if (quantity > stock) {
+//       throw new Error(`Only ${stock} items available for ${variant.shadeName || variantSku}`);
+//     }
+
+//     const existing = cart.find(
+//       item => item.product.toString() === product._id.toString() && item.selectedVariant?.sku === variantSku
+//     );
+
+//     if (existing) {
+//       if (existing.quantity + quantity > stock) {
+//         throw new Error(
+//           `You can only add ${stock - existing.quantity} more items for ${variant.shadeName || variantSku}`
+//         );
+//       }
+//       existing.quantity += quantity;
+//     } else {
+//       const selectedVariant = {
+//         sku: variant.sku,
+//         shadeName: variant.shadeName || null,
+//         hex: variant.hex || null,
+//         images: variant.images?.length ? variant.images : product.images || [],
+//         price: variant.price ?? product.price,
+//         discountedPrice: variant.discountedPrice ?? product.discountedPrice ?? product.price,
+//         stock: stock,
+//       };
+
+//       cart.push({ product: product._id, quantity, selectedVariant });
+//     }
+//   }
+
+//   return cart;
+// }
+
 export const addToCart = async (req, res) => {
   try {
     const { productId, variants = [], quantity: qty = 1 } = req.body;
     const product = await Product.findById(productId);
-    if (!product) return res.status(404).json({ message: "Product not found" });
+    if (!product)
+      return res.status(404).json({ success: false, message: "Product not found." });
 
     let cart;
-    if (req.user?._id) {
-      // Logged-in user flow
-      const user = await User.findById(req.user._id);
-      cart = await handleCart(user.cart, product, variants, qty);
-      user.cart = cart;
-      await user.save();
-    } else {
-      // Guest flow
-      cart = await handleCart(req.session.guestCart, product, variants, qty);
-      req.session.guestCart = cart;
-      await new Promise((resolve, reject) => {
-        req.session.save(err => (err ? reject(err) : resolve()));
+
+    try {
+      if (req.user?._id) {
+        // Logged-in user flow
+        const user = await User.findById(req.user._id);
+        cart = await handleCart(user.cart, product, variants, qty);
+        user.cart = cart;
+        await user.save();
+      } else {
+        // Guest flow
+        cart = await handleCart(req.session.guestCart, product, variants, qty);
+        req.session.guestCart = cart;
+        await new Promise((resolve, reject) => {
+          req.session.save(err => (err ? reject(err) : resolve()));
+        });
+      }
+    } catch (validationErr) {
+      // 🧠 Known validation issue (like stock or variant error)
+      return res.status(400).json({
+        success: false,
+        message: validationErr.message,
       });
     }
 
-    res.status(200).json({ message: "✅ Added to cart", cart });
+    res.status(200).json({
+      success: true,
+      message: "✅ Added to cart successfully!",
+      cart,
+    });
   } catch (err) {
-    console.error("addToCart error:", err);
-    res.status(500).json({ message: "Something went wrong", error: err.message });
+    console.error("❌ addToCart server error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Oops! Something went wrong. Please try again later.",
+    });
   }
 };
+
 // Helper to add/update cart items
 async function handleCart(cart, product, variants, qty) {
   if (!Array.isArray(cart)) cart = [];
 
+  // 🧩 CASE 1 — Non-variant product
   if (variants.length === 0) {
-    const existing = cart.find(item => item.product.toString() === product._id.toString() && !item.selectedVariant);
-    if (existing) existing.quantity += qty;
-    else cart.push({ product: product._id, quantity: qty, selectedVariant: null });
-  } else {
-    for (const { variantSku, quantity } of variants) {
-      if (!quantity || quantity <= 0) continue;
-      const variant = product.variants.find(v => v.sku === variantSku);
-      if (!variant) continue;
+    const stock = Number(product.quantity ?? 0);
 
+    if (stock <= 0) {
+      throw new Error("This product is currently out of stock.");
+    }
+
+    if (qty > stock) {
+      throw new Error(`Only ${stock} item(s) available in stock.`);
+    }
+
+    const existing = cart.find(
+      item => item.product.toString() === product._id.toString() && !item.selectedVariant
+    );
+
+    if (existing) {
+      if (existing.quantity + qty > stock) {
+        const canAdd = Math.max(0, stock - existing.quantity);
+        throw new Error(
+          `You can only add ${canAdd} more item${canAdd !== 1 ? "s" : ""} for this product.`
+        );
+      }
+      existing.quantity += qty;
+    } else {
+      cart.push({ product: product._id, quantity: qty, selectedVariant: null });
+    }
+
+    return cart;
+  }
+
+  // 🧩 CASE 2 — Variant product
+  for (const { variantSku, quantity } of variants) {
+    if (!quantity || quantity <= 0) continue;
+
+    const variant = product.variants.find(v => v.sku === variantSku);
+    if (!variant)
+      throw new Error(`This product variant is no longer available.`);
+
+    const stock = Number(variant.stock ?? 0);
+
+    if (stock <= 0) {
+      throw new Error(`${variant.shadeName || "This variant"} is out of stock.`);
+    }
+
+    // 🛑 Stock check — prevent adding beyond available
+    if (quantity > stock) {
+      throw new Error(
+        `Only ${stock} item(s) available for ${variant.shadeName || variantSku}.`
+      );
+    }
+
+    const existing = cart.find(
+      item =>
+        item.product.toString() === product._id.toString() &&
+        item.selectedVariant?.sku === variantSku
+    );
+
+    if (existing) {
+      if (existing.quantity + quantity > stock) {
+        const canAdd = Math.max(0, stock - existing.quantity);
+        throw new Error(
+          `You can only add ${canAdd} more item${canAdd !== 1 ? "s" : ""} for ${variant.shadeName || variantSku}.`
+        );
+      }
+      existing.quantity += quantity;
+    } else {
       const selectedVariant = {
         sku: variant.sku,
         shadeName: variant.shadeName || null,
@@ -379,20 +554,54 @@ async function handleCart(cart, product, variants, qty) {
         images: variant.images?.length ? variant.images : product.images || [],
         price: variant.price ?? product.price,
         discountedPrice: variant.discountedPrice ?? product.discountedPrice ?? product.price,
-        stock: variant.stock ?? 0,
+        stock,
       };
 
-      const existing = cart.find(
-        item => item.product.toString() === product._id.toString() && item.selectedVariant?.sku === variantSku
-      );
-
-      if (existing) existing.quantity += quantity;
-      else cart.push({ product: product._id, quantity, selectedVariant });
+      cart.push({ product: product._id, quantity, selectedVariant });
     }
   }
 
   return cart;
 }
+
+// // Helper to add/update cart items
+// async function handleCart(cart, product, variants, qty) {
+//   if (!Array.isArray(cart)) cart = [];
+
+//   if (variants.length === 0) {
+//     const existing = cart.find(item => item.product.toString() === product._id.toString() && !item.selectedVariant);
+//     if (existing) existing.quantity += qty;
+//     else cart.push({ product: product._id, quantity: qty, selectedVariant: null });
+//   } else {
+//     for (const { variantSku, quantity } of variants) {
+//       if (!quantity || quantity <= 0) continue;
+//       const variant = product.variants.find(v => v.sku === variantSku);
+//       if (!variant) continue;
+
+//       const selectedVariant = {
+//         sku: variant.sku,
+//         shadeName: variant.shadeName || null,
+//         hex: variant.hex || null,
+//         images: variant.images?.length ? variant.images : product.images || [],
+//         price: variant.price ?? product.price,
+//         discountedPrice: variant.discountedPrice ?? product.discountedPrice ?? product.price,
+//         stock: variant.stock ?? 0,
+//       };
+
+//       const existing = cart.find(
+//         item => item.product.toString() === product._id.toString() && item.selectedVariant?.sku === variantSku
+//       );
+
+//       if (existing) existing.quantity += quantity;
+//       else cart.push({ product: product._id, quantity, selectedVariant });
+//     }
+//   }
+
+//   return cart;
+// }
+
+
+
 export const getCartSummary = async (req, res) => {
   try {
     let cartSource;

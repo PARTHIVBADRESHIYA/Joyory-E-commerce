@@ -467,9 +467,11 @@ export const getAllFilteredProducts = async (req, res) => {
 //             rating: { avgRating: -1 },
 //         };
 
-//         // 🔹 6. Fetch products
+//         // 🔹 6. Fetch products (with skinTypes & formulation populated)
 //         const total = await Product.countDocuments(finalFilter);
 //         const products = await Product.find(finalFilter)
+//             .populate("skinTypes", "name slug isActive")
+//             .populate("formulation", "name slug isActive")
 //             .sort(sortOptions[sort] || { createdAt: -1 })
 //             .skip((page - 1) * limit)
 //             .limit(limit)
@@ -510,6 +512,13 @@ export const getAllFilteredProducts = async (req, res) => {
 //         // 🔹 8. Enrich all products (via unified helper)
 //         const enrichedProducts = await enrichProductsUnified(products, promotions);
 
+//         // ✅ Reattach skinTypes & formulation to each product
+//         const productsWithRelations = enrichedProducts.map((prod, i) => ({
+//             ...prod,
+//             skinTypes: products[i].skinTypes || [],
+//             formulation: products[i].formulation || null,
+//         }));
+
 //         // 🔹 9. Breadcrumbs
 //         let ancestors = [];
 //         if (Array.isArray(category.ancestors) && category.ancestors.length) {
@@ -527,7 +536,7 @@ export const getAllFilteredProducts = async (req, res) => {
 //         return res.status(200).json({
 //             category,
 //             breadcrumb: ancestors,
-//             products: enrichedProducts,
+//             products: productsWithRelations,
 //             pagination: {
 //                 page,
 //                 limit,
@@ -607,7 +616,7 @@ export const getProductsByCategory = async (req, res) => {
             rating: { avgRating: -1 },
         };
 
-        // 🔹 6. Fetch products (with skinTypes & formulation populated)
+        // 🔹 6. Fetch products
         const total = await Product.countDocuments(finalFilter);
         const products = await Product.find(finalFilter)
             .populate("skinTypes", "name slug isActive")
@@ -649,11 +658,35 @@ export const getProductsByCategory = async (req, res) => {
             endDate: { $gte: now },
         }).lean();
 
-        // 🔹 8. Enrich all products (via unified helper)
+        // 🔹 8. Enrich all products
         const enrichedProducts = await enrichProductsUnified(products, promotions);
 
+        // 🩷 User-friendly, attractive stock messages (only this part changed)
+        const enrichedWithStockMsg = enrichedProducts.map((prod) => {
+            // Per-variant stock message
+            if (Array.isArray(prod.variants) && prod.variants.length) {
+                prod.variants = prod.variants.map((v) => {
+                    const vStock = v.stock ?? 0;
+                    if (vStock <= 0) {
+                        v.stockMessage = "⛔ Currently out of stock — check back soon!";
+                    } else if (vStock === 1) {
+                        v.stockMessage = "🔥 Almost gone! Only 1 left in stock.";
+                    } else if (vStock <= 3) {
+                        v.stockMessage = `⚡ Hurry! Just ${vStock} piece${vStock > 1 ? "s" : ""} remaining.`;
+                    } else if (vStock < 10) {
+                        v.stockMessage = `💨 Only a few left — ${vStock} available!`;
+                    } else {
+                        v.stockMessage = null;
+                    }
+                    return v;
+                });
+            }
+
+            return prod;
+        });
+
         // ✅ Reattach skinTypes & formulation to each product
-        const productsWithRelations = enrichedProducts.map((prod, i) => ({
+        const productsWithRelations = enrichedWithStockMsg.map((prod, i) => ({
             ...prod,
             skinTypes: products[i].skinTypes || [],
             formulation: products[i].formulation || null,
@@ -690,17 +723,94 @@ export const getProductsByCategory = async (req, res) => {
         console.error("❌ getProductsByCategory error:", err);
         return res
             .status(500)
-            .json({ message: "Server error", error: err.message });
+            .json({
+                message: "Oops! Something went wrong while fetching products. Please try again.",
+            });
     }
 };
 
+// export const getSingleProduct = async (req, res) => {
+//     try {
+//         const productId = req.params.id;
+//         const selectedSku = req.query.variant; // Selected variant SKU (optional)
+
+//         if (!mongoose.Types.ObjectId.isValid(productId)) {
+//             return res.status(400).json({ message: "Invalid product id" });
+//         }
+
+//         // 1️⃣ Load product + increment views
+//         const product = await Product.findOneAndUpdate(
+//             { _id: productId, isPublished: true },
+//             { $inc: { views: 1 } },
+//             { new: true, lean: true }
+//         );
+//         if (!product) return res.status(404).json({ message: "Product not found" });
+
+//         // 2️⃣ Active promotions
+//         const now = new Date();
+//         const promotions = await Promotion.find({
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now }
+//         }).lean();
+
+//         // 3️⃣ Enrich using the SAME helper you already have
+//         const enrichedProduct = await enrichProductsUnified(product, promotions, {
+//             selectedSku
+//         });
+
+//         // 4️⃣ Get recommendations (same as before)
+//         const modes = ["moreLikeThis", "boughtTogether", "alsoViewed"];
+//         const recommendations = {};
+//         for (const mode of modes) {
+//             const rec = await getRecommendations({
+//                 mode,
+//                 productId: enrichedProduct._id,
+//                 categorySlug: enrichedProduct.categorySlug,
+//                 userId: req.user?._id,
+//                 limit: 6
+//             });
+//             recommendations[mode] = {
+//                 name: rec.message || mode,
+//                 products: rec.success ? rec.products : []
+//             };
+//         }
+
+//         // 5️⃣ Return exactly the same response structure
+//         return res.status(200).json({
+//             _id: enrichedProduct._id,
+//             name: enrichedProduct.name,
+//             brand: enrichedProduct.brand || null,
+//             mrp: enrichedProduct.mrp,
+//             price: enrichedProduct.price,
+//             discountPercent: enrichedProduct.discountPercent,
+//             discountAmount: enrichedProduct.discountAmount,
+//             images: enrichedProduct.images,
+//             variants: enrichedProduct.variants,
+//             shadeOptions: enrichedProduct.shadeOptions || [],
+//             status: enrichedProduct.status,
+//             message: enrichedProduct.message,
+//             avgRating: enrichedProduct.avgRating,
+//             totalRatings: enrichedProduct.totalRatings,
+//             inStock: enrichedProduct.inStock,
+//             selectedVariant: enrichedProduct.selectedVariant,
+//             recommendations
+//         });
+
+//     } catch (err) {
+//         console.error("❌ getSingleProduct error:", err);
+//         return res.status(500).json({ message: "Server error", error: err.message });
+//     }
+// };
 export const getSingleProduct = async (req, res) => {
     try {
         const productId = req.params.id;
         const selectedSku = req.query.variant; // Selected variant SKU (optional)
 
         if (!mongoose.Types.ObjectId.isValid(productId)) {
-            return res.status(400).json({ message: "Invalid product id" });
+            return res
+                .status(400)
+                .json({ message: "⚠️ Invalid product ID. Please check and try again." });
         }
 
         // 1️⃣ Load product + increment views
@@ -709,20 +819,43 @@ export const getSingleProduct = async (req, res) => {
             { $inc: { views: 1 } },
             { new: true, lean: true }
         );
-        if (!product) return res.status(404).json({ message: "Product not found" });
+
+        if (!product)
+            return res
+                .status(404)
+                .json({ message: "❌ Product not found or may have been removed." });
 
         // 2️⃣ Active promotions
         const now = new Date();
         const promotions = await Promotion.find({
             status: "active",
             startDate: { $lte: now },
-            endDate: { $gte: now }
+            endDate: { $gte: now },
         }).lean();
 
         // 3️⃣ Enrich using the SAME helper you already have
         const enrichedProduct = await enrichProductsUnified(product, promotions, {
-            selectedSku
+            selectedSku,
         });
+
+        // Per-variant stock messages (keep same logic, only friendly text)
+        if (Array.isArray(enrichedProduct.variants) && enrichedProduct.variants.length) {
+            enrichedProduct.variants = enrichedProduct.variants.map((v) => {
+                const vStock = v.stock ?? 0;
+                if (vStock <= 0) {
+                    v.stockMessage = "⛔ Currently out of stock — check back soon!";
+                } else if (vStock === 1) {
+                    v.stockMessage = "🔥 Almost gone! Only 1 left in stock.";
+                } else if (vStock <= 3) {
+                    v.stockMessage = `⚡ Hurry! Just ${vStock} piece${vStock > 1 ? "s" : ""} remaining.`;
+                } else if (vStock < 10) {
+                    v.stockMessage = `💨 Only a few left — ${vStock} available!`;
+                } else {
+                    v.stockMessage = null;
+                }
+                return v;
+            });
+        }
 
         // 4️⃣ Get recommendations (same as before)
         const modes = ["moreLikeThis", "boughtTogether", "alsoViewed"];
@@ -733,15 +866,15 @@ export const getSingleProduct = async (req, res) => {
                 productId: enrichedProduct._id,
                 categorySlug: enrichedProduct.categorySlug,
                 userId: req.user?._id,
-                limit: 6
+                limit: 6,
             });
             recommendations[mode] = {
                 name: rec.message || mode,
-                products: rec.success ? rec.products : []
+                products: rec.success ? rec.products : [],
             };
         }
 
-        // 5️⃣ Return exactly the same response structure
+        // 5️⃣ Final response (exact same structure)
         return res.status(200).json({
             _id: enrichedProduct._id,
             name: enrichedProduct.name,
@@ -754,17 +887,19 @@ export const getSingleProduct = async (req, res) => {
             variants: enrichedProduct.variants,
             shadeOptions: enrichedProduct.shadeOptions || [],
             status: enrichedProduct.status,
-            message: enrichedProduct.message,
+            message: enrichedProduct.stockMessage || null,
             avgRating: enrichedProduct.avgRating,
             totalRatings: enrichedProduct.totalRatings,
             inStock: enrichedProduct.inStock,
             selectedVariant: enrichedProduct.selectedVariant,
-            recommendations
+            recommendations,
         });
-
     } catch (err) {
         console.error("❌ getSingleProduct error:", err);
-        return res.status(500).json({ message: "Server error", error: err.message });
+        return res.status(500).json({
+            message:
+                "🚫 Oops! Something went wrong while fetching product details. Please try again shortly.",
+        });
     }
 };
 
@@ -991,45 +1126,36 @@ export const getAllSkinTypes = async (req, res) => {
 
 // export const getProductsBySkinType = async (req, res) => {
 //     try {
-//         const slug = req.params.slug.toLowerCase();
+//         const { slug } = req.params;
 //         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
 //         page = Number(page) || 1;
 //         limit = Number(limit) || 12;
 
-//         // 🔹 Fetch skin type
-//         const skinType = await SkinType.findOne({ slug, isDeleted: false }).lean();
-//         if (!skinType) return res.status(404).json({ message: "Skin type not found" });
-
-//         // 🔹 Related categories
-//         const categories = await Category.find({ slug: { $in: ["makeup", "skincare"] } })
-//             .select("_id slug ancestors")
+//         // 🔹 Find SkinType
+//         const skinType = await SkinType.findOne({ slug: slug.toLowerCase(), isDeleted: false })
+//             .select("name slug _id")
 //             .lean();
-
-//         // 🔹 Descendant categories
-//         const descendantIds = [];
-//         for (const cat of categories) {
-//             const descendants = await getDescendantCategoryIds(cat._id);
-//             descendantIds.push(...descendants.filter(id => mongoose.Types.ObjectId.isValid(id)));
-//         }
-
-//         const allCategoryIds = Array.from(new Set([
-//             ...descendantIds.map(id => id.toString()),
-//             ...categories.map(c => c._id.toString()),
-//             ...(queryFilters.categoryIds || []) // merge query param
-//         ]));
+//         if (!skinType) return res.status(404).json({ message: "Skin type not found" });
 
 //         // 🔹 Normalize filters
 //         const filters = normalizeFilters(queryFilters);
-
-//         // ✅ Merge skinType + categoryIds
 //         filters.skinTypes = [skinType._id.toString()];
-//         filters.categoryIds = allCategoryIds;
 
-//         // 🔹 Apply dynamic filters
+//         // 🔹 Apply category-wise filtering
+//         // If user passed category names/slugs in query, resolve them to _ids
+//         if (filters.categorySlugs?.length) {
+//             const categoryDocs = await Category.find({
+//                 slug: { $in: filters.categorySlugs.map(s => s.toLowerCase()) },
+//                 isActive: true
+//             }).select("_id").lean();
+//             filters.categoryIds = categoryDocs.map(c => c._id.toString());
+//         }
+
+//         // 🔹 Apply dynamic filters (includes brand, price range, search, etc.)
 //         const finalFilter = await applyDynamicFilters(filters);
 //         finalFilter.isPublished = true;
 
-//         // 🔹 Sort options
+//         // 🔹 Sorting options
 //         const sortOptions = {
 //             recent: { createdAt: -1 },
 //             priceLowToHigh: { price: 1 },
@@ -1037,27 +1163,20 @@ export const getAllSkinTypes = async (req, res) => {
 //             rating: { avgRating: -1 }
 //         };
 
-//         // 🔹 Fetch products
+//         // 🔹 Count total results
 //         const total = await Product.countDocuments(finalFilter);
+
+//         // 🔹 Fetch filtered products
 //         const products = await Product.find(finalFilter)
-//             .populate({
-//                 path: "brand",
-//                 select: "_id name slug"
-//             })
-//             .populate({
-//                 path: "formulation",
-//                 select: "_id name slug"
-//             })
-//             .populate({
-//                 path: "category",
-//                 select: "_id name slug"
-//             })
+//             .populate("category", "name slug isActive")
+//             .populate("formulation", "name slug isActive")
+//             .populate("brand", "name slug isActive")
 //             .sort(sortOptions[sort] || { createdAt: -1 })
 //             .skip((page - 1) * limit)
 //             .limit(limit)
 //             .lean();
 
-//         // 🔹 Active promotions
+//         // 🔹 Fetch active promotions
 //         const now = new Date();
 //         const promotions = await Promotion.find({
 //             status: "active",
@@ -1065,29 +1184,39 @@ export const getAllSkinTypes = async (req, res) => {
 //             endDate: { $gte: now }
 //         }).lean();
 
-//         // 🔹 Enrich products
-//         const enrichedProducts = products.map(p => enrichProductWithStockAndOptions(p, promotions));
-//         const formattedProducts = await Promise.all(enrichedProducts.map(p => formatProductCard(p, promotions)));
+//         // 🔹 Enrich products (discounts, stock, etc.)
+//         const enrichedProducts = await enrichProductsUnified(products, promotions);
 
-//         // 🔹 Breadcrumbs
-//         const ancestorIds = categories.flatMap(c => c.ancestors || []);
-//         const ancestorDocs = await Category.find({ _id: { $in: ancestorIds } }).select("name slug").lean();
-//         const ancestors = ancestorIds.map(id => ancestorDocs.find(a => String(a._id) === String(id))).filter(Boolean);
+//         // ✅ Reattach relations to ensure population consistency
+//         const productsWithRelations = enrichedProducts.map((prod, i) => ({
+//             ...prod,
+//             category: products[i].category || null,
+//             formulation: products[i].formulation || null,
+//             skinTypes: products[i].skinTypes || [],
+//             brand: products[i].brand || null
+//         }));
 
-//         // 🔹 Message
-//         let message = null;
-//         if (total === 0) {
-//             if (queryFilters.search) message = `No products found matching “${queryFilters.search}” for this skin type.`;
-//             else if (filters.minPrice || filters.maxPrice || filters.brandIds?.length || filters.skinTypes?.length) {
-//                 message = `No products found with the selected filters for this skin type.`;
-//             } else message = `No products available for ${skinType.name} at the moment.`;
-//         }
+//         // 🔹 Derive unique categories for filter options (like brand landing)
+//         const uniqueCategoryIds = await Product.distinct("category", {
+//             skinTypes: skinType._id,
+//             isPublished: true
+//         });
+//         const categories = await Category.find({
+//             _id: { $in: uniqueCategoryIds },
+//             isActive: true
+//         }).select("name slug").lean();
 
-//         res.json({
+//         // 🔹 Prepare response message
+//         const message = products.length
+//             ? `Showing products for ${skinType.name} skin type.`
+//             : `No products available for ${skinType.name} skin type.`;
+
+//         // 🔹 Final response
+//         return res.status(200).json({
 //             success: true,
-//             skinType: skinType.name,
-//             products: formattedProducts,
-//             breadcrumb: ancestors,
+//             skinType: { _id: skinType._id, name: skinType.name, slug: skinType.slug },
+//             products: productsWithRelations,
+//             categories,
 //             pagination: {
 //                 page,
 //                 limit,
@@ -1099,127 +1228,9 @@ export const getAllSkinTypes = async (req, res) => {
 //         });
 
 //     } catch (err) {
-//         console.error("❌ getProductsBySkinType error:", err);
-//         res.status(500).json({ success: false, message: err.message });
+//         console.error("🔥 Error in getProductsBySkinType:", err);
+//         res.status(500).json({ success: false, message: "Failed to fetch skin type details", error: err.message });
 //     }
-// };
-// export const getProductsBySkinType = async (req, res) => {
-// try {
-// const slug = req.params.slug.toLowerCase();
-// let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
-// page = Number(page) || 1;
-// limit = Number(limit) || 12;
-
-//     // 🔹 Fetch skin type
-//     const skinType = await SkinType.findOne({ slug, isDeleted: false }).lean();
-//     if (!skinType) return res.status(404).json({ message: "Skin type not found" });
-
-//     // 🔹 Related categories
-//     const categories = await Category.find({ slug: { $in: ["makeup", "skincare"] } })
-//         .select("_id slug ancestors")
-//         .lean();
-
-//     // 🔹 Descendant categories
-//     const descendantIds = [];
-//     for (const cat of categories) {
-//         const descendants = await getDescendantCategoryIds(cat._id);
-//         descendantIds.push(...descendants.filter(id => mongoose.Types.ObjectId.isValid(id)));
-//     }
-
-//     const allCategoryIds = Array.from(new Set([
-//         ...descendantIds.map(id => id.toString()),
-//         ...categories.map(c => c._id.toString()),
-//         ...(queryFilters.categoryIds || [])
-//     ]));
-
-//     // 🔹 Normalize filters
-//     const filters = normalizeFilters(queryFilters);
-
-//     // ✅ Merge skinType + categoryIds
-//     filters.skinTypes = [skinType._id.toString()];
-//     filters.categoryIds = allCategoryIds;
-
-//     // 🔹 Apply dynamic filters
-//     const finalFilter = await applyDynamicFilters(filters);
-//     finalFilter.isPublished = true;
-
-//     // 🔹 Sort options
-//     const sortOptions = {
-//         recent: { createdAt: -1 },
-//         priceLowToHigh: { price: 1 },
-//         priceHighToLow: { price: -1 },
-//         rating: { avgRating: -1 }
-//     };
-
-//     // 🔹 Fetch total count
-//     const total = await Product.countDocuments(finalFilter);
-
-//     // 🔹 Fetch products (with full relational population)
-//     const products = await Product.find(finalFilter)
-//         .populate("category", "name slug banner isActive")
-//         .populate("formulation", "name slug isActive")
-//         .populate("skinTypes", "name slug isActive")
-//         .populate("brand", "name slug logo isActive")
-//         .sort(sortOptions[sort] || { createdAt: -1 })
-//         .skip((page - 1) * limit)
-//         .limit(limit)
-//         .lean();
-
-//     // 🔹 Active promotions
-//     const now = new Date();
-//     const promotions = await Promotion.find({
-//         status: "active",
-//         startDate: { $lte: now },
-//         endDate: { $gte: now }
-//     }).lean();
-
-//     // 🔹 Enrich products with discounts, stock, etc.
-//     const enrichedProducts = await enrichProductsUnified(products, promotions);
-
-//     // ✅ Reattach category, formulation, and skinTypes
-//     const productsWithRelations = enrichedProducts.map((prod, i) => ({
-//         ...prod,
-//         category: products[i].category || null,
-//         formulation: products[i].formulation || null,
-//         skinTypes: products[i].skinTypes || [],
-//         brand: products[i].brand || null
-//     }));
-
-//     // 🔹 Build unique categories list (for filters on the page)
-//     const uniqueCategoryIds = await Product.distinct("category", { skinTypes: skinType._id, isPublished: true });
-//     const relatedCategories = await Category.find({ _id: { $in: uniqueCategoryIds }, isActive: true })
-//         .select("name slug")
-//         .lean();
-
-//     // 🔹 Message logic
-//     let message = null;
-//     if (total === 0) {
-//         if (queryFilters.search) message = `No products found matching “${queryFilters.search}” for this skin type.`;
-//         else if (filters.minPrice || filters.maxPrice || filters.brandIds?.length || filters.skinTypes?.length) {
-//             message = `No products found with the selected filters for this skin type.`;
-//         } else message = `No products available for ${skinType.name} at the moment.`;
-//     }
-
-//     // 🔹 Final response
-//     return res.status(200).json({
-//         success: true,
-//         skinType: skinType.name,
-//         products: productsWithRelations,
-//         categories: relatedCategories,
-//         pagination: {
-//             page,
-//             limit,
-//             total,
-//             totalPages: Math.ceil(total / limit),
-//             hasMore: page < Math.ceil(total / limit)
-//         },
-//         message
-//     });
-
-// } catch (err) {
-//     console.error("❌ getProductsBySkinType error:", err);
-//     res.status(500).json({ success: false, message: err.message });
-// }
 // };
 export const getProductsBySkinType = async (req, res) => {
     try {
@@ -1232,20 +1243,24 @@ export const getProductsBySkinType = async (req, res) => {
         const skinType = await SkinType.findOne({ slug: slug.toLowerCase(), isDeleted: false })
             .select("name slug _id")
             .lean();
-        if (!skinType) return res.status(404).json({ message: "Skin type not found" });
+        if (!skinType)
+            return res
+                .status(404)
+                .json({ message: "❌ Skin type not found or may have been removed." });
 
         // 🔹 Normalize filters
         const filters = normalizeFilters(queryFilters);
         filters.skinTypes = [skinType._id.toString()];
 
         // 🔹 Apply category-wise filtering
-        // If user passed category names/slugs in query, resolve them to _ids
         if (filters.categorySlugs?.length) {
             const categoryDocs = await Category.find({
-                slug: { $in: filters.categorySlugs.map(s => s.toLowerCase()) },
-                isActive: true
-            }).select("_id").lean();
-            filters.categoryIds = categoryDocs.map(c => c._id.toString());
+                slug: { $in: filters.categorySlugs.map((s) => s.toLowerCase()) },
+                isActive: true,
+            })
+                .select("_id")
+                .lean();
+            filters.categoryIds = categoryDocs.map((c) => c._id.toString());
         }
 
         // 🔹 Apply dynamic filters (includes brand, price range, search, etc.)
@@ -1257,7 +1272,7 @@ export const getProductsBySkinType = async (req, res) => {
             recent: { createdAt: -1 },
             priceLowToHigh: { price: 1 },
             priceHighToLow: { price: -1 },
-            rating: { avgRating: -1 }
+            rating: { avgRating: -1 },
         };
 
         // 🔹 Count total results
@@ -1278,35 +1293,60 @@ export const getProductsBySkinType = async (req, res) => {
         const promotions = await Promotion.find({
             status: "active",
             startDate: { $lte: now },
-            endDate: { $gte: now }
+            endDate: { $gte: now },
         }).lean();
 
         // 🔹 Enrich products (discounts, stock, etc.)
         const enrichedProducts = await enrichProductsUnified(products, promotions);
 
+        // 🩷 Add user-friendly stock messages (like in category & single product)
+        const enrichedWithStockMsg = enrichedProducts.map((prod) => {
+            if (Array.isArray(prod.variants) && prod.variants.length) {
+                prod.variants = prod.variants.map((v) => {
+                    const vStock = v.stock ?? 0;
+                    if (vStock <= 0) {
+                        v.stockMessage = "Out of stock";
+                    } else if (vStock === 1) {
+                        v.stockMessage = "🔥 Only 1 left!";
+                    } else if (vStock <= 3) {
+                        v.stockMessage = `⚡ Just ${vStock} left — selling fast!`;
+                    } else if (vStock < 10) {
+                        v.stockMessage = `💨 Few left (${vStock} in stock)`;
+                    } else {
+                        v.stockMessage = null;
+                    }
+                    return v;
+                });
+            }
+
+            return prod;
+        });
+
         // ✅ Reattach relations to ensure population consistency
-        const productsWithRelations = enrichedProducts.map((prod, i) => ({
+        const productsWithRelations = enrichedWithStockMsg.map((prod, i) => ({
             ...prod,
             category: products[i].category || null,
             formulation: products[i].formulation || null,
             skinTypes: products[i].skinTypes || [],
-            brand: products[i].brand || null
+            brand: products[i].brand || null,
         }));
 
-        // 🔹 Derive unique categories for filter options (like brand landing)
-        const uniqueCategoryIds = await Product.distinct("category", { 
-            skinTypes: skinType._id, 
-            isPublished: true 
+        // 🔹 Derive unique categories for filter options
+        const uniqueCategoryIds = await Product.distinct("category", {
+            skinTypes: skinType._id,
+            isPublished: true,
         });
-        const categories = await Category.find({ 
-            _id: { $in: uniqueCategoryIds }, 
-            isActive: true 
-        }).select("name slug").lean();
+        const categories = await Category.find({
+            _id: { $in: uniqueCategoryIds },
+            isActive: true,
+        })
+            .select("name slug")
+            .lean();
 
         // 🔹 Prepare response message
         const message = products.length
-            ? `Showing products for ${skinType.name} skin type.`
-            : `No products available for ${skinType.name} skin type.`;
+            ? `✨ Showing curated products specially for ${skinType.name} skin type.`
+            : `😔 No products available for ${skinType.name} skin type right now — we're adding new ones soon!`;
 
         // 🔹 Final response
         return res.status(200).json({
@@ -1319,14 +1359,17 @@ export const getProductsBySkinType = async (req, res) => {
                 limit,
                 total,
                 totalPages: Math.ceil(total / limit),
-                hasMore: page < Math.ceil(total / limit)
+                hasMore: page < Math.ceil(total / limit),
             },
-            message
+            message,
         });
-
     } catch (err) {
         console.error("🔥 Error in getProductsBySkinType:", err);
-        res.status(500).json({ success: false, message: "Failed to fetch skin type details", error: err.message });
+        res.status(500).json({
+            success: false,
+            message: "🚫 Oops! Something went wrong while fetching products for this skin type. Please try again later.",
+            error: err.message,
+        });
     }
 };
 
