@@ -2932,7 +2932,7 @@ const razorpay = new Razorpay({
 
 /**
  * 🧾 Create Razorpay Order
- */ 
+ */
 export const createRazorpayOrder = async (req, res) => {
     try {
         const { orderId } = req.body;
@@ -3026,7 +3026,6 @@ export const createRazorpayOrder = async (req, res) => {
     }
 };
 
-// production-ready verifyRazorpayPayment (variant-aware, transaction-safe)
 export const verifyRazorpayPayment = async (req, res) => {
     const session = await mongoose.startSession();
     try {
@@ -3071,56 +3070,62 @@ export const verifyRazorpayPayment = async (req, res) => {
 
             // iterate items and perform atomic updates
             for (const item of sessionOrder.products) {
-                const rawProd = item.productId;
-                const productId = (rawProd && rawProd._id) ? rawProd._id : rawProd;
+                const productId = item.productId._id || item.productId;
                 const qty = Number(item.quantity || 0);
                 if (qty <= 0) continue;
 
                 productIdsToRecalc.add(String(productId));
 
-                if (item.selectedVariant?.sku) {
-                    // ---- VARIANT PATH ----
-                    const sku = item.selectedVariant.sku;
-                    console.log(`Attempting variant update: product=${productId}, sku=${sku}, qty=${qty}`);
+                // 🧠 If product has variant SKU
+                if (item.variant?.sku) {
+                    const sku = item.variant.sku;
 
-                    const updateRes = await Product.updateOne(
-                        { _id: productId, "variants.sku": sku, "variants.stock": { $gte: qty } },
-                        {
-                            $inc: {
-                                "variants.$.stock": -qty,
-                                "variants.$.sales": qty,
-                                sales: qty
-                            }
-                        },
-                        { session }
-                    );
+                    const product = await Product.findById(productId).session(session);
+                    if (!product) throw new Error(`Product not found: ${productId}`);
 
-                    const modified = (updateRes && (updateRes.modifiedCount ?? updateRes.nModified ?? 0));
-                    console.log(`Variant update result for sku=${sku}: matched=${updateRes.matchedCount ?? updateRes.n ?? 0}, modified=${modified}`);
+                    const variantIndex = product.variants.findIndex(v => v.sku === sku);
+                    if (variantIndex === -1) throw new Error(`Variant not found for SKU: ${sku}`);
 
-                    if (!modified) {
-                        // Explicit, actionable error for the caller
-                        throw { step: "STOCK", type: "INSUFFICIENT", message: `Insufficient variant stock or SKU missing for product ${productId} (sku: ${sku})` };
-                    }
+                    const variant = product.variants[variantIndex];
+                    if (variant.stock < qty) throw new Error(`Not enough stock for ${variant.sku}`);
+
+                    // update variant stock and sales
+                    variant.stock -= qty;
+                    variant.sales = (variant.sales || 0) + qty;
+
+                    // update product-level stock and sales
+                    product.sales = (product.sales || 0) + qty;
+
+                    // recalc total stock (sum of all variants)
+                    const totalQty = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
+                    product.quantity = totalQty;
+
+                    // status update
+                    if (totalQty <= 0) product.status = "Out of stock";
+                    else if (product.thresholdValue && totalQty < product.thresholdValue)
+                        product.status = "Low stock";
+                    else product.status = "In-stock";
+
+                    await product.save({ session });
 
                 } else {
-                    // ---- SIMPLE PRODUCT PATH ----
-                    console.log(`Attempting simple product update: product=${productId}, qty=${qty}`);
+                    // 🧠 Non-variant product
+                    const product = await Product.findById(productId).session(session);
+                    if (!product) throw new Error(`Product not found: ${productId}`);
+                    if (product.quantity < qty) throw new Error(`Not enough stock for ${product.name}`);
 
-                    const updateRes = await Product.updateOne(
-                        { _id: productId, quantity: { $gte: qty } },
-                        { $inc: { quantity: -qty, sales: qty } },
-                        { session }
-                    );
+                    product.quantity -= qty;
+                    product.sales = (product.sales || 0) + qty;
 
-                    const modified = (updateRes && (updateRes.modifiedCount ?? updateRes.nModified ?? 0));
-                    console.log(`Simple product update result: matched=${updateRes.matchedCount ?? updateRes.n ?? 0}, modified=${modified}`);
+                    if (product.quantity <= 0) product.status = "Out of stock";
+                    else if (product.thresholdValue && product.quantity < product.thresholdValue)
+                        product.status = "Low stock";
+                    else product.status = "In-stock";
 
-                    if (!modified) {
-                        throw { step: "STOCK", type: "INSUFFICIENT", message: `Insufficient stock for product ${productId}` };
-                    }
+                    await product.save({ session });
                 }
-            } // end for items
+            }
+
 
             // ---- update order fields inside transaction ----
             sessionOrder.paid = true;

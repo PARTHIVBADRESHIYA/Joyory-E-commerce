@@ -1,5 +1,6 @@
 import express from "express";
 import mongoose from "mongoose";
+import Product from '../../models/Product.js';
 import Order from '../../models/Order.js';
 import User from '../../models/User.js';
 import { calculateCartSummary } from "../../middlewares/utils/cartPricingHelper.js";
@@ -139,7 +140,6 @@ export const getUserOrders = async (req, res) => {
     res.status(500).json({ message: "Failed to fetch orders" });
   }
 };
-
 export const initiateOrderFromCart = async (req, res) => {
   try {
     if (!req.user || !req.user._id) {
@@ -148,20 +148,17 @@ export const initiateOrderFromCart = async (req, res) => {
 
     const user = await User.findById(req.user._id).populate("cart.product");
     if (!user) return res.status(404).json({ message: "User not found" });
-
-    if (!user.cart || !user.cart.length) {
+    if (!user.cart?.length)
       return res.status(400).json({ message: "Cart is empty" });
-    }
 
-    // -------------------- 🔥 Calculate cart summary --------------------
+    // -------------------- 🧮 Calculate Summary --------------------
     const summaryData = await calculateCartSummary(user, {
-      discount: req.body?.discountCode || req.query?.discount,        // optional
-      pointsToUse: req.body?.pointsToUse || req.query?.pointsToUse,  // optional
-      giftCardCode: req.body?.giftCardCode || req.query?.giftCardCode,    // optional
-      giftCardPin: req.body?.giftCardPin || req.query?.giftCardPin,        // optional
-      giftCardAmount: req.body?.giftCardAmount || req.query?.giftCardAmount // optional
+      discount: req.body?.discountCode || req.query?.discount,
+      pointsToUse: req.body?.pointsToUse || req.query?.pointsToUse,
+      giftCardCode: req.body?.giftCardCode || req.query?.giftCardCode,
+      giftCardPin: req.body?.giftCardPin || req.query?.giftCardPin,
+      giftCardAmount: req.body?.giftCardAmount || req.query?.giftCardAmount,
     });
-
 
     const {
       cart,
@@ -173,22 +170,109 @@ export const initiateOrderFromCart = async (req, res) => {
       grandTotal,
     } = summaryData;
 
-    if (!cart || !cart.length) {
+    if (!cart?.length) {
       return res.status(400).json({ message: "Cart is empty" });
     }
 
-    // -------------------- 📝 Generate order identifiers --------------------
+    // -------------------- 🛍 Fetch DB Products --------------------
+    const productIds = cart.map((i) => i.product);
+    const products = await Product.find({ _id: { $in: productIds } }).lean();
+
+    // -------------------- 🧾 Generate Order ID --------------------
     const latestOrder = await Order.findOne().sort({ createdAt: -1 });
     const nextOrderNumber = latestOrder ? latestOrder.orderNumber + 1 : 1001;
     const orderId = `ORDER-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    // -------------------- 💾 Save new order --------------------
+
+    // -------------------- 🧩 Build Cart Snapshot --------------------
+    const finalCart = cart.map((item) => {
+      const product = products.find(
+        (p) => p._id.toString() === item.product.toString()
+      );
+      if (!product) throw new Error(`Product not found: ${item.product}`);
+
+      // Verify variant exists
+      let dbVariant = null;
+      if (item.variant?.sku) {
+        dbVariant = product.variants.find(
+          (v) => v.sku?.trim() === item.variant.sku?.trim()
+        );
+      }
+      if (!dbVariant && item.variant?._id) {
+        dbVariant = product.variants.find(
+          (v) => v._id?.toString() === item.variant._id?.toString()
+        );
+      }
+      if (!dbVariant)
+        throw new Error(`Variant not found for product: ${product.name}`);
+
+      // ✅ Use already-calculated variant prices from summary
+      const variantSnapshot = {
+        sku: item.variant?.sku || dbVariant.sku || null,
+        shadeName: item.variant?.shadeName || dbVariant.shadeName || null,
+        hex: item.variant?.hex || dbVariant.hex || null,
+        images:
+          item.variant?.images?.length
+            ? item.variant.images
+            : dbVariant.images?.length
+            ? dbVariant.images
+            : product.images || [],
+        image:
+          item.variant?.image ||
+          dbVariant.image ||
+          dbVariant.images?.[0] ||
+          product.images?.[0] ||
+          null,
+        stock: typeof dbVariant.stock === "number" ? dbVariant.stock : 0,
+
+        // ✅ These come from the calculated cart summary (not DB)
+        originalPrice: item.variant?.originalPrice ?? dbVariant.originalPrice ?? 0,
+        discountedPrice:
+          item.variant?.discountedPrice ??
+          item.variant?.displayPrice ??
+          dbVariant.discountedPrice ??
+          0,
+        displayPrice:
+          item.variant?.displayPrice ??
+          item.variant?.discountedPrice ??
+          dbVariant.displayPrice ??
+          0,
+        discountPercent:
+          item.variant?.discountPercent ??
+          (item.variant?.originalPrice
+            ? Math.round(
+                ((item.variant.originalPrice -
+                  (item.variant.discountedPrice ?? item.variant.displayPrice)) /
+                  item.variant.originalPrice) *
+                  100
+              )
+            : 0),
+        discountAmount:
+          item.variant?.discountAmount ??
+          (item.variant?.originalPrice && item.variant?.discountedPrice
+            ? item.variant.originalPrice - item.variant.discountedPrice
+            : 0),
+      };
+
+      const productSnapshot = {
+        id: product._id,
+        name: product.name,
+        brand: product.brand,
+        category: product.category,
+      };
+
+      return {
+        productId: String(product._id),
+        productSnapshot,
+        name: product.name,
+        quantity: item.quantity || 1,
+        price: variantSnapshot.displayPrice, // ✅ correct discounted price
+        variant: variantSnapshot,
+      };
+    });
+
+    // -------------------- 💾 Save Order --------------------
     const newOrder = new Order({
-      products: cart.map((item) => ({
-        productId: item.product, // product _id
-        quantity: item.quantity, // quantity
-        price: item.variant?.discountedPrice || item.variant?.originalPrice || 0, // variant price
-        selectedVariant: item.variant || null, // keep variant details
-      })),
+      products: finalCart,
       orderId,
       orderNumber: nextOrderNumber,
       user: user._id,
@@ -211,17 +295,16 @@ export const initiateOrderFromCart = async (req, res) => {
       paymentStatus: "pending",
     });
 
-
     await newOrder.save();
 
-    // -------------------- 📤 Send response --------------------
+    // -------------------- 📦 Response --------------------
     return res.status(200).json({
       message: "✅ Order initiated",
       orderId: newOrder._id,
       displayOrderId: newOrder.orderId,
       finalAmount: grandTotal,
       priceBreakdown: priceDetails,
-      cart,
+      cart: finalCart,
       appliedCoupon,
       pointsUsed,
       pointsDiscount,
@@ -235,6 +318,103 @@ export const initiateOrderFromCart = async (req, res) => {
     });
   }
 };
+
+
+// export const initiateOrderFromCart = async (req, res) => {
+//   try {
+//     if (!req.user || !req.user._id) {
+//       return res.status(401).json({ message: "Unauthorized" });
+//     }
+
+//     const user = await User.findById(req.user._id).populate("cart.product");
+//     if (!user) return res.status(404).json({ message: "User not found" });
+
+//     if (!user.cart || !user.cart.length) {
+//       return res.status(400).json({ message: "Cart is empty" });
+//     }
+
+//     // -------------------- 🔥 Calculate cart summary --------------------
+//     const summaryData = await calculateCartSummary(user, {
+//       discount: req.body?.discountCode || req.query?.discount,        // optional
+//       pointsToUse: req.body?.pointsToUse || req.query?.pointsToUse,  // optional
+//       giftCardCode: req.body?.giftCardCode || req.query?.giftCardCode,    // optional
+//       giftCardPin: req.body?.giftCardPin || req.query?.giftCardPin,        // optional
+//       giftCardAmount: req.body?.giftCardAmount || req.query?.giftCardAmount // optional
+//     });
+
+
+//     const {
+//       cart,
+//       priceDetails,
+//       appliedCoupon,
+//       pointsUsed,
+//       pointsDiscount,
+//       giftCardApplied,
+//       grandTotal,
+//     } = summaryData;
+
+//     if (!cart || !cart.length) {
+//       return res.status(400).json({ message: "Cart is empty" });
+//     }
+
+//     // -------------------- 📝 Generate order identifiers --------------------
+//     const latestOrder = await Order.findOne().sort({ createdAt: -1 });
+//     const nextOrderNumber = latestOrder ? latestOrder.orderNumber + 1 : 1001;
+//     const orderId = `ORDER-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+//     // -------------------- 💾 Save new order --------------------
+//     const newOrder = new Order({
+//       products: cart.map((item) => ({
+//         productId: item.product, // product _id
+//         quantity: item.quantity, // quantity
+//         price: item.variant?.discountedPrice || item.variant?.originalPrice || 0, // variant price
+//         selectedVariant: item.variant || null, // keep variant details
+//       })),
+//       orderId,
+//       orderNumber: nextOrderNumber,
+//       user: user._id,
+//       customerName: user.name,
+//       date: new Date(),
+//       status: "Pending",
+//       orderType: "Online",
+//       amount: grandTotal,
+//       subtotal: priceDetails.bagMrp,
+//       totalSavings:
+//         priceDetails.bagDiscount +
+//         priceDetails.couponDiscount +
+//         priceDetails.referralPointsDiscount +
+//         priceDetails.giftCardDiscount,
+//       couponDiscount: priceDetails.couponDiscount,
+//       pointsDiscount: priceDetails.referralPointsDiscount,
+//       giftCardDiscount: priceDetails.giftCardDiscount,
+//       discountCode: appliedCoupon?.code || null,
+//       paid: false,
+//       paymentStatus: "pending",
+//     });
+
+
+//     await newOrder.save();
+
+//     // -------------------- 📤 Send response --------------------
+//     return res.status(200).json({
+//       message: "✅ Order initiated",
+//       orderId: newOrder._id,
+//       displayOrderId: newOrder.orderId,
+//       finalAmount: grandTotal,
+//       priceBreakdown: priceDetails,
+//       cart,
+//       appliedCoupon,
+//       pointsUsed,
+//       pointsDiscount,
+//       giftCardApplied,
+//     });
+//   } catch (err) {
+//     console.error("initiateOrderFromCart error:", err);
+//     return res.status(500).json({
+//       message: "Failed to initiate order",
+//       error: err.message,
+//     });
+//   }
+// };
 
 // export const getOrderTracking = async (req, res) => {
 //   try {

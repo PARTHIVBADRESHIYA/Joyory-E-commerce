@@ -9,7 +9,7 @@
                 type: String,
                 enum: ["active", "inactive", "upcoming", "expired"],
                 default: "inactive",
-            },
+            },  
             displaySection: {
                 type: [String],
                 enum: ["banner", "product", "offers"],

@@ -453,39 +453,58 @@ export const calculateCartSummary = async (user, query = {}) => {
     const productDoc = item.product;
     let enrichedVariant;
 
+    // 🔹 Find and recalc variant details
     if (item.selectedVariant) {
-      const variantFromProduct = (productDoc.variants || []).find(v => v.sku === item.selectedVariant?.sku);
+      const variantFromProduct = (productDoc.variants || []).find(v =>
+        v.sku === item.selectedVariant?.sku || v._id?.toString() === item.selectedVariant?._id?.toString()
+      );
       const calcVariant = calculateVariantPrices([variantFromProduct || item.selectedVariant], productDoc, activePromotions)[0];
       enrichedVariant = {
         ...calcVariant,
-        images: (variantFromProduct?.images?.length ? variantFromProduct.images : productDoc.images) || [],
+        images: Array.isArray(variantFromProduct?.images) && variantFromProduct.images.length
+          ? variantFromProduct.images
+          : Array.isArray(calcVariant?.images) && calcVariant.images.length
+            ? calcVariant.images
+            : Array.isArray(productDoc.images) && productDoc.images.length
+              ? productDoc.images
+              : [],
       };
     } else {
       enrichedVariant = calculateVariantPrices([getPseudoVariant(productDoc)], productDoc, activePromotions)[0] || {};
-      enrichedVariant.images = enrichedVariant.images || productDoc.images || [];
+      enrichedVariant.images = Array.isArray(enrichedVariant.images) && enrichedVariant.images.length
+        ? enrichedVariant.images
+        : Array.isArray(productDoc.images) && productDoc.images.length
+          ? productDoc.images
+          : [];
     }
 
-    // ✅ Ensure numeric fields are never NaN
+    // ✅ Include both _id & sku for production-safe variant tracking
     const toNumberSafe = val => (typeof val === "number" && !isNaN(val) ? val : 0);
+    const toStringSafe = v => (v === undefined || v === null) ? null : String(v);
+
+    const normalizedVariant = {
+      _id: enrichedVariant?._id || item.selectedVariant?._id || null,
+      sku: toStringSafe(enrichedVariant?.sku) || toStringSafe(item.selectedVariant?.sku) || null,
+      shadeName: enrichedVariant?.shadeName || null,
+      hex: enrichedVariant?.hex || null,
+      images: Array.isArray(enrichedVariant?.images) ? enrichedVariant.images : [],
+      image: (Array.isArray(enrichedVariant?.images) && enrichedVariant.images[0]) || null,
+      stock: toNumberSafe(enrichedVariant?.stock),
+      originalPrice: toNumberSafe(enrichedVariant?.originalPrice),
+      displayPrice: toNumberSafe(enrichedVariant?.displayPrice),
+      discountedPrice: toNumberSafe(enrichedVariant?.discountedPrice ?? enrichedVariant?.displayPrice),
+      discountPercent: toNumberSafe(enrichedVariant?.discountPercent),
+      discountAmount: toNumberSafe(enrichedVariant?.discountAmount),
+    };
 
     return {
       _id: item._id,
       product: productDoc._id,
-      name: enrichedVariant?.shadeName ? `${productDoc.name} - ${enrichedVariant.shadeName}` : productDoc.name,
+      productSnapshot: { id: productDoc._id, name: productDoc.name },
+      name: normalizedVariant?.shadeName ? `${productDoc.name} - ${normalizedVariant.shadeName}` : productDoc.name,
       quantity: item.quantity || 1,
-      variant: {
-        sku: enrichedVariant?.sku || null,
-        shadeName: enrichedVariant?.shadeName || null,
-        hex: enrichedVariant?.hex || null,
-        image: enrichedVariant.images[0] || null,
-        stock: toNumberSafe(enrichedVariant?.stock),
-        originalPrice: toNumberSafe(enrichedVariant?.originalPrice),
-        discountedPrice: toNumberSafe(enrichedVariant?.displayPrice),
-        displayPrice: toNumberSafe(enrichedVariant?.displayPrice),
-        discountPercent: toNumberSafe(enrichedVariant?.discountPercent),
-        discountAmount: toNumberSafe(enrichedVariant?.discountAmount),
-      },
-      price: toNumberSafe(enrichedVariant?.displayPrice),
+      variant: normalizedVariant,
+      price: normalizedVariant.displayPrice,
     };
   });
 

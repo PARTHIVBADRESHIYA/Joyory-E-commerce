@@ -246,6 +246,7 @@ const createPromotion = async (req, res) => {
     res.status(400).json({ message: "❌ Failed to create promotion", error: err.message });
   }
 };
+
 const getPromotionById = async (req, res) => {
   try {
     const { id } = req.params;
