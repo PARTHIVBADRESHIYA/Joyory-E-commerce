@@ -228,6 +228,88 @@ export const uploadProductWithVariants = multer({
   },
 }).any();
 
+
+
+// -------------------- Video Upload --------------------
+export const uploadVideo = multer({
+  storage: new CloudinaryStorage({
+    cloudinary,
+    params: {
+      folder: "videos",
+      resource_type: "video",
+      allowed_formats: ["mp4", "mov", "avi", "webm", "mkv"],
+      access_mode: "public",
+    },
+  }),
+  fileFilter: (req, file, cb) => {
+    const allowedMimeTypes = [
+      "video/mp4",
+      "video/webm",
+      "video/ogg",
+      "video/quicktime", // .mov
+      "video/x-msvideo", // .avi
+      "video/x-matroska", // .mkv
+    ];
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+      return cb(new multer.MulterError("LIMIT_UNEXPECTED_FILE", "Invalid file type. Only video formats allowed."));
+    }
+    cb(null, true);
+  },
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100MB limit per video
+    files: 1,
+  },
+});
+
+
+// -------------------- Universal Image/Video Uploader --------------------
+export const uploadMedia = multer({
+  storage: new CloudinaryStorage({
+    cloudinary,
+    params: async (req, file) => {
+      // detect type
+      const isVideo = file.mimetype.startsWith("video/");
+      const folder = "uploads"; // single folder for all media (you can change)
+
+      return {
+        folder,
+        resource_type: isVideo ? "video" : "image",
+        allowed_formats: isVideo
+          ? ["mp4", "mov", "avi", "webm", "mkv"]
+          : ["jpg", "jpeg", "png", "webp"],
+        access_mode: "public",
+      };
+    },
+  }),
+  fileFilter: (req, file, cb) => {
+    const allowedMimeTypes = [
+      // images
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      // videos
+      "video/mp4",
+      "video/webm",
+      "video/ogg",
+      "video/quicktime",
+      "video/x-msvideo",
+      "video/x-matroska",
+    ];
+
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+      return cb(
+        new multer.MulterError("LIMIT_UNEXPECTED_FILE", "Invalid file type. Only image/video formats allowed.")
+      );
+    }
+    cb(null, true);
+  },
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100MB max (covers both image & video)
+    files: 5, // allow up to 5 files
+  },
+});
+
+
 // -------------------- Exported Uploaders --------------------
 export const uploadEcard = makeCloudinaryPdfUploader("ecards", 1);
 export const uploadProduct = makeCloudinaryUploader('products', 25);
