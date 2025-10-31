@@ -2,7 +2,7 @@ import Payment from '../../../models/settings/payments/Payment.js';
 import PaymentMethod from '../../../models/settings/payments/PaymentMethod.js';
 import Order from '../../../models/Order.js';
 import { encrypt, decrypt } from '../../../middlewares/utils/encryption.js';
-// import { createShiprocketOrder } from "../../../middlewares/services/shiprocket.js";
+import { createShiprocketOrder } from "../../../middlewares/services/shiprocket.js";
 import { createShipment } from "../../../middlewares/services/shippingProvider.js";
 import { sendEmail } from "../../../middlewares/utils/emailService.js"; // ✅ assume you already have an email service
 import Product from '../../../models/Product.js';
@@ -3211,7 +3211,7 @@ export const verifyRazorpayPayment = async (req, res) => {
         // ---- post-commit: external shipment (do not include external calls inside tx) ----
         const finalOrder = await Order.findById(orderId).populate("user").populate("products.productId");
         try {
-            const shiprocketRes = await createShipment(finalOrder);
+            const shiprocketRes = await createShiprocketOrder(finalOrder);
             if (shiprocketRes?.shipmentDetails) {
                 finalOrder.shipment = shiprocketRes.shipmentDetails;
                 finalOrder.trackingHistory.push({ status: "Shipment Created", timestamp: new Date(), location: "Shiprocket" });

@@ -419,6 +419,10 @@ import "./middlewares/utils/cron/promotionScheduler.js";
 import { startTrackingJob } from "./middlewares/utils/cron/shiprocketTrackingJob.js";
 import "./middlewares/utils/cron/autoPayout.js";
 
+// ================= START CRON JOBS =================
+startTrackingJob();
+console.log("🚀 Shiprocket tracking job started...");
+
 // 🔹 Routes
 import authRoutes from "./routes/authRoutes.js";
 import userRoutes from "./routes/user/userRoutes.js";
