@@ -933,6 +933,51 @@ const deleteProduct = async (req, res) => {
     }
 }
 
+// const getSingleProductById = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+
+//         if (!mongoose.Types.ObjectId.isValid(id))
+//             return res.status(400).json({ message: 'Invalid product ID format' });
+
+//         const product = await Product.findById(id)
+//             .populate('category', 'name slug')
+//             .populate('categoryHierarchy', 'name slug')
+//             .lean();
+
+//         if (!product) return res.status(404).json({ message: '❌ Product not found' });
+
+//         if (product.variants?.length) {
+//             // Variant-level stock/status with discountedPrice
+//             product.variants = product.variants.map(v => {
+//                 let statusMessage;
+//                 if (v.stock === 0) statusMessage = "No stock available now, please try again later";
+//                 else if (v.stock < (v.thresholdValue || 5)) statusMessage = `Few left (${v.stock})`;
+//                 else statusMessage = "In-stock";
+
+//                 return {
+//                     ...v,
+//                     status: statusMessage,
+//                     displayPrice: v.discountedPrice && v.discountedPrice < v.price ? v.discountedPrice : v.price
+//                 };
+//             });
+//             delete product.quantity;
+//             delete product.status;
+//         } else {
+//             // Non-variant product
+//             let statusMessage;
+//             if (product.quantity === 0) statusMessage = "No stock available now, please try again later";
+//             else if (product.quantity < (product.thresholdValue || 5)) statusMessage = `Few left (${product.quantity})`;
+//             else statusMessage = "In-stock";
+//             product.status = statusMessage;
+//         }
+
+//         res.status(200).json({ message: '✅ Product fetched successfully', product });
+//     } catch (error) {
+//         console.error("❌ Error fetching single product:", error);
+//         res.status(500).json({ message: 'Failed to fetch product', error: error.message });
+//     }
+// };
 const getSingleProductById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -947,8 +992,16 @@ const getSingleProductById = async (req, res) => {
 
         if (!product) return res.status(404).json({ message: '❌ Product not found' });
 
+        // ✅ Ensure product has a slug (auto-generate if missing)
+        if (!product.slug) {
+            const { generateUniqueSlug } = await import("../middlewares/utils/slug.js");
+            const slug = await generateUniqueSlug(Product, product.name);
+            await Product.findByIdAndUpdate(id, { slug });
+            product.slug = slug;
+        }
+
+        // ✅ Variant handling
         if (product.variants?.length) {
-            // Variant-level stock/status with discountedPrice
             product.variants = product.variants.map(v => {
                 let statusMessage;
                 if (v.stock === 0) statusMessage = "No stock available now, please try again later";
@@ -958,24 +1011,40 @@ const getSingleProductById = async (req, res) => {
                 return {
                     ...v,
                     status: statusMessage,
-                    displayPrice: v.discountedPrice && v.discountedPrice < v.price ? v.discountedPrice : v.price
+                    displayPrice:
+                        v.discountedPrice && v.discountedPrice < v.price
+                            ? v.discountedPrice
+                            : v.price
                 };
             });
             delete product.quantity;
             delete product.status;
         } else {
-            // Non-variant product
+            // ✅ Non-variant stock message
             let statusMessage;
-            if (product.quantity === 0) statusMessage = "No stock available now, please try again later";
-            else if (product.quantity < (product.thresholdValue || 5)) statusMessage = `Few left (${product.quantity})`;
+            if (product.quantity === 0)
+                statusMessage = "No stock available now, please try again later";
+            else if (product.quantity < (product.thresholdValue || 5))
+                statusMessage = `Few left (${product.quantity})`;
             else statusMessage = "In-stock";
             product.status = statusMessage;
         }
 
-        res.status(200).json({ message: '✅ Product fetched successfully', product });
+        // ✅ Final response (slug included)
+        res.status(200).json({
+            message: "✅ Product fetched successfully",
+            product: {
+                ...product,
+                slug: product.slug, // explicitly ensure slug is included
+            }
+        });
+
     } catch (error) {
         console.error("❌ Error fetching single product:", error);
-        res.status(500).json({ message: 'Failed to fetch product', error: error.message });
+        res.status(500).json({
+            message: "Failed to fetch product",
+            error: error.message
+        });
     }
 };
 

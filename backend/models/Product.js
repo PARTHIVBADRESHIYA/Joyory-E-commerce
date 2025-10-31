@@ -362,6 +362,7 @@
 
 // models/Product.js
 import mongoose from 'mongoose';
+import { generateUniqueSlug } from '../middlewares/utils/slug.js'; // ✅ import this
 
 const variantSchema = new mongoose.Schema({
     sku: { type: String, required: true },
@@ -382,6 +383,7 @@ const variantSchema = new mongoose.Schema({
 
 const productSchema = new mongoose.Schema({
     name: { type: String, required: true, unique: true },
+    slug: { type: String, unique: true, index: true }, // ✅ Add this line
     buyingPrice: { type: Number, required: true },
     variant: String,
     images: [{ type: String }],
@@ -394,7 +396,7 @@ const productSchema = new mongoose.Schema({
         required: function () {
             return !this.variants || this.variants.length === 0;
         }
-    },  
+    },
 
     brand: { type: mongoose.Schema.Types.ObjectId, ref: "Brand" },
     category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
@@ -417,7 +419,12 @@ const productSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // 🔹 Automatically update min/max price & discount before saving
-productSchema.pre('save', function (next) {
+productSchema.pre('save', async function (next) {
+
+    if (!this.slug || this.isModified('name')) {
+        this.slug = await generateUniqueSlug(mongoose.model('Product'), this.name);
+    }
+
     if (this.variants?.length) {
         const prices = this.variants.map(v => v.discountedPrice || v.price).filter(Boolean);
         this.minPrice = Math.min(...prices);

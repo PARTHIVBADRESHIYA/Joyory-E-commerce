@@ -1,6 +1,7 @@
 // helpers/cartCalculator.js
 import Discount from "../../models/Discount.js";
 import GiftCard from "../../models/GiftCard.js";
+import Product from "../../models/Product.js";
 import { validateDiscountForCartInternal } from "../../controllers/user/userDiscountController.js";
 import { applyPromotions } from "../../middlewares/services/promotionEngine.js";
 import { getOrCreateWallet } from "../../middlewares/utils/walletHelpers.js";
@@ -449,69 +450,85 @@ export const calculateCartSummary = async (user, query = {}) => {
   const now = new Date();
   const activePromotions = await Promotion.find({ status: "active", startDate: { $lte: now }, endDate: { $gte: now } }).lean();
 
-  const finalCart = validCartItems.map(item => {
-    const productDoc = item.product;
-    let enrichedVariant;
+  // ✅ FIXED: Always recalc variant fresh from DB
+  const finalCart = await Promise.all(validCartItems.map(async item => {
+    const productFromDB = await Product.findById(item.product._id).lean();
+    if (!productFromDB) throw new Error(`Product not found: ${item.product._id}`);
 
-    // 🔹 Find and recalc variant details
-    if (item.selectedVariant) {
-      const variantFromProduct = (productDoc.variants || []).find(v =>
-        v.sku === item.selectedVariant?.sku || v._id?.toString() === item.selectedVariant?._id?.toString()
-      );
-      const calcVariant = calculateVariantPrices([variantFromProduct || item.selectedVariant], productDoc, activePromotions)[0];
-      enrichedVariant = {
-        ...calcVariant,
-        images: Array.isArray(variantFromProduct?.images) && variantFromProduct.images.length
-          ? variantFromProduct.images
-          : Array.isArray(calcVariant?.images) && calcVariant.images.length
+    const promoItem = promoItems.find(p => p.productId === String(productFromDB._id));
+
+    // ✅ Match variant by SKU OR ObjectId (like getCartSummary)
+    const matchedVariant =
+      (productFromDB.variants || []).find(v =>
+        String(v.sku).trim().toLowerCase() === String(item.selectedVariant?.sku || "").trim().toLowerCase()
+      ) ||
+      (productFromDB.variants || []).find(v =>
+        v._id?.toString() === item.selectedVariant?._id?.toString()
+      ) ||
+      null;
+
+    // ✅ Use correct variant for pricing
+    const calcVariant = matchedVariant
+      ? calculateVariantPrices([matchedVariant], productFromDB, activePromotions)[0]
+      : calculateVariantPrices([getPseudoVariant(productFromDB)], productFromDB, activePromotions)[0];
+
+    const enrichedVariant = {
+      ...calcVariant,
+      images:
+        Array.isArray(matchedVariant?.images) && matchedVariant.images.length
+          ? matchedVariant.images
+          : Array.isArray(calcVariant.images) && calcVariant.images.length
             ? calcVariant.images
-            : Array.isArray(productDoc.images) && productDoc.images.length
-              ? productDoc.images
+            : Array.isArray(productFromDB.images) && productFromDB.images.length
+              ? productFromDB.images
               : [],
-      };
-    } else {
-      enrichedVariant = calculateVariantPrices([getPseudoVariant(productDoc)], productDoc, activePromotions)[0] || {};
-      enrichedVariant.images = Array.isArray(enrichedVariant.images) && enrichedVariant.images.length
-        ? enrichedVariant.images
-        : Array.isArray(productDoc.images) && productDoc.images.length
-          ? productDoc.images
-          : [];
-    }
-
-    // ✅ Include both _id & sku for production-safe variant tracking
-    const toNumberSafe = val => (typeof val === "number" && !isNaN(val) ? val : 0);
-    const toStringSafe = v => (v === undefined || v === null) ? null : String(v);
-
-    const normalizedVariant = {
-      _id: enrichedVariant?._id || item.selectedVariant?._id || null,
-      sku: toStringSafe(enrichedVariant?.sku) || toStringSafe(item.selectedVariant?.sku) || null,
-      shadeName: enrichedVariant?.shadeName || null,
-      hex: enrichedVariant?.hex || null,
-      images: Array.isArray(enrichedVariant?.images) ? enrichedVariant.images : [],
-      image: (Array.isArray(enrichedVariant?.images) && enrichedVariant.images[0]) || null,
-      stock: toNumberSafe(enrichedVariant?.stock),
-      originalPrice: toNumberSafe(enrichedVariant?.originalPrice),
-      displayPrice: toNumberSafe(enrichedVariant?.displayPrice),
-      discountedPrice: toNumberSafe(enrichedVariant?.discountedPrice ?? enrichedVariant?.displayPrice),
-      discountPercent: toNumberSafe(enrichedVariant?.discountPercent),
-      discountAmount: toNumberSafe(enrichedVariant?.discountAmount),
+      shadeName: calcVariant?.shadeName || matchedVariant?.shadeName || null,
+      hex: calcVariant?.hex || matchedVariant?.hex || null,
+      sku: matchedVariant?.sku || calcVariant?.sku || null,
     };
+
+    const displayPrice = item.isFreeItem ? 0 : enrichedVariant.displayPrice;
+
+    console.log("🧾 VARIANT DEBUG:", {
+      product: productFromDB.name,
+      selectedSku: item.selectedVariant?.sku,
+      matchedSku: matchedVariant?.sku,
+      usedPrice: displayPrice,
+      variantName: enrichedVariant.shadeName,
+    });
 
     return {
       _id: item._id,
-      product: productDoc._id,
-      productSnapshot: { id: productDoc._id, name: productDoc.name },
-      name: normalizedVariant?.shadeName ? `${productDoc.name} - ${normalizedVariant.shadeName}` : productDoc.name,
+      product: productFromDB._id,
+      productSnapshot: { id: productFromDB._id, name: productFromDB.name },
+      name: item.isFreeItem
+        ? `${productFromDB.name} (Free Item)`
+        : enrichedVariant?.shadeName
+          ? `${productFromDB.name} - ${enrichedVariant.shadeName}`
+          : productFromDB.name,
       quantity: item.quantity || 1,
-      variant: normalizedVariant,
-      price: normalizedVariant.displayPrice,
+      variant: {
+        sku: enrichedVariant.sku,
+        shadeName: enrichedVariant.shadeName,
+        hex: enrichedVariant.hex,
+        image: enrichedVariant.images?.[0] || null,
+        stock: matchedVariant?.stock ?? 0,
+        originalPrice: item.isFreeItem ? 0 : enrichedVariant.originalPrice,
+        discountedPrice: displayPrice,
+        displayPrice,
+        discountPercent: item.isFreeItem ? 100 : enrichedVariant.discountPercent,
+        discountAmount: item.isFreeItem
+          ? enrichedVariant.originalPrice
+          : enrichedVariant.discountAmount,
+      },
+      isFreeItem: !!item.isFreeItem,
+      promoTag: item.promoTag || null,
     };
-  });
+  }));
 
   const bagMrp = round2(finalCart.reduce((sum, item) => sum + item.variant.originalPrice * item.quantity, 0));
-  const bagPayable = round2(finalCart.reduce((sum, item) => sum + item.variant.displayPrice * item.quantity, 0));
+  const bagPayable = round2(finalCart.reduce((sum, item) => sum + item.variant.discountedPrice * item.quantity, 0));
   const totalSavings = round2(bagMrp - bagPayable + discountFromCoupon + pointsDiscount + giftCardDiscount);
-
   let grandTotal = round2(bagPayable - discountFromCoupon - pointsDiscount - giftCardDiscount);
 
   const FREE_SHIPPING_THRESHOLD = 499;

@@ -27,34 +27,102 @@ export const getCountdown = (endDate) => {
     return { days, hours, minutes, seconds };
 };
 
+// export const productMatchesPromo = (product, promo) => {
+//     // scope = product
+//     if (promo.scope === "product" && Array.isArray(promo.products) && promo.products.length) {
+//         const pid = product._id?.toString?.() || product._id;
+//         return promo.products.some((p) => p.toString() === pid);
+//     }
+
+//     // scope = category
+//     if (promo.scope === "category" && Array.isArray(promo.categories) && promo.categories.length) {
+//         const catId = product.category?.toString?.();
+//         const matchesCat = promo.categories.some((c) => c?.category?.toString?.() === catId);
+//         const matchesHierarchy = Array.isArray(product.categoryHierarchy)
+//             ? product.categoryHierarchy.some((cid) =>
+//                 promo.categories.some((c) => c?.category?.toString?.() === cid?.toString?.())
+//             )
+//             : false;
+//         return matchesCat || matchesHierarchy;
+//     }
+
+//     // scope = brand
+//     if (promo.scope === "brand" && Array.isArray(promo.brands) && promo.brands.length) {
+//         const productBrandId = product.brand?._id?.toString?.() || product.brand?.toString?.();
+//         return promo.brands.some((b) => {
+//             const bId = b?.brand?._id?.toString?.() || b?.brand?.toString?.();
+//             return bId && bId === productBrandId;
+//         });
+//     }
+
+//     return false;
+// };
 export const productMatchesPromo = (product, promo) => {
-    // scope = product
-    if (promo.scope === "product" && Array.isArray(promo.products) && promo.products.length) {
-        const pid = product._id?.toString?.() || product._id;
-        return promo.products.some((p) => p.toString() === pid);
+    if (!product || !promo) return false;
+
+    // 🧠 Normalize IDs safely
+    const pid = String(product._id || "");
+    const categoryId = String(product.category?._id || product.category || "");
+    const brandId = String(product.brand?._id || product.brand || "");
+
+    // Normalize promo arrays
+    const promoProducts = (promo.products || []).map(p => String(p.product || p));
+    const promoCategories = (promo.categories || []).map(c => String(c.category || c));
+    const promoBrands = (promo.brands || []).map(b => String(b.brand || b));
+
+    // ✅ 1️⃣ Product-specific match
+    if (promoProducts.length && promoProducts.includes(pid)) {
+        console.log(`✅ Matched by Product: ${product.name}`);
+        return true;
     }
 
-    // scope = category
-    if (promo.scope === "category" && Array.isArray(promo.categories) && promo.categories.length) {
-        const catId = product.category?.toString?.();
-        const matchesCat = promo.categories.some((c) => c?.category?.toString?.() === catId);
-        const matchesHierarchy = Array.isArray(product.categoryHierarchy)
-            ? product.categoryHierarchy.some((cid) =>
-                promo.categories.some((c) => c?.category?.toString?.() === cid?.toString?.())
-            )
-            : false;
-        return matchesCat || matchesHierarchy;
+    // ✅ 2️⃣ Category match (handles nested hierarchy)
+    if (promoCategories.length) {
+        const productCatIds = new Set();
+
+        // Add direct category
+        if (categoryId) productCatIds.add(String(categoryId));
+
+        // Add all hierarchy categories
+        if (Array.isArray(product.categoryHierarchy)) {
+            product.categoryHierarchy.forEach(c => {
+                const cid = String(c._id || c.id || c.category || c);
+                if (cid) productCatIds.add(cid);
+            });
+        }
+
+        // Match check
+        const matched = [...productCatIds].some(cid => promoCategories.includes(cid));
+
+        if (matched) {
+            console.log(`✅ Matched by Category: ${product.name}`);
+            return true;
+        } else if (process.env.NODE_ENV === "development") {
+            console.log("❌ Not matched category", {
+                promoCats: promoCategories,
+                productCats: [...productCatIds],
+                productName: product.name,
+            });
+        }
     }
 
-    // scope = brand
-    if (promo.scope === "brand" && Array.isArray(promo.brands) && promo.brands.length) {
-        const productBrandId = product.brand?._id?.toString?.() || product.brand?.toString?.();
-        return promo.brands.some((b) => {
-            const bId = b?.brand?._id?.toString?.() || b?.brand?.toString?.();
-            return bId && bId === productBrandId;
-        });
+    // ✅ 3️⃣ Brand match
+    if (promoBrands.length && brandId) {
+        const matched = promoBrands.includes(String(brandId));
+        if (matched) {
+            console.log(`✅ Matched by Brand: ${product.name}`);
+            return true;
+        }
     }
 
+    // ✅ 4️⃣ Global promo (applies to all products)
+    const isGlobal = !promoProducts.length && !promoCategories.length && !promoBrands.length;
+    if (isGlobal) {
+        console.log("✅ Global Promo applies to all products");
+        return true;
+    }
+
+    // ❌ No match found
     return false;
 };
 
@@ -138,9 +206,15 @@ export const getActivePromotionsForUsers = async (req, res) => {
                     : 0;
                 discountLabel = top ? `Buy More, Save up to ${top}%` : "Buy More, Save More";
             } else if (p.promotionType === "bogo") {
-                const bq = p.promotionConfig?.buyQty ?? 1;
-                const gq = p.promotionConfig?.getQty ?? 1;
-                discountLabel = `BOGO ${bq}+${gq}`;
+                const bq = p.promotionConfig?.buyQty || p.promotionConfig?.buy || 1;
+                const gq = p.promotionConfig?.getQty || p.promotionConfig?.get || 1;
+                discountLabel = `Buy ${bq} Get ${gq} Free`;
+            } else if (p.promotionType === "cartValue") {
+                discountLabel = `Extra ${p.promotionConfig?.discountPercent || 0}% off on orders over ₹${p.promotionConfig?.minOrderValue || p.conditions?.minOrderValue || 0}`;
+            } else if (p.promotionType === "gift") {
+                discountLabel = `Free gift on orders over ₹${p.promotionConfig?.minOrderValue || p.conditions?.minOrderValue || 0}`;
+            } else if (p.promotionType === "freeShipping") {
+                discountLabel = `Free shipping over ₹${p.promotionConfig?.minOrderValue || p.conditions?.minOrderValue || 0}`;
             } else if (p.promotionType === "paymentOffer") {
                 const provider = p.promotionConfig?.provider || "";
                 const pct = Number(p.promotionConfig?.discountPercent || 0);
@@ -180,6 +254,8 @@ export const getActivePromotionsForUsers = async (req, res) => {
                     products: (p.products || []).map((x) =>
                         typeof x === "object" ? String(x._id ?? x) : String(x)
                     ),
+                    conditions: p.conditions || {},
+                    allowStacking: !!p.allowStacking,
                     promotionConfig: p.promotionConfig || {},
                     startDate: p.startDate,
                     endDate: p.endDate,

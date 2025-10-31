@@ -467,7 +467,7 @@ export const getAllFilteredProducts = async (req, res) => {
 //             rating: { avgRating: -1 },
 //         };
 
-//         // 🔹 6. Fetch products (with skinTypes & formulation populated)
+//         // 🔹 6. Fetch products
 //         const total = await Product.countDocuments(finalFilter);
 //         const products = await Product.find(finalFilter)
 //             .populate("skinTypes", "name slug isActive")
@@ -509,11 +509,35 @@ export const getAllFilteredProducts = async (req, res) => {
 //             endDate: { $gte: now },
 //         }).lean();
 
-//         // 🔹 8. Enrich all products (via unified helper)
+//         // 🔹 8. Enrich all products
 //         const enrichedProducts = await enrichProductsUnified(products, promotions);
 
+//         // 🩷 User-friendly, attractive stock messages (only this part changed)
+//         const enrichedWithStockMsg = enrichedProducts.map((prod) => {
+//             // Per-variant stock message
+//             if (Array.isArray(prod.variants) && prod.variants.length) {
+//                 prod.variants = prod.variants.map((v) => {
+//                     const vStock = v.stock ?? 0;
+//                     if (vStock <= 0) {
+//                         v.stockMessage = "⛔ Currently out of stock — check back soon!";
+//                     } else if (vStock === 1) {
+//                         v.stockMessage = "🔥 Almost gone! Only 1 left in stock.";
+//                     } else if (vStock <= 3) {
+//                         v.stockMessage = `⚡ Hurry! Just ${vStock} piece${vStock > 1 ? "s" : ""} remaining.`;
+//                     } else if (vStock < 10) {
+//                         v.stockMessage = `💨 Only a few left — ${vStock} available!`;
+//                     } else {
+//                         v.stockMessage = null;
+//                     }
+//                     return v;
+//                 });
+//             }
+
+//             return prod;
+//         });
+
 //         // ✅ Reattach skinTypes & formulation to each product
-//         const productsWithRelations = enrichedProducts.map((prod, i) => ({
+//         const productsWithRelations = enrichedWithStockMsg.map((prod, i) => ({
 //             ...prod,
 //             skinTypes: products[i].skinTypes || [],
 //             formulation: products[i].formulation || null,
@@ -550,9 +574,12 @@ export const getAllFilteredProducts = async (req, res) => {
 //         console.error("❌ getProductsByCategory error:", err);
 //         return res
 //             .status(500)
-//             .json({ message: "Server error", error: err.message });
+//             .json({
+//                 message: "Oops! Something went wrong while fetching products. Please try again.",
+//             });
 //     }
 // };
+
 export const getProductsByCategory = async (req, res) => {
     try {
         const slug = req.params.slug.toLowerCase();
@@ -560,55 +587,42 @@ export const getProductsByCategory = async (req, res) => {
         page = Number(page) || 1;
         limit = Number(limit) || 12;
 
-        // 🔹 Convert string query params to array if needed
-        if (queryFilters.skinTypes && typeof queryFilters.skinTypes === "string") {
-            queryFilters.skinTypes = [queryFilters.skinTypes];
-        }
-        if (queryFilters.brandIds && typeof queryFilters.brandIds === "string") {
-            queryFilters.brandIds = [queryFilters.brandIds];
-        }
-        if (queryFilters.formulations && typeof queryFilters.formulations === "string") {
-            queryFilters.formulations = [queryFilters.formulations];
-        }
-        if (queryFilters.finishes && typeof queryFilters.finishes === "string") {
-            queryFilters.finishes = [queryFilters.finishes];
-        }
+        // Convert filters to arrays if needed
+        ["skinTypes", "brandIds", "formulations", "finishes"].forEach(key => {
+            if (queryFilters[key] && typeof queryFilters[key] === "string") {
+                queryFilters[key] = [queryFilters[key]];
+            }
+        });
 
-        // 🔹 1. Fetch category
+        // 1️⃣ Find category
         const category = mongoose.Types.ObjectId.isValid(slug)
-            ? await Category.findById(slug)
-                .select("name slug bannerImage thumbnailImage ancestors")
-                .lean()
-            : await Category.findOne({ slug })
-                .select("name slug bannerImage thumbnailImage ancestors")
-                .lean();
+            ? await Category.findById(slug).select("name slug bannerImage thumbnailImage ancestors").lean()
+            : await Category.findOne({ slug }).select("name slug bannerImage thumbnailImage ancestors").lean();
 
         if (!category)
             return res.status(404).json({ message: "Category not found" });
 
-        // 🔹 2. Track user recent categories
+        // 2️⃣ Track user’s recent categories
         if (req.user?.id) {
             await User.findByIdAndUpdate(req.user.id, { $pull: { recentCategories: category._id } });
             await User.findByIdAndUpdate(req.user.id, {
-                $push: {
-                    recentCategories: { $each: [category._id], $position: 0, $slice: 20 },
-                },
+                $push: { recentCategories: { $each: [category._id], $position: 0, $slice: 20 } },
             });
         }
 
-        // 🔹 3. Get descendant categories
+        // 3️⃣ Descendants
         const descendantIds = (await getDescendantCategoryIds(category._id))
-            .filter((id) => mongoose.Types.ObjectId.isValid(id))
-            .map((id) => new mongoose.Types.ObjectId(id));
+            .filter(id => mongoose.Types.ObjectId.isValid(id))
+            .map(id => new mongoose.Types.ObjectId(id));
         descendantIds.push(category._id);
 
-        // 🔹 4. Normalize & apply filters
+        // 4️⃣ Filters
         const filters = normalizeFilters(queryFilters);
-        filters.categoryIds = descendantIds.map((id) => id.toString());
+        filters.categoryIds = descendantIds.map(id => id.toString());
         const finalFilter = await applyDynamicFilters(filters);
         finalFilter.isPublished = true;
 
-        // 🔹 5. Sorting
+        // 5️⃣ Sorting
         const sortOptions = {
             recent: { createdAt: -1 },
             priceLowToHigh: { price: 1 },
@@ -616,9 +630,10 @@ export const getProductsByCategory = async (req, res) => {
             rating: { avgRating: -1 },
         };
 
-        // 🔹 6. Fetch products
+        // 6️⃣ Fetch products (slug included)
         const total = await Product.countDocuments(finalFilter);
         const products = await Product.find(finalFilter)
+            .select("name slug price discountedPrice images variants category skinTypes formulation isPublished createdAt")
             .populate("skinTypes", "name slug isActive")
             .populate("formulation", "name slug isActive")
             .sort(sortOptions[sort] || { createdAt: -1 })
@@ -629,9 +644,7 @@ export const getProductsByCategory = async (req, res) => {
         if (!products.length) {
             const msg = queryFilters.search
                 ? `No products found matching “${queryFilters.search}” in this category.`
-                : filters.minPrice ||
-                    filters.maxPrice ||
-                    filters.brandIds?.length
+                : (filters.minPrice || filters.maxPrice || filters.brandIds?.length)
                     ? `No products found with the selected filters in this category.`
                     : `No products available in ${category.name} at the moment.`;
 
@@ -650,7 +663,7 @@ export const getProductsByCategory = async (req, res) => {
             });
         }
 
-        // 🔹 7. Active promotions
+        // 7️⃣ Active promotions
         const now = new Date();
         const promotions = await Promotion.find({
             status: "active",
@@ -658,58 +671,61 @@ export const getProductsByCategory = async (req, res) => {
             endDate: { $gte: now },
         }).lean();
 
-        // 🔹 8. Enrich all products
+        // 8️⃣ Enrich products
         const enrichedProducts = await enrichProductsUnified(products, promotions);
 
-        // 🩷 User-friendly, attractive stock messages (only this part changed)
-        const enrichedWithStockMsg = enrichedProducts.map((prod) => {
-            // Per-variant stock message
+        // 9️⃣ Stock messages
+        const enrichedWithStockMsg = enrichedProducts.map(prod => {
             if (Array.isArray(prod.variants) && prod.variants.length) {
-                prod.variants = prod.variants.map((v) => {
+                prod.variants = prod.variants.map(v => {
                     const vStock = v.stock ?? 0;
-                    if (vStock <= 0) {
-                        v.stockMessage = "⛔ Currently out of stock — check back soon!";
-                    } else if (vStock === 1) {
-                        v.stockMessage = "🔥 Almost gone! Only 1 left in stock.";
-                    } else if (vStock <= 3) {
-                        v.stockMessage = `⚡ Hurry! Just ${vStock} piece${vStock > 1 ? "s" : ""} remaining.`;
-                    } else if (vStock < 10) {
-                        v.stockMessage = `💨 Only a few left — ${vStock} available!`;
-                    } else {
-                        v.stockMessage = null;
-                    }
+                    if (vStock <= 0) v.stockMessage = "⛔ Currently out of stock — check back soon!";
+                    else if (vStock === 1) v.stockMessage = "🔥 Almost gone! Only 1 left.";
+                    else if (vStock <= 3) v.stockMessage = `⚡ Hurry! Just ${vStock} left.`;
+                    else if (vStock < 10) v.stockMessage = `💨 Few left — ${vStock} available!`;
+                    else v.stockMessage = null;
                     return v;
                 });
             }
-
             return prod;
         });
 
-        // ✅ Reattach skinTypes & formulation to each product
+        // 🔟 Make sure slug exists (generate if missing)
+        const { generateUniqueSlug } = await import("../../middlewares/utils/slug.js");
+        for (const prod of enrichedWithStockMsg) {
+            if (!prod.slug) {
+                const newSlug = await generateUniqueSlug(Product, prod.name);
+                await Product.findByIdAndUpdate(prod._id, { slug: newSlug });
+                prod.slug = newSlug;
+            }
+        }
+
+        // 11️⃣ Reattach skinTypes/formulation
         const productsWithRelations = enrichedWithStockMsg.map((prod, i) => ({
             ...prod,
             skinTypes: products[i].skinTypes || [],
             formulation: products[i].formulation || null,
         }));
 
-        // 🔹 9. Breadcrumbs
+        // 12️⃣ Breadcrumbs
         let ancestors = [];
         if (Array.isArray(category.ancestors) && category.ancestors.length) {
-            const ancestorDocs = await Category.find({
-                _id: { $in: category.ancestors },
-            })
+            const ancestorDocs = await Category.find({ _id: { $in: category.ancestors } })
                 .select("name slug")
                 .lean();
             ancestors = category.ancestors
-                .map((id) => ancestorDocs.find((a) => String(a._id) === String(id)))
+                .map(id => ancestorDocs.find(a => String(a._id) === String(id)))
                 .filter(Boolean);
         }
 
-        // ✅ 10. Final response
+        // ✅ 13️⃣ Final response (slug included)
         return res.status(200).json({
             category,
             breadcrumb: ancestors,
-            products: productsWithRelations,
+            products: productsWithRelations.map(p => ({
+                ...p,
+                slug: p.slug, // ✅ always include slug
+            })),
             pagination: {
                 page,
                 limit,
@@ -719,15 +735,15 @@ export const getProductsByCategory = async (req, res) => {
             },
             message: null,
         });
+
     } catch (err) {
         console.error("❌ getProductsByCategory error:", err);
-        return res
-            .status(500)
-            .json({
-                message: "Oops! Something went wrong while fetching products. Please try again.",
-            });
+        return res.status(500).json({
+            message: "Oops! Something went wrong while fetching products. Please try again.",
+        });
     }
 };
+
 
 // export const getSingleProduct = async (req, res) => {
 //     try {
@@ -735,7 +751,9 @@ export const getProductsByCategory = async (req, res) => {
 //         const selectedSku = req.query.variant; // Selected variant SKU (optional)
 
 //         if (!mongoose.Types.ObjectId.isValid(productId)) {
-//             return res.status(400).json({ message: "Invalid product id" });
+//             return res
+//                 .status(400)
+//                 .json({ message: "⚠️ Invalid product ID. Please check and try again." });
 //         }
 
 //         // 1️⃣ Load product + increment views
@@ -744,20 +762,43 @@ export const getProductsByCategory = async (req, res) => {
 //             { $inc: { views: 1 } },
 //             { new: true, lean: true }
 //         );
-//         if (!product) return res.status(404).json({ message: "Product not found" });
+
+//         if (!product)
+//             return res
+//                 .status(404)
+//                 .json({ message: "❌ Product not found or may have been removed." });
 
 //         // 2️⃣ Active promotions
 //         const now = new Date();
 //         const promotions = await Promotion.find({
 //             status: "active",
 //             startDate: { $lte: now },
-//             endDate: { $gte: now }
+//             endDate: { $gte: now },
 //         }).lean();
 
 //         // 3️⃣ Enrich using the SAME helper you already have
 //         const enrichedProduct = await enrichProductsUnified(product, promotions, {
-//             selectedSku
+//             selectedSku,
 //         });
+
+//         // Per-variant stock messages (keep same logic, only friendly text)
+//         if (Array.isArray(enrichedProduct.variants) && enrichedProduct.variants.length) {
+//             enrichedProduct.variants = enrichedProduct.variants.map((v) => {
+//                 const vStock = v.stock ?? 0;
+//                 if (vStock <= 0) {
+//                     v.stockMessage = "⛔ Currently out of stock — check back soon!";
+//                 } else if (vStock === 1) {
+//                     v.stockMessage = "🔥 Almost gone! Only 1 left in stock.";
+//                 } else if (vStock <= 3) {
+//                     v.stockMessage = `⚡ Hurry! Just ${vStock} piece${vStock > 1 ? "s" : ""} remaining.`;
+//                 } else if (vStock < 10) {
+//                     v.stockMessage = `💨 Only a few left — ${vStock} available!`;
+//                 } else {
+//                     v.stockMessage = null;
+//                 }
+//                 return v;
+//             });
+//         }
 
 //         // 4️⃣ Get recommendations (same as before)
 //         const modes = ["moreLikeThis", "boughtTogether", "alsoViewed"];
@@ -768,15 +809,15 @@ export const getProductsByCategory = async (req, res) => {
 //                 productId: enrichedProduct._id,
 //                 categorySlug: enrichedProduct.categorySlug,
 //                 userId: req.user?._id,
-//                 limit: 6
+//                 limit: 6,
 //             });
 //             recommendations[mode] = {
 //                 name: rec.message || mode,
-//                 products: rec.success ? rec.products : []
+//                 products: rec.success ? rec.products : [],
 //             };
 //         }
 
-//         // 5️⃣ Return exactly the same response structure
+//         // 5️⃣ Final response (exact same structure)
 //         return res.status(200).json({
 //             _id: enrichedProduct._id,
 //             name: enrichedProduct.name,
@@ -789,43 +830,45 @@ export const getProductsByCategory = async (req, res) => {
 //             variants: enrichedProduct.variants,
 //             shadeOptions: enrichedProduct.shadeOptions || [],
 //             status: enrichedProduct.status,
-//             message: enrichedProduct.message,
+//             message: enrichedProduct.stockMessage || null,
 //             avgRating: enrichedProduct.avgRating,
 //             totalRatings: enrichedProduct.totalRatings,
 //             inStock: enrichedProduct.inStock,
 //             selectedVariant: enrichedProduct.selectedVariant,
-//             recommendations
+//             recommendations,
 //         });
-
 //     } catch (err) {
 //         console.error("❌ getSingleProduct error:", err);
-//         return res.status(500).json({ message: "Server error", error: err.message });
+//         return res.status(500).json({
+//             message:
+//                 "🚫 Oops! Something went wrong while fetching product details. Please try again shortly.",
+//         });
 //     }
 // };
 export const getSingleProduct = async (req, res) => {
     try {
-        const productId = req.params.id;
-        const selectedSku = req.query.variant; // Selected variant SKU (optional)
+        const { idOrSlug } = req.params; // ✅ works for both slug or id
+        const selectedSku = req.query.variant; // optional
 
-        if (!mongoose.Types.ObjectId.isValid(productId)) {
-            return res
-                .status(400)
-                .json({ message: "⚠️ Invalid product ID. Please check and try again." });
-        }
+        // 🧩 Detect whether it's an ObjectId or slug
+        const query = mongoose.Types.ObjectId.isValid(idOrSlug)
+            ? { _id: idOrSlug }
+            : { slug: idOrSlug };
 
-        // 1️⃣ Load product + increment views
+        // 1️⃣ Find product + increment views
         const product = await Product.findOneAndUpdate(
-            { _id: productId, isPublished: true },
+            { ...query, isPublished: true },
             { $inc: { views: 1 } },
             { new: true, lean: true }
         );
 
-        if (!product)
-            return res
-                .status(404)
-                .json({ message: "❌ Product not found or may have been removed." });
+        if (!product) {
+            return res.status(404).json({
+                message: "❌ Product not found or may have been removed.",
+            });
+        }
 
-        // 2️⃣ Active promotions
+        // 2️⃣ Fetch active promotions
         const now = new Date();
         const promotions = await Promotion.find({
             status: "active",
@@ -833,12 +876,12 @@ export const getSingleProduct = async (req, res) => {
             endDate: { $gte: now },
         }).lean();
 
-        // 3️⃣ Enrich using the SAME helper you already have
+        // 3️⃣ Enrich product data (using your existing helper)
         const enrichedProduct = await enrichProductsUnified(product, promotions, {
             selectedSku,
         });
 
-        // Per-variant stock messages (keep same logic, only friendly text)
+        // 4️⃣ Handle per-variant stock messages (same logic, cleaned)
         if (Array.isArray(enrichedProduct.variants) && enrichedProduct.variants.length) {
             enrichedProduct.variants = enrichedProduct.variants.map((v) => {
                 const vStock = v.stock ?? 0;
@@ -857,9 +900,10 @@ export const getSingleProduct = async (req, res) => {
             });
         }
 
-        // 4️⃣ Get recommendations (same as before)
+        // 5️⃣ Generate recommendations
         const modes = ["moreLikeThis", "boughtTogether", "alsoViewed"];
         const recommendations = {};
+
         for (const mode of modes) {
             const rec = await getRecommendations({
                 mode,
@@ -874,10 +918,11 @@ export const getSingleProduct = async (req, res) => {
             };
         }
 
-        // 5️⃣ Final response (exact same structure)
+        // 6️⃣ Final clean response
         return res.status(200).json({
             _id: enrichedProduct._id,
             name: enrichedProduct.name,
+            slug: enrichedProduct.slug, // ✅ include slug in response
             brand: enrichedProduct.brand || null,
             mrp: enrichedProduct.mrp,
             price: enrichedProduct.price,
@@ -899,6 +944,7 @@ export const getSingleProduct = async (req, res) => {
         return res.status(500).json({
             message:
                 "🚫 Oops! Something went wrong while fetching product details. Please try again shortly.",
+            error: err.message,
         });
     }
 };

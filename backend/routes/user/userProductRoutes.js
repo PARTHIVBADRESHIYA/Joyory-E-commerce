@@ -14,7 +14,7 @@ import {
 
 import {
     productListRateLimiter,
-    productDetailRateLimiter, 
+    productDetailRateLimiter,
 } from "../../middlewares/security/rateLimiter.js";
 
 import {
@@ -30,7 +30,7 @@ const router = express.Router();
 router.get(
     "/",
     productListRateLimiter,
-    
+
     validate(productQuerySchema),
     getAllFilteredProducts
 );
@@ -47,14 +47,14 @@ router.get("/top-categories", getTopCategories);
 router.get("/category/:slug/products", getProductsByCategory);
 
 // ✅ Products by skin type (use a distinct prefix to avoid conflicts)
-router.get("/skintype/:slug",  validate(productQuerySchema), getProductsBySkinType);
+router.get("/skintype/:slug", validate(productQuerySchema), getProductsBySkinType);
 
 // ✅ Related product info
 router.get("/top-sellers/:id", getProductWithRelated);
 
 // ✅ Single product details (dynamic routes last!)
 router.get(
-    "/:id",
+    "/:idOrSlug",
     productDetailRateLimiter,
     validate(productDetailQuerySchema),
     getSingleProduct

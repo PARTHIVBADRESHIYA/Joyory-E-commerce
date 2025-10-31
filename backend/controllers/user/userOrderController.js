@@ -140,6 +140,186 @@ export const getUserOrders = async (req, res) => {
     res.status(500).json({ message: "Failed to fetch orders" });
   }
 };
+
+// export const initiateOrderFromCart = async (req, res) => {
+//   try {
+//     if (!req.user || !req.user._id) {
+//       return res.status(401).json({ message: "Unauthorized" });
+//     }
+
+//     const user = await User.findById(req.user._id).populate("cart.product");
+//     if (!user) return res.status(404).json({ message: "User not found" });
+//     if (!user.cart?.length)
+//       return res.status(400).json({ message: "Cart is empty" });
+
+//     // -------------------- 🧮 Calculate Summary --------------------
+//     const summaryData = await calculateCartSummary(user, {
+//       discount: req.body?.discountCode || req.query?.discount,
+//       pointsToUse: req.body?.pointsToUse || req.query?.pointsToUse,
+//       giftCardCode: req.body?.giftCardCode || req.query?.giftCardCode,
+//       giftCardPin: req.body?.giftCardPin || req.query?.giftCardPin,
+//       giftCardAmount: req.body?.giftCardAmount || req.query?.giftCardAmount,
+//     });
+
+//     const {
+//       cart,
+//       priceDetails,
+//       appliedCoupon,
+//       pointsUsed,
+//       pointsDiscount,
+//       giftCardApplied,
+//       grandTotal,
+//     } = summaryData;
+
+//     if (!cart?.length) {
+//       return res.status(400).json({ message: "Cart is empty" });
+//     }
+
+//     // -------------------- 🛍 Fetch DB Products --------------------
+//     const productIds = cart.map((i) => i.product);
+//     const products = await Product.find({ _id: { $in: productIds } }).lean();
+
+//     // -------------------- 🧾 Generate Order ID --------------------
+//     const latestOrder = await Order.findOne().sort({ createdAt: -1 });
+//     const nextOrderNumber = latestOrder ? latestOrder.orderNumber + 1 : 1001;
+//     const orderId = `ORDER-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+//     // -------------------- 🧩 Build Cart Snapshot --------------------
+//     const finalCart = cart.map((item) => {
+//       const product = products.find(
+//         (p) => p._id.toString() === item.product.toString()
+//       );
+//       if (!product) throw new Error(`Product not found: ${item.product}`);
+
+//       // Verify variant exists
+//       let dbVariant = null;
+//       if (item.variant?.sku) {
+//         dbVariant = product.variants.find(
+//           (v) => v.sku?.trim() === item.variant.sku?.trim()
+//         );
+//       }
+//       if (!dbVariant && item.variant?._id) {
+//         dbVariant = product.variants.find(
+//           (v) => v._id?.toString() === item.variant._id?.toString()
+//         );
+//       }
+//       if (!dbVariant)
+//         throw new Error(`Variant not found for product: ${product.name}`);
+
+//       // ✅ Use already-calculated variant prices from summary
+//       const variantSnapshot = {
+//         sku: item.variant?.sku || dbVariant.sku || null,
+//         shadeName: item.variant?.shadeName || dbVariant.shadeName || null,
+//         hex: item.variant?.hex || dbVariant.hex || null,
+//         images:
+//           item.variant?.images?.length
+//             ? item.variant.images
+//             : dbVariant.images?.length
+//             ? dbVariant.images
+//             : product.images || [],
+//         image:
+//           item.variant?.image ||
+//           dbVariant.image ||
+//           dbVariant.images?.[0] ||
+//           product.images?.[0] ||
+//           null,
+//         stock: typeof dbVariant.stock === "number" ? dbVariant.stock : 0,
+
+//         // ✅ These come from the calculated cart summary (not DB)
+//         originalPrice: item.variant?.originalPrice ?? dbVariant.originalPrice ?? 0,
+//         discountedPrice:
+//           item.variant?.discountedPrice ??
+//           item.variant?.displayPrice ??
+//           dbVariant.discountedPrice ??
+//           0,
+//         displayPrice:
+//           item.variant?.displayPrice ??
+//           item.variant?.discountedPrice ??
+//           dbVariant.displayPrice ??
+//           0,
+//         discountPercent:
+//           item.variant?.discountPercent ??
+//           (item.variant?.originalPrice
+//             ? Math.round(
+//                 ((item.variant.originalPrice -
+//                   (item.variant.discountedPrice ?? item.variant.displayPrice)) /
+//                   item.variant.originalPrice) *
+//                   100
+//               )
+//             : 0),
+//         discountAmount:
+//           item.variant?.discountAmount ??
+//           (item.variant?.originalPrice && item.variant?.discountedPrice
+//             ? item.variant.originalPrice - item.variant.discountedPrice
+//             : 0),
+//       };
+
+//       const productSnapshot = {
+//         id: product._id,
+//         name: product.name,
+//         brand: product.brand,
+//         category: product.category,
+//       };
+
+//       return {
+//         productId: String(product._id),
+//         productSnapshot,
+//         name: product.name,
+//         quantity: item.quantity || 1,
+//         price: variantSnapshot.displayPrice, // ✅ correct discounted price
+//         variant: variantSnapshot,
+//       };
+//     });
+
+//     // -------------------- 💾 Save Order --------------------
+//     const newOrder = new Order({
+//       products: finalCart,
+//       orderId,
+//       orderNumber: nextOrderNumber,
+//       user: user._id,
+//       customerName: user.name,
+//       date: new Date(),
+//       status: "Pending",
+//       orderType: "Online",
+//       amount: grandTotal,
+//       subtotal: priceDetails.bagMrp,
+//       totalSavings:
+//         priceDetails.bagDiscount +
+//         priceDetails.couponDiscount +
+//         priceDetails.referralPointsDiscount +
+//         priceDetails.giftCardDiscount,
+//       couponDiscount: priceDetails.couponDiscount,
+//       pointsDiscount: priceDetails.referralPointsDiscount,
+//       giftCardDiscount: priceDetails.giftCardDiscount,
+//       discountCode: appliedCoupon?.code || null,
+//       paid: false,
+//       paymentStatus: "pending",
+//     });
+
+//     await newOrder.save();
+
+//     // -------------------- 📦 Response --------------------
+//     return res.status(200).json({
+//       message: "✅ Order initiated",
+//       orderId: newOrder._id,
+//       displayOrderId: newOrder.orderId,
+//       finalAmount: grandTotal,
+//       priceBreakdown: priceDetails,
+//       cart: finalCart,
+//       appliedCoupon,
+//       pointsUsed,
+//       pointsDiscount,
+//       giftCardApplied,
+//     });
+//   } catch (err) {
+//     console.error("initiateOrderFromCart error:", err);
+//     return res.status(500).json({
+//       message: "Failed to initiate order",
+//       error: err.message,
+//     });
+//   }
+// };
+
 export const initiateOrderFromCart = async (req, res) => {
   try {
     if (!req.user || !req.user._id) {
@@ -174,6 +354,10 @@ export const initiateOrderFromCart = async (req, res) => {
       return res.status(400).json({ message: "Cart is empty" });
     }
 
+    // 🧾 Debug summary before order creation
+    console.log("🧾 FINAL CART SUMMARY:", JSON.stringify(cart, null, 2));
+    console.log("💰 PRICE DETAILS:", priceDetails);
+
     // -------------------- 🛍 Fetch DB Products --------------------
     const productIds = cart.map((i) => i.product);
     const products = await Product.find({ _id: { $in: productIds } }).lean();
@@ -190,68 +374,90 @@ export const initiateOrderFromCart = async (req, res) => {
       );
       if (!product) throw new Error(`Product not found: ${item.product}`);
 
-      // Verify variant exists
-      let dbVariant = null;
-      if (item.variant?.sku) {
-        dbVariant = product.variants.find(
-          (v) => v.sku?.trim() === item.variant.sku?.trim()
-        );
-      }
-      if (!dbVariant && item.variant?._id) {
-        dbVariant = product.variants.find(
-          (v) => v._id?.toString() === item.variant._id?.toString()
-        );
-      }
-      if (!dbVariant)
-        throw new Error(`Variant not found for product: ${product.name}`);
+      let dbVariant =
+        product.variants.find(
+          (v) =>
+            String(v.sku).trim().toLowerCase() ===
+            String(item.variant?.sku).trim().toLowerCase()
+        ) ||
+        product.variants.find(
+          (v) =>
+            String(v.shadeName).trim().toLowerCase() ===
+            String(item.variant?.shadeName).trim().toLowerCase()
+        ) ||
+        product.variants.find(
+          (v) => v._id?.toString() === item.variant?._id?.toString()
+        ) ||
+        product.variants?.[0];
 
-      // ✅ Use already-calculated variant prices from summary
+      if (!dbVariant) {
+        throw new Error(`Variant not found for product: ${product.name}`);
+      }
+
+      // 🧾 Debug variant matching
+      console.log("🧾 VARIANT MATCH DETAILS:", {
+        product: product.name,
+        selectedSku: item.variant?.sku,
+        dbSku: dbVariant?.sku,
+        itemDisplayPrice: item.variant?.displayPrice,
+        dbDiscountedPrice: dbVariant?.discountedPrice,
+        dbDisplayPrice: dbVariant?.displayPrice,
+      });
+
+      // ✅ Final price priority: Use promo-applied cart variant price FIRST
+      const finalPrice =
+        item.variant?.discountedPrice ??
+        item.variant?.displayPrice ??
+        dbVariant.discountedPrice ??
+        dbVariant.displayPrice ??
+        product.price ??
+        0;
+
       const variantSnapshot = {
-        sku: item.variant?.sku || dbVariant.sku || null,
-        shadeName: item.variant?.shadeName || dbVariant.shadeName || null,
-        hex: item.variant?.hex || dbVariant.hex || null,
+        sku: dbVariant.sku || item.variant?.sku || null,
+        shadeName: dbVariant.shadeName || item.variant?.shadeName || null,
+        hex: dbVariant.hex || item.variant?.hex || null,
         images:
-          item.variant?.images?.length
-            ? item.variant.images
-            : dbVariant.images?.length
+          dbVariant.images?.length
             ? dbVariant.images
+            : item.variant?.images?.length
+            ? item.variant.images
             : product.images || [],
         image:
-          item.variant?.image ||
-          dbVariant.image ||
           dbVariant.images?.[0] ||
+          item.variant?.image ||
           product.images?.[0] ||
           null,
         stock: typeof dbVariant.stock === "number" ? dbVariant.stock : 0,
-
-        // ✅ These come from the calculated cart summary (not DB)
-        originalPrice: item.variant?.originalPrice ?? dbVariant.originalPrice ?? 0,
-        discountedPrice:
-          item.variant?.discountedPrice ??
-          item.variant?.displayPrice ??
-          dbVariant.discountedPrice ??
+        originalPrice:
+          item.variant?.originalPrice ??
+          dbVariant.originalPrice ??
+          product.price ??
           0,
-        displayPrice:
-          item.variant?.displayPrice ??
-          item.variant?.discountedPrice ??
-          dbVariant.displayPrice ??
-          0,
+        discountedPrice: finalPrice,
+        displayPrice: finalPrice,
         discountPercent:
           item.variant?.discountPercent ??
-          (item.variant?.originalPrice
+          (dbVariant.originalPrice && dbVariant.discountedPrice
             ? Math.round(
-                ((item.variant.originalPrice -
-                  (item.variant.discountedPrice ?? item.variant.displayPrice)) /
-                  item.variant.originalPrice) *
+                ((dbVariant.originalPrice - dbVariant.discountedPrice) /
+                  dbVariant.originalPrice) *
                   100
               )
             : 0),
         discountAmount:
           item.variant?.discountAmount ??
-          (item.variant?.originalPrice && item.variant?.discountedPrice
-            ? item.variant.originalPrice - item.variant.discountedPrice
+          (dbVariant.originalPrice && dbVariant.discountedPrice
+            ? dbVariant.originalPrice - dbVariant.discountedPrice
             : 0),
       };
+
+      // 🧾 Debug final price decision
+      console.log("✅ FINAL VARIANT PRICE USED:", {
+        product: product.name,
+        finalPrice,
+        variantSnapshot,
+      });
 
       const productSnapshot = {
         id: product._id,
@@ -265,7 +471,7 @@ export const initiateOrderFromCart = async (req, res) => {
         productSnapshot,
         name: product.name,
         quantity: item.quantity || 1,
-        price: variantSnapshot.displayPrice, // ✅ correct discounted price
+        price: finalPrice,
         variant: variantSnapshot,
       };
     });
@@ -297,6 +503,13 @@ export const initiateOrderFromCart = async (req, res) => {
 
     await newOrder.save();
 
+    // 🧾 Final confirmation log
+    console.log("✅ ORDER CREATED:", {
+      id: newOrder._id,
+      total: grandTotal,
+      productsCount: finalCart.length,
+    });
+
     // -------------------- 📦 Response --------------------
     return res.status(200).json({
       message: "✅ Order initiated",
@@ -311,13 +524,14 @@ export const initiateOrderFromCart = async (req, res) => {
       giftCardApplied,
     });
   } catch (err) {
-    console.error("initiateOrderFromCart error:", err);
+    console.error("❌ initiateOrderFromCart error:", err);
     return res.status(500).json({
       message: "Failed to initiate order",
       error: err.message,
     });
   }
 };
+
 
 
 // export const initiateOrderFromCart = async (req, res) => {

@@ -6,7 +6,7 @@ import Product from "../models/Product.js";
 import Brand from "../models/Brand.js";
 import mongoose from "mongoose";
 import moment from "moment-timezone";
-
+import { promotionSchema } from "../middlewares/validations/promotionValidation.js";
 
 /* ---------- helpers ---------- */
 const isObjectId = (s) => typeof s === "string" && /^[0-9a-fA-F]{24}$/.test(s);
@@ -71,112 +71,455 @@ const resolveCategories = async (categories) => {
 };
 
 // Validate & normalize promotion types
+// const normalizeByType = async (body) => {
+//   const { promotionType, promotionConfig = {}, discountUnit, discountValue } = body;
+
+//   switch (promotionType) {
+//     case "discount":
+//       if (!["percent", "amount"].includes(discountUnit))
+//         throw new Error("discountUnit must be 'percent' or 'amount'");
+//       if (!(discountValue > 0)) throw new Error("discountValue must be positive");
+//       return { promotionConfig: {} };
+
+//     case "tieredDiscount":
+//       const tiers = promotionConfig.tiers || [];
+//       if (!tiers.length) throw new Error("tieredDiscount requires non-empty tiers");
+//       tiers.forEach((t) => {
+//         if (!(t.minQty >= 1)) throw new Error("Each tier requires minQty >= 1");
+//         if (!(t.discountPercent > 0 && t.discountPercent <= 95))
+//           throw new Error("tier discountPercent must be 1..95");
+//       });
+//       return {
+//         promotionConfig: {
+//           tiers: tiers.sort((a, b) => a.minQty - b.minQty),
+//           tierScope: promotionConfig.tierScope === "perOrder" ? "perOrder" : "perProduct",
+//         },
+//       };
+//     case "bundle": {
+//       // fallback safe parsing
+//       const bundleProducts = Array.isArray(promotionConfig.bundleProducts)
+//         ? promotionConfig.bundleProducts.filter(isObjectId)
+//         : [];
+
+//       const bundlePrice = Number(promotionConfig.bundlePrice || 0);
+
+//       // ✅ Instead of throwing hard errors, just fallback gracefully
+//       return {
+//         promotionConfig: {
+//           bundleProducts,
+//           bundlePrice: bundlePrice > 0 ? bundlePrice : null, // allow null if not set
+//         },
+//       };
+//     }
+
+
+//     case "gift":
+//       const minOrderValue = Number(promotionConfig.minOrderValue || 0);
+//       if (!(minOrderValue > 0)) throw new Error("gift requires minOrderValue > 0");
+//       if (!isObjectId(promotionConfig.giftProductId || ""))
+//         throw new Error("gift requires valid giftProductId");
+//       return { promotionConfig: { minOrderValue, giftProductId: promotionConfig.giftProductId } };
+
+//     case "freeShipping":
+//       if (!(promotionConfig.minOrderValue > 0))
+//         throw new Error("freeShipping requires minOrderValue > 0");
+//       return { promotionConfig: { minOrderValue: promotionConfig.minOrderValue } };
+
+//     case "newUser":
+//       if (!(promotionConfig.discountPercent > 0 && promotionConfig.discountPercent <= 50))
+//         throw new Error("newUser discountPercent must be 1..50");
+//       if (!(promotionConfig.maxDiscount >= 0))
+//         throw new Error("newUser maxDiscount must be >= 0");
+//       return { promotionConfig };
+
+//     case "collection":
+//       if (!(promotionConfig.maxProductPrice > 0)) {
+//         throw new Error("collection requires maxProductPrice > 0");
+//       }
+//       return {
+//         promotionConfig: { maxProductPrice: promotionConfig.maxProductPrice }
+//       };
+
+//     case "paymentOffer":
+//       if (!promotionConfig.provider) throw new Error("paymentOffer requires provider");
+//       if (!Array.isArray(promotionConfig.methods) || !promotionConfig.methods.length)
+//         throw new Error("paymentOffer requires methods");
+//       return { promotionConfig };
+
+//     case "bogo":
+//       const cfg = {
+//         buyQty: Number(promotionConfig.buyQty || 1),
+//         getQty: Number(promotionConfig.getQty || 1),
+//         sameProduct: Boolean(promotionConfig.sameProduct),
+//         freeProductId: promotionConfig.freeProductId || null,
+//       };
+//       if (cfg.buyQty < 1 || cfg.getQty < 1)
+//         throw new Error("bogo requires buyQty>=1 and getQty>=1");
+//       if (!cfg.sameProduct && !isObjectId(cfg.freeProductId || ""))
+//         throw new Error("bogo with sameProduct=false requires valid freeProductId");
+//       return { promotionConfig: cfg };
+
+//     default:
+//       throw new Error("Unsupported promotionType");
+//   }
+// };
+
+
+
+// const normalizeByType = async (body) => {
+//   const { promotionType, promotionConfig = {}, discountUnit, discountValue } = body;
+
+//   switch (promotionType) {
+//     /* ------------------- FLAT DISCOUNT ------------------- */
+//     case "discount":
+//       if (!["percent", "amount"].includes(discountUnit))
+//         throw new Error("discountUnit must be 'percent' or 'amount'");
+//       if (!(discountValue > 0))
+//         throw new Error("discountValue must be positive");
+//       return { promotionConfig: {} };
+
+//     /* ------------------- TIERED DISCOUNT ------------------- */
+//     case "tieredDiscount": {
+//       const tiers = promotionConfig.tiers || [];
+//       if (!tiers.length) throw new Error("tieredDiscount requires non-empty tiers");
+
+//       tiers.forEach((t) => {
+//         if (!(t.minQty >= 1)) throw new Error("Each tier requires minQty >= 1");
+//         if (!(t.discountPercent > 0 && t.discountPercent <= 95))
+//           throw new Error("tier discountPercent must be 1..95");
+//       });
+
+//       return {
+//         promotionConfig: {
+//           tiers: tiers.sort((a, b) => a.minQty - b.minQty),
+//           tierScope: promotionConfig.tierScope === "perOrder" ? "perOrder" : "perProduct",
+//         },
+//       };
+//     }
+
+//     /* ------------------- BUNDLE DEAL ------------------- */
+//     case "bundle": {
+//       // ✅ Soft validation + graceful fallback
+//       const bundleProducts = Array.isArray(promotionConfig.bundleProducts)
+//         ? promotionConfig.bundleProducts.filter(isObjectId)
+//         : [];
+
+//       const bundlePrice = Number(promotionConfig.bundlePrice || 0);
+
+//       // ⚠️ Do not throw if admin misses one field — just sanitize
+//       return {
+//         promotionConfig: {
+//           bundleProducts,
+//           bundlePrice: bundlePrice > 0 ? bundlePrice : null, // null means not active yet
+//         },
+//       };
+//     }
+
+//     /* ------------------- GIFT PROMO ------------------- */
+//     case "gift": {
+//       const minOrderValue = Number(promotionConfig.minOrderValue || 0);
+//       const giftProductId = promotionConfig.giftProductId;
+
+//       if (!(minOrderValue > 0))
+//         throw new Error("gift requires minOrderValue > 0");
+//       if (!isObjectId(giftProductId || ""))
+//         throw new Error("gift requires valid giftProductId");
+
+//       return { promotionConfig: { minOrderValue, giftProductId } };
+//     }
+
+//     /* ------------------- FREE SHIPPING ------------------- */
+//     case "freeShipping": {
+//       const minOrderValue = Number(promotionConfig.minOrderValue || 0);
+//       if (!(minOrderValue > 0))
+//         throw new Error("freeShipping requires minOrderValue > 0");
+//       return { promotionConfig: { minOrderValue } };
+//     }
+
+//     /* ------------------- NEW USER OFFER ------------------- */
+//     case "newUser": {
+//       const dp = Number(promotionConfig.discountPercent || 0);
+//       const cap = Number(promotionConfig.maxDiscount || 0);
+
+//       if (!(dp > 0 && dp <= 50))
+//         throw new Error("newUser discountPercent must be between 1–50");
+//       if (cap < 0)
+//         throw new Error("newUser maxDiscount must be >= 0");
+
+//       return { promotionConfig: { discountPercent: dp, maxDiscount: cap } };
+//     }
+
+//     /* ------------------- COLLECTION OFFER ------------------- */
+//     case "collection": {
+//       const maxProductPrice = Number(promotionConfig.maxProductPrice || 0);
+//       if (!(maxProductPrice > 0))
+//         throw new Error("collection requires maxProductPrice > 0");
+
+//       return { promotionConfig: { maxProductPrice } };
+//     }
+
+//     /* ------------------- PAYMENT OFFER ------------------- */
+//     case "paymentOffer": {
+//       const provider = (promotionConfig.provider || "").trim();
+//       const methods = Array.isArray(promotionConfig.methods)
+//         ? promotionConfig.methods.filter(Boolean)
+//         : [];
+
+//       if (!provider)
+//         throw new Error("paymentOffer requires provider");
+//       if (!methods.length)
+//         throw new Error("paymentOffer requires at least one payment method");
+
+//       return { promotionConfig: { provider, methods } };
+//     }
+
+//     /* ------------------- BUY ONE GET ONE (BOGO) ------------------- */
+//     case "bogo": {
+//       const cfg = {
+//         buyQty: Number(promotionConfig.buyQty || 1),
+//         getQty: Number(promotionConfig.getQty || 1),
+//         sameProduct:
+//           promotionConfig.sameProduct === true ||
+//           promotionConfig.sameProduct === "true" ||
+//           promotionConfig.sameProduct === 1,
+//         freeProductId: promotionConfig.freeProductId || null,
+//       };
+
+//       if (cfg.buyQty < 1 || cfg.getQty < 1)
+//         throw new Error("bogo requires buyQty>=1 and getQty>=1");
+
+//       if (!cfg.sameProduct && !isObjectId(cfg.freeProductId || ""))
+//         throw new Error("bogo with sameProduct=false requires valid freeProductId");
+
+//       return { promotionConfig: cfg };
+//     }
+
+//     /* ------------------- UNSUPPORTED ------------------- */
+//     default:
+//       throw new Error(`Unsupported promotionType: ${promotionType}`);
+//   }
+// };
+
+
+
 const normalizeByType = async (body) => {
   const { promotionType, promotionConfig = {}, discountUnit, discountValue } = body;
+
+  const invalid = (msg) => { throw new Error(msg); };
 
   switch (promotionType) {
     case "discount":
       if (!["percent", "amount"].includes(discountUnit))
-        throw new Error("discountUnit must be 'percent' or 'amount'");
-      if (!(discountValue > 0)) throw new Error("discountValue must be positive");
-      return { promotionConfig: {} };
+        invalid("discountUnit must be 'percent' or 'amount'");
+      if (!(discountValue > 0)) invalid("discountValue must be positive");
+      return {};
 
-    case "tieredDiscount":
+    case "tieredDiscount": {
       const tiers = promotionConfig.tiers || [];
-      if (!tiers.length) throw new Error("tieredDiscount requires non-empty tiers");
+      if (!tiers.length) invalid("tieredDiscount requires non-empty tiers");
+
       tiers.forEach((t) => {
-        if (!(t.minQty >= 1)) throw new Error("Each tier requires minQty >= 1");
+        if (!(Number(t.minQty) >= 1)) invalid("Each tier requires minQty >= 1");
         if (!(t.discountPercent > 0 && t.discountPercent <= 95))
-          throw new Error("tier discountPercent must be 1..95");
+          invalid("tier discountPercent must be 1..95");
       });
-      return {
-        promotionConfig: {
-          tiers: tiers.sort((a, b) => a.minQty - b.minQty),
-          tierScope: promotionConfig.tierScope === "perOrder" ? "perOrder" : "perProduct",
-        },
-      };
-    case "bundle": {
-      // fallback safe parsing
-      const bundleProducts = Array.isArray(promotionConfig.bundleProducts)
-        ? promotionConfig.bundleProducts.filter(isObjectId)
-        : [];
 
-      const bundlePrice = Number(promotionConfig.bundlePrice || 0);
-
-      // ✅ Instead of throwing hard errors, just fallback gracefully
       return {
-        promotionConfig: {
-          bundleProducts,
-          bundlePrice: bundlePrice > 0 ? bundlePrice : null, // allow null if not set
-        },
+        tiers: tiers
+          .map(t => ({
+            minQty: Number(t.minQty),
+            discountPercent: Number(t.discountPercent),
+            extraPercent: Number(t.extraPercent || 0)
+          }))
+          .sort((a, b) => a.minQty - b.minQty),
+        tierScope: promotionConfig.tierScope === "perOrder" ? "perOrder" : "perProduct",
       };
     }
 
+    case "bundle": {
+      const bundleProducts = Array.isArray(promotionConfig.bundleProducts)
+        ? promotionConfig.bundleProducts.filter(isObjectId).map(String)
+        : [];
+      const bundlePrice = Number(promotionConfig.bundlePrice || 0);
+      return { bundleProducts, bundlePrice: bundlePrice > 0 ? bundlePrice : null };
+    }
 
-    case "gift":
+    case "gift": {
       const minOrderValue = Number(promotionConfig.minOrderValue || 0);
-      if (!(minOrderValue > 0)) throw new Error("gift requires minOrderValue > 0");
-      if (!isObjectId(promotionConfig.giftProductId || ""))
-        throw new Error("gift requires valid giftProductId");
-      return { promotionConfig: { minOrderValue, giftProductId: promotionConfig.giftProductId } };
+      const giftProductId = promotionConfig.giftProductId || promotionConfig.giftProduct;
+      if (!(minOrderValue > 0)) invalid("gift requires minOrderValue > 0");
+      if (!isObjectId(giftProductId || "")) invalid("gift requires valid giftProductId");
+      return { minOrderValue, giftProductId: String(giftProductId) };
+    }
 
-    case "freeShipping":
-      if (!(promotionConfig.minOrderValue > 0))
-        throw new Error("freeShipping requires minOrderValue > 0");
-      return { promotionConfig: { minOrderValue: promotionConfig.minOrderValue } };
+    case "freeShipping": {
+      const minOrderValue = Number(promotionConfig.minOrderValue || 0);
+      if (!(minOrderValue > 0)) invalid("freeShipping requires minOrderValue > 0");
+      return { minOrderValue };
+    }
 
-    case "newUser":
-      if (!(promotionConfig.discountPercent > 0 && promotionConfig.discountPercent <= 50))
-        throw new Error("newUser discountPercent must be 1..50");
-      if (!(promotionConfig.maxDiscount >= 0))
-        throw new Error("newUser maxDiscount must be >= 0");
-      return { promotionConfig };
+    case "newUser": {
+      const dp = Number(promotionConfig.discountPercent || 0);
+      const cap = Number(promotionConfig.maxDiscount || 0);
+      if (!(dp > 0 && dp <= 50)) invalid("newUser discountPercent must be between 1–50");
+      if (cap < 0) invalid("newUser maxDiscount must be >= 0");
+      return { discountPercent: dp, maxDiscount: cap };
+    }
 
-    case "collection":
-      if (!(promotionConfig.maxProductPrice > 0)) {
-        throw new Error("collection requires maxProductPrice > 0");
-      }
+    case "collection": {
+      const maxProductPrice = Number(promotionConfig.maxProductPrice || 0);
+      if (!(maxProductPrice > 0)) invalid("collection requires maxProductPrice > 0");
+      return { maxProductPrice };
+    }
+
+    case "paymentOffer": {
+      const provider = (promotionConfig.provider || "").trim();
+      const methods = Array.isArray(promotionConfig.methods)
+        ? promotionConfig.methods.filter(Boolean)
+        : [];
+      if (!provider) invalid("paymentOffer requires provider");
+      if (!methods.length) invalid("paymentOffer requires at least one payment method");
+      return { provider, methods };
+    }
+
+    // ✅ FIXED: Removed forced validation for BOGO
+    case "bogo": {
       return {
-        promotionConfig: { maxProductPrice: promotionConfig.maxProductPrice }
-      };
-
-    case "paymentOffer":
-      if (!promotionConfig.provider) throw new Error("paymentOffer requires provider");
-      if (!Array.isArray(promotionConfig.methods) || !promotionConfig.methods.length)
-        throw new Error("paymentOffer requires methods");
-      return { promotionConfig };
-
-    case "bogo":
-      const cfg = {
         buyQty: Number(promotionConfig.buyQty || 1),
         getQty: Number(promotionConfig.getQty || 1),
-        sameProduct: Boolean(promotionConfig.sameProduct),
+        sameProduct: !!promotionConfig.sameProduct,
         freeProductId: promotionConfig.freeProductId || null,
       };
-      if (cfg.buyQty < 1 || cfg.getQty < 1)
-        throw new Error("bogo requires buyQty>=1 and getQty>=1");
-      if (!cfg.sameProduct && !isObjectId(cfg.freeProductId || ""))
-        throw new Error("bogo with sameProduct=false requires valid freeProductId");
-      return { promotionConfig: cfg };
+    }
 
     default:
-      throw new Error("Unsupported promotionType");
+      invalid(`Unsupported promotionType: ${promotionType}`);
   }
 };
 
-/* ---------- controllers ---------- */
-
 const ALLOWED_SECTIONS = ["banner", "product", "offers"];
+
+// const createPromotion = async (req, res) => {
+//   try {
+//     // ✅ Step 1: Joi validation
+//     const { error, value } = promotionSchema.validate(req.body, { abortEarly: false });
+//     if (error) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "❌ Validation failed",
+//         errors: error.details.map(e => e.message),
+//       });
+//     }
+
+//     // Destructure after Joi validation
+//     const { startDate, endDate, displaySection } = value;
+
+//     if (!startDate || !endDate) {
+//       return res.status(400).json({ message: "❌ startDate and endDate are required" });
+//     }
+
+//     // ✅ Step 2: Convert IST → UTC
+//     const startDateUTC = parseISTtoUTC(startDate, "startDate");
+//     const endDateUTC = parseISTtoUTC(endDate, "endDate");
+
+//     if (endDateUTC <= startDateUTC) {
+//       return res.status(400).json({ message: "❌ endDate must be after startDate" });
+//     }
+
+//     // ✅ Step 3: Parse display sections
+//     let sections = [];
+//     if (typeof displaySection === "string") {
+//       sections = displaySection.split(",").map(s => s.trim().toLowerCase());
+//     } else if (Array.isArray(displaySection)) {
+//       sections = displaySection.map(s => s.trim().toLowerCase());
+//     }
+
+//     sections = sections.filter(s => ALLOWED_SECTIONS.includes(s));
+//     if (sections.length === 0) {
+//       return res.status(400).json({
+//         message: `❌ At least one valid display section must be selected (${ALLOWED_SECTIONS.join(", ")})`,
+//       });
+//     }
+
+//     // ✅ Step 4: Normalize categories & brands
+//     const categoriesInput = value.categories
+//       ? Array.isArray(value.categories)
+//         ? value.categories
+//         : [value.categories]
+//       : [];
+
+//     // ✅ Ensure we only store ObjectIds (clean, consistent)
+//     const resolvedCategories = await resolveCategories(categoriesInput);
+//     const categories = resolvedCategories
+//       .map(c => (typeof c === "object" && c._id ? c._id : c))
+//       .filter(isObjectId)
+//       .map(id => id.toString());
+
+//     const brandsInput = value.brands
+//       ? Array.isArray(value.brands)
+//         ? value.brands
+//         : [value.brands]
+//       : [];
+//     const resolvedBrands = await resolveBrands(brandsInput);
+//     const brands = resolvedBrands
+//       .map(b => (typeof b === "object" && b._id ? b._id : b))
+//       .filter(isObjectId)
+//       .map(id => id.toString());
+
+//     // ✅ Step 5: Collect images (from req.files or body)
+//     const images = [
+//       ...(req.files?.map(f => f.path) || []),
+//       ...(Array.isArray(req.body.images) ? req.body.images.filter(Boolean) : []),
+//       ...(req.body.image ? [req.body.image] : []),
+//     ];
+
+//     // ✅ Step 6: Normalize promotionConfig based on type
+//     const promotionConfig = await normalizeByType(value);
+
+//     // ✅ Step 7: Calculate status (active / upcoming / expired)
+//     const status = calculateStatus(startDateUTC, endDateUTC);
+//     const isScheduled = status === "upcoming";
+
+//     // ✅ Step 8: Create promotion
+//     const promotion = await Promotion.create({
+//       ...value,
+//       categories,
+//       brands,
+//       images,
+//       promotionConfig,           // now a plain object
+//       startDate: startDateUTC,
+//       endDate: endDateUTC,
+//       status,
+//       isScheduled,
+//       displaySection: sections,
+//     });
+
+//     res.status(201).json({
+//       success: true,
+//       message: "✅ Promotion created successfully",
+//       promotion,
+//     });
+//   } catch (err) {
+//     console.error("❌ Create Promotion Error:", err);
+//     res.status(400).json({
+//       success: false,
+//       message: "❌ Failed to create promotion",
+//       error: err.message,
+//     });
+//   }
+// };
 
 const createPromotion = async (req, res) => {
   try {
-    const { startDate, endDate, displaySection } = req.body;
+    // ✅ Step 1: Extract body directly (no Joi validation)
+    const value = req.body;
+    const { startDate, endDate, displaySection } = value;
 
+    // ✅ Step 2: Basic date validation
     if (!startDate || !endDate) {
       return res.status(400).json({ message: "❌ startDate and endDate are required" });
     }
 
-    // Parse IST → UTC
     const startDateUTC = parseISTtoUTC(startDate, "startDate");
     const endDateUTC = parseISTtoUTC(endDate, "endDate");
 
@@ -184,52 +527,63 @@ const createPromotion = async (req, res) => {
       return res.status(400).json({ message: "❌ endDate must be after startDate" });
     }
 
-    // Parse and validate displaySection
-    if (!displaySection) {
-      return res.status(400).json({
-        message: `❌ At least one display section must be selected (${ALLOWED_SECTIONS.join(", ")})`,
-      });
-    }
-
+    // ✅ Step 3: Parse display sections
     let sections = [];
     if (typeof displaySection === "string") {
-      sections = displaySection.split(",").map((s) => s.trim().toLowerCase());
+      sections = displaySection.split(",").map(s => s.trim().toLowerCase());
     } else if (Array.isArray(displaySection)) {
-      sections = displaySection.map((s) => s.trim().toLowerCase());
+      sections = displaySection.map(s => s.trim().toLowerCase());
     }
 
-    // Keep only valid sections
-    sections = sections.filter((s) => ALLOWED_SECTIONS.includes(s));
+    sections = sections.filter(s => ALLOWED_SECTIONS.includes(s));
     if (sections.length === 0) {
       return res.status(400).json({
         message: `❌ At least one valid display section must be selected (${ALLOWED_SECTIONS.join(", ")})`,
       });
     }
 
-    // ✅ Normalize categories and brands to arrays
-    const categoriesInput = req.body.categories
-      ? Array.isArray(req.body.categories) ? req.body.categories : [req.body.categories]
+    // ✅ Step 4: Normalize categories & brands
+    const categoriesInput = value.categories
+      ? Array.isArray(value.categories)
+        ? value.categories
+        : [value.categories]
       : [];
-    const categories = await resolveCategories(categoriesInput);
 
-    const brandsInput = req.body.brands
-      ? Array.isArray(req.body.brands) ? req.body.brands : [req.body.brands]
+    const resolvedCategories = await resolveCategories(categoriesInput);
+    const categories = resolvedCategories
+      .map(c => (typeof c === "object" && c._id ? c._id : c))
+      .filter(isObjectId)
+      .map(id => id.toString());
+
+    const brandsInput = value.brands
+      ? Array.isArray(value.brands)
+        ? value.brands
+        : [value.brands]
       : [];
-    const brands = await resolveBrands(brandsInput);
 
+    const resolvedBrands = await resolveBrands(brandsInput);
+    const brands = resolvedBrands
+      .map(b => (typeof b === "object" && b._id ? b._id : b))
+      .filter(isObjectId)
+      .map(id => id.toString());
+
+    // ✅ Step 5: Collect images
     const images = [
-      ...(req.files?.map((f) => f.path) || []),
+      ...(req.files?.map(f => f.path) || []),
       ...(Array.isArray(req.body.images) ? req.body.images.filter(Boolean) : []),
       ...(req.body.image ? [req.body.image] : []),
     ];
 
-    const { promotionConfig } = await normalizeByType(req.body);
+    // ✅ Step 6: Normalize promotionConfig (light logic)
+    const promotionConfig = await normalizeByType(value);
 
+    // ✅ Step 7: Calculate status (active / upcoming / expired)
     const status = calculateStatus(startDateUTC, endDateUTC);
     const isScheduled = status === "upcoming";
 
+    // ✅ Step 8: Create promotion
     const promotion = await Promotion.create({
-      ...req.body,
+      ...value,
       categories,
       brands,
       images,
@@ -241,11 +595,103 @@ const createPromotion = async (req, res) => {
       displaySection: sections,
     });
 
-    res.status(201).json({ message: "✅ Promotion created", id: promotion._id, promotion });
+    // ✅ Step 9: Return
+    res.status(201).json({
+      success: true,
+      message: "✅ Promotion created successfully",
+      promotion,
+    });
   } catch (err) {
-    res.status(400).json({ message: "❌ Failed to create promotion", error: err.message });
+    console.error("❌ Create Promotion Error:", err);
+    res.status(400).json({
+      success: false,
+      message: "❌ Failed to create promotion",
+      error: err.message,
+    });
   }
 };
+
+
+
+// const createPromotion = async (req, res) => {
+//   try {
+
+//     const { startDate, endDate, displaySection } = req.body;
+
+//     if (!startDate || !endDate) {
+//       return res.status(400).json({ message: "❌ startDate and endDate are required" });
+//     }
+
+//     // Parse IST → UTC
+//     const startDateUTC = parseISTtoUTC(startDate, "startDate");
+//     const endDateUTC = parseISTtoUTC(endDate, "endDate");
+
+//     if (endDateUTC <= startDateUTC) {
+//       return res.status(400).json({ message: "❌ endDate must be after startDate" });
+//     }
+
+//     // Parse and validate displaySection
+//     if (!displaySection) {
+//       return res.status(400).json({
+//         message: `❌ At least one display section must be selected (${ALLOWED_SECTIONS.join(", ")})`,
+//       });
+//     }
+
+//     let sections = [];
+//     if (typeof displaySection === "string") {
+//       sections = displaySection.split(",").map((s) => s.trim().toLowerCase());
+//     } else if (Array.isArray(displaySection)) {
+//       sections = displaySection.map((s) => s.trim().toLowerCase());
+//     }
+
+//     // Keep only valid sections
+//     sections = sections.filter((s) => ALLOWED_SECTIONS.includes(s));
+//     if (sections.length === 0) {
+//       return res.status(400).json({
+//         message: `❌ At least one valid display section must be selected (${ALLOWED_SECTIONS.join(", ")})`,
+//       });
+//     }
+
+//     // ✅ Normalize categories and brands to arrays
+//     const categoriesInput = req.body.categories
+//       ? Array.isArray(req.body.categories) ? req.body.categories : [req.body.categories]
+//       : [];
+//     const categories = await resolveCategories(categoriesInput);
+
+//     const brandsInput = req.body.brands
+//       ? Array.isArray(req.body.brands) ? req.body.brands : [req.body.brands]
+//       : [];
+//     const brands = await resolveBrands(brandsInput);
+
+//     const images = [
+//       ...(req.files?.map((f) => f.path) || []),
+//       ...(Array.isArray(req.body.images) ? req.body.images.filter(Boolean) : []),
+//       ...(req.body.image ? [req.body.image] : []),
+//     ];
+
+//     const { promotionConfig } = await normalizeByType(req.body);
+
+//     const status = calculateStatus(startDateUTC, endDateUTC);
+//     const isScheduled = status === "upcoming";
+
+//     const promotion = await Promotion.create({
+//       ...req.body,
+//       categories,
+//       brands,
+//       images,
+//       promotionConfig,
+//       startDate: startDateUTC,
+//       endDate: endDateUTC,
+//       status,
+//       isScheduled,
+//       displaySection: sections,
+//     });
+
+//     res.status(201).json({ message: "✅ Promotion created", id: promotion._id, promotion });
+//   } catch (err) {
+//     res.status(400).json({ message: "❌ Failed to create promotion", error: err.message });
+//   }
+// };
 
 const getPromotionById = async (req, res) => {
   try {

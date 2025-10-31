@@ -229,7 +229,6 @@ export const uploadProductWithVariants = multer({
 }).any();
 
 
-
 // -------------------- Video Upload --------------------
 export const uploadVideo = multer({
   storage: new CloudinaryStorage({
@@ -260,7 +259,6 @@ export const uploadVideo = multer({
     files: 1,
   },
 });
-
 
 // -------------------- Universal Image/Video Uploader --------------------
 export const uploadMedia = multer({
@@ -308,7 +306,6 @@ export const uploadMedia = multer({
     files: 5, // allow up to 5 files
   },
 });
-
 
 // -------------------- Exported Uploaders --------------------
 export const uploadEcard = makeCloudinaryPdfUploader("ecards", 1);
