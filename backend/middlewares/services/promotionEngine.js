@@ -1284,18 +1284,14 @@ export const applyPromotions = async (itemsInput, ctx = {}) => {
             if (!isProductLevel) continue;
 
             for (const line of cart) {
-                console.log("🔍 Checking promo:", promo.campaignName, "for", line.name);
 
                 if (!productMatchesPromo(line.product, promo)) {
-                    console.log("❌ productMatchesPromo failed for", line.product.name, "with", promo.campaignName);
                     continue;
                 }
                 if (!isPromoEligibleForProduct(line.product, promo)) {
-                    console.log("❌ isPromoEligibleForProduct failed for", line.product.name, "with", promo.campaignName);
                     continue;
                 }
                 if (!productMatchesConditions(line.product, promo.conditions)) {
-                    console.log("❌ productMatchesConditions failed for", line.product.name, "with", promo.campaignName);
                     continue;
                 }
 

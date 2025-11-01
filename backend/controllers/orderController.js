@@ -230,56 +230,60 @@ export const getAllOrders = async (req, res) => {
 
 export const getOrderSummary = async (req, res) => {
     try {
+        const { range = "7d" } = req.query; // options: 1d, 7d, 1m, 1y
+
+        // ---- Helper: Date Range Builder ----
         const now = new Date();
-
-        // Current week (last 7 days)
-        const lastWeekStart = new Date();
-        lastWeekStart.setDate(now.getDate() - 7);
-
-        // Previous week (7–14 days ago)
-        const prevWeekStart = new Date();
-        prevWeekStart.setDate(now.getDate() - 14);
-
-        // --- Current stats ---
-        const current = {
-            totalOrders: await Order.countDocuments(), // ✅ all time
-            totalOrdersWeek: await Order.countDocuments({ createdAt: { $gte: lastWeekStart } }), // ✅ for trend only
-
-            newOrders: await Order.countDocuments({ createdAt: { $gte: lastWeekStart } }),
-
-            completedOrders: await Order.countDocuments({
-                status: { $in: ["Delivered", "Completed"] },
-                createdAt: { $gte: lastWeekStart }
-            }),
-
-            cancelledOrders: await Order.countDocuments({
-                status: "Cancelled",
-                createdAt: { $gte: lastWeekStart }
-            })
+        const getDateRange = (type) => {
+            const end = new Date(now);
+            const start = new Date(now);
+            switch (type) {
+                case "1d":
+                    start.setDate(now.getDate() - 1);
+                    break;
+                case "7d":
+                    start.setDate(now.getDate() - 7);
+                    break;
+                case "1m":
+                    start.setMonth(now.getMonth() - 1);
+                    break;
+                case "1y":
+                    start.setFullYear(now.getFullYear() - 1);
+                    break;
+                default:
+                    start.setDate(now.getDate() - 7);
+            }
+            return { start, end };
         };
 
-        // --- Previous week stats ---
-        const prev = {
-            totalOrdersWeek: await Order.countDocuments({
-                createdAt: { $gte: prevWeekStart, $lt: lastWeekStart }
-            }),
+        const { start: currentStart, end: currentEnd } = getDateRange(range);
 
-            newOrders: await Order.countDocuments({
-                createdAt: { $gte: prevWeekStart, $lt: lastWeekStart }
-            }),
-
-            completedOrders: await Order.countDocuments({
-                status: { $in: ["Delivered", "Completed"] },
-                createdAt: { $gte: prevWeekStart, $lt: lastWeekStart }
-            }),
-
-            cancelledOrders: await Order.countDocuments({
-                status: "Cancelled",
-                createdAt: { $gte: prevWeekStart, $lt: lastWeekStart }
-            })
+        // ---- Helper: Previous Range ----
+        const getPreviousRange = (type) => {
+            const prevEnd = new Date(currentStart);
+            const prevStart = new Date(currentStart);
+            switch (type) {
+                case "1d":
+                    prevStart.setDate(prevEnd.getDate() - 1);
+                    break;
+                case "7d":
+                    prevStart.setDate(prevEnd.getDate() - 7);
+                    break;
+                case "1m":
+                    prevStart.setMonth(prevEnd.getMonth() - 1);
+                    break;
+                case "1y":
+                    prevStart.setFullYear(prevEnd.getFullYear() - 1);
+                    break;
+                default:
+                    prevStart.setDate(prevEnd.getDate() - 7);
+            }
+            return { prevStart, prevEnd };
         };
 
-        // Always return { change, trend }
+        const { prevStart, prevEnd } = getPreviousRange(range);
+
+        // ---- Helper: Percentage Change ----
         const pctChange = (curr, prev) => {
             if (prev === 0 && curr > 0) return { change: 100, trend: "up" };
             if (prev === 0 && curr === 0) return { change: 0, trend: "no-change" };
@@ -287,40 +291,163 @@ export const getOrderSummary = async (req, res) => {
             const diff = ((curr - prev) / prev) * 100;
             return {
                 change: Math.abs(diff.toFixed(2)),
-                trend: diff > 0 ? "up" : diff < 0 ? "down" : "no-change"
+                trend: diff > 0 ? "up" : diff < 0 ? "down" : "no-change",
             };
         };
 
+        // ===== Current Range Data =====
+        const [totalOrders, newOrders, completedOrders, cancelledOrders] = await Promise.all([
+            Order.countDocuments({ createdAt: { $gte: currentStart, $lte: currentEnd } }), // ✅ range-based total
+            Order.countDocuments({ createdAt: { $gte: currentStart, $lte: currentEnd } }), // ✅ same as total for now
+            Order.countDocuments({
+                status: { $in: ["Delivered", "Completed"] },
+                createdAt: { $gte: currentStart, $lte: currentEnd },
+            }),
+            Order.countDocuments({
+                status: "Cancelled",
+                createdAt: { $gte: currentStart, $lte: currentEnd },
+            }),
+        ]);
+
+        // ===== Previous Range Data =====
+        const [prevTotalOrders, prevNewOrders, prevCompletedOrders, prevCancelledOrders] = await Promise.all([
+            Order.countDocuments({ createdAt: { $gte: prevStart, $lt: prevEnd } }),
+            Order.countDocuments({ createdAt: { $gte: prevStart, $lt: prevEnd } }),
+            Order.countDocuments({
+                status: { $in: ["Delivered", "Completed"] },
+                createdAt: { $gte: prevStart, $lt: prevEnd },
+            }),
+            Order.countDocuments({
+                status: "Cancelled",
+                createdAt: { $gte: prevStart, $lt: prevEnd },
+            }),
+        ]);
+
+        // ===== Response =====
         res.json({
+            range,
             totalOrders: {
-                count: current.totalOrders, // ✅ all-time total
-                change: pctChange(current.totalOrdersWeek, prev.totalOrdersWeek), // ✅ weekly trend
+                count: totalOrders,
+                change: pctChange(totalOrders, prevTotalOrders),
+                note: `Last ${range}`,
             },
             newOrders: {
-                count: current.newOrders,
-                change: pctChange(current.newOrders, prev.newOrders),
-                note: "last 7 days"
+                count: newOrders,
+                change: pctChange(newOrders, prevNewOrders),
+                note: `Last ${range}`,
             },
             completedOrders: {
-                count: current.completedOrders,
-                change: pctChange(current.completedOrders, prev.completedOrders),
-                note: "last 7 days"
+                count: completedOrders,
+                change: pctChange(completedOrders, prevCompletedOrders),
+                note: `Last ${range}`,
             },
             cancelledOrders: {
-                count: current.cancelledOrders,
-                change: pctChange(current.cancelledOrders, prev.cancelledOrders),
-                note: "last 7 days"
-            }
+                count: cancelledOrders,
+                change: pctChange(cancelledOrders, prevCancelledOrders),
+                note: `Last ${range}`,
+            },
         });
-
     } catch (error) {
         console.error(error);
         res.status(500).json({
-            message: "Error getting summary",
-            error: error.message
+            message: "Error generating order summary",
+            error: error.message,
         });
     }
 };
+// export const getOrderSummary = async (req, res) => {
+//     try {
+//         const now = new Date();
+
+//         // Current week (last 7 days)
+//         const lastWeekStart = new Date();
+//         lastWeekStart.setDate(now.getDate() - 7);
+
+//         // Previous week (7–14 days ago)
+//         const prevWeekStart = new Date();
+//         prevWeekStart.setDate(now.getDate() - 14);
+
+//         // --- Current stats ---
+//         const current = {
+//             totalOrders: await Order.countDocuments(), // ✅ all time
+//             totalOrdersWeek: await Order.countDocuments({ createdAt: { $gte: lastWeekStart } }), // ✅ for trend only
+
+//             newOrders: await Order.countDocuments({ createdAt: { $gte: lastWeekStart } }),
+
+//             completedOrders: await Order.countDocuments({
+//                 status: { $in: ["Delivered", "Completed"] },
+//                 createdAt: { $gte: lastWeekStart }
+//             }),
+
+//             cancelledOrders: await Order.countDocuments({
+//                 status: "Cancelled",
+//                 createdAt: { $gte: lastWeekStart }
+//             })
+//         };
+
+//         // --- Previous week stats ---
+//         const prev = {
+//             totalOrdersWeek: await Order.countDocuments({
+//                 createdAt: { $gte: prevWeekStart, $lt: lastWeekStart }
+//             }),
+
+//             newOrders: await Order.countDocuments({
+//                 createdAt: { $gte: prevWeekStart, $lt: lastWeekStart }
+//             }),
+
+//             completedOrders: await Order.countDocuments({
+//                 status: { $in: ["Delivered", "Completed"] },
+//                 createdAt: { $gte: prevWeekStart, $lt: lastWeekStart }
+//             }),
+
+//             cancelledOrders: await Order.countDocuments({
+//                 status: "Cancelled",
+//                 createdAt: { $gte: prevWeekStart, $lt: lastWeekStart }
+//             })
+//         };
+
+//         // Always return { change, trend }
+//         const pctChange = (curr, prev) => {
+//             if (prev === 0 && curr > 0) return { change: 100, trend: "up" };
+//             if (prev === 0 && curr === 0) return { change: 0, trend: "no-change" };
+
+//             const diff = ((curr - prev) / prev) * 100;
+//             return {
+//                 change: Math.abs(diff.toFixed(2)),
+//                 trend: diff > 0 ? "up" : diff < 0 ? "down" : "no-change"
+//             };
+//         };
+
+//         res.json({
+//             totalOrders: {
+//                 count: current.totalOrders, // ✅ all-time total
+//                 change: pctChange(current.totalOrdersWeek, prev.totalOrdersWeek), // ✅ weekly trend
+//             },
+//             newOrders: {
+//                 count: current.newOrders,
+//                 change: pctChange(current.newOrders, prev.newOrders),
+//                 note: "last 7 days"
+//             },
+//             completedOrders: {
+//                 count: current.completedOrders,
+//                 change: pctChange(current.completedOrders, prev.completedOrders),
+//                 note: "last 7 days"
+//             },
+//             cancelledOrders: {
+//                 count: current.cancelledOrders,
+//                 change: pctChange(current.cancelledOrders, prev.cancelledOrders),
+//                 note: "last 7 days"
+//             }
+//         });
+
+//     } catch (error) {
+//         console.error(error);
+//         res.status(500).json({
+//             message: "Error getting summary",
+//             error: error.message
+//         });
+//     }
+// };
 
 // export const getOrderById = async (req, res) => {
 //     try {
@@ -335,6 +462,22 @@ export const getOrderSummary = async (req, res) => {
 
 //         if (!order) return res.status(404).json({ message: "Order not found" });
 
+//         // --- Build timeline from trackingHistory & shipment ---
+//         const timeline = (order.trackingHistory || []).map(t => ({
+//             status: t.status,
+//             timestamp: t.timestamp,
+//             location: t.location || null
+//         }));
+
+//         // Include shipment status as a final step if available
+//         if (order.shipment?.status) {
+//             timeline.push({
+//                 status: order.shipment.status,
+//                 timestamp: order.shipment.assignedAt || null,
+//                 location: order.shipment.courier_name || null
+//             });
+//         }
+
 //         const response = {
 //             // --- Summary ---
 //             _id: order._id,
@@ -342,6 +485,7 @@ export const getOrderSummary = async (req, res) => {
 //             orderNumber: order.orderNumber,
 //             date: order.date,
 //             status: order.status,
+//             currentStatus: order.orderStatus || order.shipment?.status || order.status,
 //             orderType: order.orderType,
 //             amount: order.amount,
 
@@ -367,9 +511,9 @@ export const getOrderSummary = async (req, res) => {
 
 //             // --- Shipping & Payment ---
 //             shippingAddress: order.shippingAddress,
-//             courierName: order.courierName || null,
-//             trackingNumber: order.trackingNumber || null,
-//             expectedDelivery: order.expectedDelivery || null,
+//             courierName: order.shipment?.courier_name || null,
+//             trackingNumber: order.shipment?.awb_code || null,
+//             expectedDelivery: null, // compute if you have ETA
 //             payment: {
 //                 method: order.paymentMethod || "Manual",
 //                 status: order.paymentStatus || "Pending",
@@ -387,15 +531,8 @@ export const getOrderSummary = async (req, res) => {
 //                 ? { id: order.affiliate._id, name: order.affiliate.name, referralCode: order.affiliate.referralCode }
 //                 : null,
 
-//             // --- Timeline (for tracking UI) ---
-//             timeline: {
-//                 orderedAt: order.date,
-//                 confirmedAt: order.confirmedAt,
-//                 shippedAt: order.shippedAt,
-//                 outForDeliveryAt: order.outForDeliveryAt,
-//                 deliveredAt: order.deliveredAt,
-//                 returnInitiatedAt: order.returnInitiatedAt
-//             }
+//             // --- Timeline (with status) ---
+//             timeline
 //         };
 
 //         res.json(response);
@@ -404,9 +541,6 @@ export const getOrderSummary = async (req, res) => {
 //         res.status(500).json({ message: "Failed to fetch order", error: err.message });
 //     }
 // };
-
-
-// ✅ Admin: Update order status
 export const getOrderById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -420,82 +554,131 @@ export const getOrderById = async (req, res) => {
 
         if (!order) return res.status(404).json({ message: "Order not found" });
 
-        // --- Build timeline from trackingHistory & shipment ---
+        // 🧭 Timeline history (status progress)
         const timeline = (order.trackingHistory || []).map(t => ({
             status: t.status,
-            timestamp: t.timestamp,
-            location: t.location || null
+            date: t.timestamp,
+            location: t.location || "",
         }));
 
-        // Include shipment status as a final step if available
+        // Include shipment status if available
         if (order.shipment?.status) {
             timeline.push({
                 status: order.shipment.status,
-                timestamp: order.shipment.assignedAt || null,
-                location: order.shipment.courier_name || null
+                date: order.shipment.assignedAt || null,
+                location: order.shipment.courier_name || "",
             });
         }
 
-        const response = {
-            // --- Summary ---
-            _id: order._id,
-            orderId: order.orderId,
+        // 🧾 Order summary
+        const summary = {
+            orderId: order.orderId || order._id,
             orderNumber: order.orderNumber,
             date: order.date,
+            totalAmount: order.amount,
             status: order.status,
             currentStatus: order.orderStatus || order.shipment?.status || order.status,
-            orderType: order.orderType,
-            amount: order.amount,
-
-            // --- Customer ---
-            customer: {
-                id: order.user?._id,
-                name: order.user?.name || order.customerName,
-                email: order.user?.email,
-                phone: order.user?.phone,
-            },
-
-            // --- Products ---
-            products: order.products.map(p => ({
-                id: p.productId?._id,
-                name: p.productId?.name,
-                brand: p.productId?.brand,
-                category: p.productId?.category,
-                image: p.productId?.images?.[0] || null,
-                quantity: p.quantity,
-                price: p.price,
-                total: p.quantity * p.price
-            })),
-
-            // --- Shipping & Payment ---
-            shippingAddress: order.shippingAddress,
-            courierName: order.shipment?.courier_name || null,
-            trackingNumber: order.shipment?.awb_code || null,
-            expectedDelivery: null, // compute if you have ETA
-            payment: {
-                method: order.paymentMethod || "Manual",
-                status: order.paymentStatus || "Pending",
-                transactionId: order.transactionId || null,
-                amount: order.amount
-            },
-
-            // --- Discounts & Affiliates ---
-            discount: {
-                code: order.discountCode,
-                discountAmount: order.discountAmount || 0,
-                buyerDiscountAmount: order.buyerDiscountAmount || 0,
-            },
-            affiliate: order.affiliate
-                ? { id: order.affiliate._id, name: order.affiliate.name, referralCode: order.affiliate.referralCode }
-                : null,
-
-            // --- Timeline (with status) ---
-            timeline
+            orderType: order.orderType || "Online",
         };
 
-        res.json(response);
+        // 👤 Customer details
+        const customer = {
+            id: order.user?._id || null,
+            name: order.user?.name || order.customerName || "",
+            email: order.user?.email || "",
+            phone: order.user?.phone || "",
+        };
+
+        // 📦 Product details (for both detail view + tracking view)
+        const products = order.products.map((p) => ({
+            id: p.productId?._id,
+            name: p.productId?.name,
+            brand: p.productId?.brand || "Unknown",
+            category: p.productId?.category,
+            image: p.productId?.images?.[0] || null,
+            quantity: p.quantity,
+            price: p.price,
+            total: p.quantity * p.price,
+        }));
+
+        // 🚚 Shipping details
+        const shipping = {
+            name: order.shippingAddress?.name,
+            phone: order.shippingAddress?.phone,
+            address: [
+                order.shippingAddress?.addressLine1,
+                order.shippingAddress?.city,
+                order.shippingAddress?.state,
+                order.shippingAddress?.pincode,
+            ].filter(Boolean).join(", "),
+            expectedDelivery: order.expectedDelivery || null,
+        };
+
+        // 💳 Payment details
+        const payment = {
+            method: order.paymentMethod || "Not specified",
+            status: order.paymentStatus || "Pending",
+            transactionId: order.transactionId || null,
+            amount: order.amount,
+        };
+
+        // 🎁 Discount and affiliate info
+        const discount = order.discount
+            ? {
+                code: order.discount.code,
+                type: order.discount.type,
+                value: order.discount.value,
+                discountAmount: order.discountAmount || 0,
+                buyerDiscountAmount: order.buyerDiscountAmount || 0,
+            }
+            : null;
+
+        const affiliate = order.affiliate
+            ? {
+                id: order.affiliate._id,
+                name: order.affiliate.name,
+                referralCode: order.affiliate.referralCode,
+            }
+            : null;
+
+        // 📦 Shipment info
+        const shipment = order.shipment
+            ? {
+                courierName: order.shipment.courier_name || null,
+                trackingNumber: order.shipment.awb_code || null,
+                currentStatus: order.shipment.status || null,
+                assignedAt: order.shipment.assignedAt || null,
+            }
+            : null;
+
+        // 🧠 Compute totals
+        const subtotal = order.products.reduce((acc, p) => acc + p.price * p.quantity, 0);
+        const shippingCharge = order.shippingCharge || 0;
+        const tax = order.taxAmount || 0;
+        const totalPrice = subtotal + shippingCharge + tax - (order.discountAmount || 0);
+
+        // 🧩 Final structured response (for both UIs)
+        const response = {
+            summary,
+            customer,
+            products,
+            shipping,
+            payment,
+            discount,
+            affiliate,
+            shipment,
+            totals: {
+                subtotal,
+                shipping: shippingCharge,
+                tax,
+                totalPrice,
+            },
+            timeline,
+        };
+
+        res.status(200).json(response);
     } catch (err) {
-        console.error(err);
+        console.error("Error fetching order:", err);
         res.status(500).json({ message: "Failed to fetch order", error: err.message });
     }
 };
