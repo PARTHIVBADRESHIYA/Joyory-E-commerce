@@ -375,6 +375,7 @@ const variantSchema = new mongoose.Schema({
     isActive: { type: Boolean, default: true },
     createdAt: { type: Date, default: Date.now },
     discountedPrice: { type: Number, default: null },
+    displayPrice: { type: Number, default: null },
     familyKey: { type: String },
     toneKeys: [{ type: String }],
     undertoneKeys: [{ type: String }],
