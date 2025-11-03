@@ -630,12 +630,13 @@ export const getProductsByCategory = async (req, res) => {
             rating: { avgRating: -1 },
         };
 
-        // 6️⃣ Fetch products (slug included)
+        // 6️⃣ Fetch products (include all needed fields & relations)
         const total = await Product.countDocuments(finalFilter);
         const products = await Product.find(finalFilter)
-            .select("name slug price discountedPrice images variants category skinTypes formulation isPublished createdAt")
-            .populate("skinTypes", "name slug isActive")
-            .populate("formulation", "name slug isActive")
+            .populate("brand", "name slug isActive") // ✅ brand
+            .populate("category", "name slug") // ✅ category
+            .populate("skinTypes", "name slug isActive") // ✅ skin types
+            .populate("formulation", "name slug isActive") // ✅ formulation
             .sort(sortOptions[sort] || { createdAt: -1 })
             .skip((page - 1) * limit)
             .limit(limit)
@@ -680,9 +681,9 @@ export const getProductsByCategory = async (req, res) => {
                 prod.variants = prod.variants.map(v => {
                     const vStock = v.stock ?? 0;
                     if (vStock <= 0) v.stockMessage = "⛔ Currently out of stock — check back soon!";
-                    else if (vStock === 1) v.stockMessage = "🔥 Almost gone! Only 1 left.";
-                    else if (vStock <= 3) v.stockMessage = `⚡ Hurry! Just ${vStock} left.`;
-                    else if (vStock < 10) v.stockMessage = `💨 Few left — ${vStock} available!`;
+                    else if (vStock === 1) v.stockMessage = "🔥 Almost gone! Only 1 left in stock.";
+                    else if (vStock <= 3) v.stockMessage = `⚡ Hurry! Just ${vStock} piece${vStock > 1 ? "s" : ""} remaining.`;
+                    else if (vStock < 10) v.stockMessage = `💨 Only a few left — ${vStock} available!`;
                     else v.stockMessage = null;
                     return v;
                 });
@@ -690,7 +691,7 @@ export const getProductsByCategory = async (req, res) => {
             return prod;
         });
 
-        // 🔟 Make sure slug exists (generate if missing)
+        // 🔟 Ensure slug exists
         const { generateUniqueSlug } = await import("../../middlewares/utils/slug.js");
         for (const prod of enrichedWithStockMsg) {
             if (!prod.slug) {
@@ -700,9 +701,11 @@ export const getProductsByCategory = async (req, res) => {
             }
         }
 
-        // 11️⃣ Reattach skinTypes/formulation
+        // 11️⃣ Reattach relations (to ensure they persist)
         const productsWithRelations = enrichedWithStockMsg.map((prod, i) => ({
             ...prod,
+            brand: products[i].brand || null,
+            category: products[i].category || null,
             skinTypes: products[i].skinTypes || [],
             formulation: products[i].formulation || null,
         }));
@@ -718,13 +721,13 @@ export const getProductsByCategory = async (req, res) => {
                 .filter(Boolean);
         }
 
-        // ✅ 13️⃣ Final response (slug included)
+        // ✅ 13️⃣ Final response
         return res.status(200).json({
             category,
             breadcrumb: ancestors,
             products: productsWithRelations.map(p => ({
                 ...p,
-                slug: p.slug, // ✅ always include slug
+                slug: p.slug,
             })),
             pagination: {
                 page,

@@ -68,7 +68,7 @@ const PromotionSchema = new mongoose.Schema(
         targetAudience: {
             type: String,
             enum: ["all", "new", "existing"],
-            default: "all",
+            default: "all", 
         },
         images: [{ type: String }],
         scope: { type: String, enum: ["category", "product", "brand", "global"], default: "global" },

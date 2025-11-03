@@ -72,7 +72,6 @@ export const productMatchesPromo = (product, promo) => {
 
     // ✅ 1️⃣ Product-specific match
     if (promoProducts.length && promoProducts.includes(pid)) {
-        console.log(`✅ Matched by Product: ${product.name}`);
         return true;
     }
 
@@ -93,38 +92,23 @@ export const productMatchesPromo = (product, promo) => {
 
         // Match check
         const matched = [...productCatIds].some(cid => promoCategories.includes(cid));
-
-        if (matched) {
-            console.log(`✅ Matched by Category: ${product.name}`);
-            return true;
-        } else if (process.env.NODE_ENV === "development") {
-            console.log("❌ Not matched category", {
-                promoCats: promoCategories,
-                productCats: [...productCatIds],
-                productName: product.name,
-            });
-        }
+        if (matched) return true;
     }
 
     // ✅ 3️⃣ Brand match
     if (promoBrands.length && brandId) {
         const matched = promoBrands.includes(String(brandId));
-        if (matched) {
-            console.log(`✅ Matched by Brand: ${product.name}`);
-            return true;
-        }
+        if (matched) return true;
     }
 
     // ✅ 4️⃣ Global promo (applies to all products)
     const isGlobal = !promoProducts.length && !promoCategories.length && !promoBrands.length;
-    if (isGlobal) {
-        console.log("✅ Global Promo applies to all products");
-        return true;
-    }
+    if (isGlobal) return true;
 
     // ❌ No match found
     return false;
 };
+
 
 export const asMoney = (num) => {
     if (!num || isNaN(num)) return "0";
