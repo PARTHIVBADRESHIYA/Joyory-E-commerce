@@ -723,7 +723,11 @@ export async function createShiprocketOrder(order) {
         billing_state: order.shippingAddress.state,
         billing_country: "India",
         billing_email: order.user?.email || "guest@example.com",
-        billing_phone: order.user?.phone || "9876543210",
+        // ✅ Phone priority: shippingAddress > user > default
+        billing_phone:
+            order.shippingAddress?.phone ||
+            order.user?.phone ||
+            "9876543210",
         shipping_is_billing: true,
         order_items: order.products.map(item => ({
             name: item.productId?.name || item.name || "Product",

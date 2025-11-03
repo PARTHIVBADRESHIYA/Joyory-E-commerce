@@ -28,15 +28,15 @@ const orderSchema = new mongoose.Schema({
 
     // 🔹 Gift card purchase (optional if order is for a gift card)
     giftCard: {
-    templateId: { type: mongoose.Schema.Types.ObjectId, ref: "GiftCardTemplate" },
-    recipient: {
-        name: String,
-        email: String,
-        phone: String
+        templateId: { type: mongoose.Schema.Types.ObjectId, ref: "GiftCardTemplate" },
+        recipient: {
+            name: String,
+            email: String,
+            phone: String
+        },
+        senderMessage: String,
+        amount: Number
     },
-    senderMessage: String,
-    amount: Number
-},
 
     orderId: { type: String, required: true, unique: true },
     orderNumber: { type: Number, required: true, unique: true },
@@ -52,21 +52,30 @@ const orderSchema = new mongoose.Schema({
     affiliate: { type: mongoose.Schema.Types.ObjectId, ref: 'Affiliate' },
     buyerDiscountAmount: { type: Number, default: 0 },
     shippingAddress: {
-    type: Object, // or use a sub-schema if structured
-    required: false
-},
+        type: Object, // or use a sub-schema if structured
+        required: false
+    },
     razorpayOrderId: { type: String },
     paid: { type: Boolean, default: false },
     paymentStatus: { type: String, enum: ['pending', 'success', 'failed'], default: 'pending' },
     paymentMethod: { type: String },
     transactionId: { type: String },
     orderStatus: {
-    type: String,
-    enum: ["Pending", "Awaiting Payment", "Paid", "Processing", "Shipped", "Delivered", "Cancelled"]
-    ,
-    default: "Pending"
-}
-    ,
+        type: String,
+        enum: [
+            "Pending",
+            "Awaiting Payment",
+            "Paid",
+            "Processing",
+            "Awaiting Pickup",   // ✅ added for Shiprocket
+            "Shipped",
+            "Out for Delivery",  // ✅ optional: common Shiprocket status
+            "Delivered",
+            "Cancelled",
+            "Returned"           // ✅ optional: if you plan to support returns
+        ],
+        default: "Pending",
+    },
     ecard: {
     occasion: { type: String, enum: ['WELCOME', 'BIRTHDAY', 'FESTIVAL', 'TEST'] },
     message: { type: String },
@@ -74,7 +83,6 @@ const orderSchema = new mongoose.Schema({
     pdfUrl: { type: String },          // uploaded print asset (optional)
     includePhysical: { type: Boolean, default: false }, // for packing team
 },
-    // optional splitOrders created after payment is captured
     splitOrders: [
     {
         seller: { type: mongoose.Schema.Types.ObjectId, ref: 'Seller' },
