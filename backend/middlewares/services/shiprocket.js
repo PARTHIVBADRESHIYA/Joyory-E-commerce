@@ -877,3 +877,44 @@ export async function retryFailedShipments() {
         }
     }
 }
+
+export async function validatePincodeServiceability(pincode, cod = true) {
+    const token = await getShiprocketToken();
+
+    const pickup_postcode = process.env.SHIPROCKET_PICKUP_PIN || "110030"; // Default or env pickup pin
+    const weight = 0.5; // in KG
+    const codFlag = cod ? 1 : 0;
+
+    // ✅ Build query string for GET request
+    const url = `https://apiv2.shiprocket.in/v1/external/courier/serviceability/?pickup_postcode=${pickup_postcode}&delivery_postcode=${String(
+        pincode
+    ).trim()}&weight=${weight}&cod=${codFlag}`;
+
+    try {
+        const res = await axios.get(url, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+
+        const couriers = res.data?.data?.available_courier_companies || [];
+
+        if (couriers.length === 0) {
+            return { serviceable: false, couriers: [] };
+        }
+
+        // Extract useful info
+        return {
+            serviceable: true,
+            couriers: couriers.map((c) => ({
+                name: c.courier_name,
+                etd: c.etd,
+                cod: c.cod,
+            })),
+        };
+    } catch (err) {
+        console.error(
+            "❌ Shiprocket Pincode Validation Failed:",
+            err.response?.data || err.message
+        );
+        throw new Error("Failed to validate pincode via Shiprocket");
+    }
+}
