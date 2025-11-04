@@ -3,150 +3,144 @@ import Order from "../models/Order.js";
 import Payment from "../models/settings/payments/Payment.js";
 import { io } from "../server.js"; // ✅ import socket.io instance
 import { splitOrderForPersistence } from "../middlewares/services/orderSplit.js"; // ✅ your split service
-
-/**
- * 🔹 Razorpay Webhook
- * Handles → payment.captured, payment.failed
- */
+import { refundWorker } from "../middlewares/services/refundWorker.js"; // import worker
 
 
 // export const razorpayWebhook = async (req, res) => {
 //     try {
 //         const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
 //         const signature = req.headers["x-razorpay-signature"];
-//         const rawBody =
-//             req.body instanceof Buffer ? req.body.toString() : JSON.stringify(req.body);
 
-//         // 🔹 Verify Razorpay signature (skip in dev if SKIP_SIGNATURE flag set)
-//         if (
-//             !(process.env.NODE_ENV === "development" ||
-//                 process.env.SKIP_SIGNATURE === "true")
-//         ) {
-//             const expectedSignature = crypto
-//                 .createHmac("sha256", secret)
-//                 .update(rawBody)
-//                 .digest("hex");
+//         // raw body (req.body is Buffer because we used express.raw middleware)
+//         const rawBody = req.body instanceof Buffer ? req.body.toString() : JSON.stringify(req.body);
 
+//         // Verify signature (skip only in development if you intentionally set SKIP_SIGNATURE)
+//         if (!(process.env.NODE_ENV === "development" || process.env.SKIP_SIGNATURE === "true")) {
+//             const expectedSignature = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
 //             if (signature !== expectedSignature) {
-//                 console.error("❌ Razorpay Webhook Invalid Signature");
-//                 return res
-//                     .status(400)
-//                     .json({ status: "failed", message: "Invalid signature" });
+//                 console.error("❌ Invalid Razorpay Signature (webhook)");
+//                 // respond 200 to avoid retries but mark ignored
+//                 return res.status(200).json({ status: "ignored", reason: "invalid signature" });
 //             }
 //         }
 
-//         const eventPayload =
-//             typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+//         const eventPayload = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
 //         const event = eventPayload.event;
-
 //         console.log("✅ Razorpay Webhook Event:", event);
 
-//         // ================= PAYMENT CAPTURED =================
+//         // Handle payment captured (covers regular orders and some payment-link captures)
 //         if (event === "payment.captured") {
 //             const payment = eventPayload.payload.payment.entity;
+
+//             // find order either by razorpayOrderId (order_id), by payment.link_id (payment link), or by notes.orderId
 //             const order = await Order.findOne({
-//                 razorpayOrderId: payment.order_id,
+//                 $or: [
+//                     { razorpayOrderId: payment.order_id },
+//                     { "paymentLink.id": payment.link_id },
+//                     { _id: payment.notes?.orderId },
+//                     { "paymentLink.referenceId": payment.reference_id }, // defensive
+//                 ],
 //             }).populate("user");
 
 //             if (!order) {
-//                 console.error(
-//                     "❌ Order not found for Razorpay orderId:",
-//                     payment.order_id
-//                 );
-//                 return res.status(404).json({ message: "Order not found" });
+//                 console.error("❌ Order not found for Razorpay payment:", payment.order_id, payment.link_id, payment.notes);
+//                 return res.status(200).json({ status: "ignored", reason: "order not found" });
 //             }
 
 //             if (!order.paid) {
-//                 order.paid = true;
-//                 order.paymentStatus = "success";
-//                 order.paymentMethod =
-//                     order.paymentMethod === "COD" ? "COD" : "Prepaid";
-//                 order.transactionId = payment.id;
-//                 order.orderStatus = "Paid";
-//                 await order.save();
-
-//                 // ✅ Create Payment record
-//                 await Payment.create({
-//                     order: order._id,
-//                     method: payment.method || "Razorpay",
-//                     status: "Completed",
-//                     transactionId: payment.id,
-//                     amount: payment.amount / 100,
-//                     cardHolderName: payment.card?.name,
-//                     cardNumber: payment.card?.last4,
-//                     expiryDate: payment.card
-//                         ? `${payment.card.expiry_month}/${payment.card.expiry_year}`
-//                         : undefined,
-//                     isActive: true,
-//                 });
-
-//                 // ✅ Create seller splitOrders
 //                 try {
-//                     await splitOrderForPersistence(order);
-//                     splitOrderForPersistence(order)
-//                     console.log(
-//                         `📦 Split orders generated for sellers in Order ${order._id}`
-//                     );
-//                 } catch (splitErr) {
-//                     console.error("❌ Failed to split order for sellers:", splitErr);
+//                     await finalizeOrderPayment(order, payment);
+//                     console.log(`💰 Order ${order._id} marked Paid (webhook payment.captured)`);
+//                 } catch (err) {
+//                     console.error("❌ Error during finalizeOrderPayment (webhook):", err);
 //                 }
+//             }
 
-//                 // ✅ Notify user via socket
-//                 io.to(order.user._id.toString()).emit("orderUpdated", {
-//                     orderId: order._id,
-//                     status: "Paid",
-//                     paymentId: payment.id,
-//                 });
+//             // emit socket notify
+//             try {
+//                 io.to(order.user._id.toString()).emit("orderUpdated", { orderId: order._id, status: "Paid", paymentId: payment.id });
+//             } catch (err) { /* ignore */ }
+//         }
 
-//                 console.log(
-//                     `💰 Order ${order._id} marked Paid, payment saved, socket emitted`
-//                 );
+//         // Handle payment link events (e.g., payment_link.paid: you might get link entity with payments array)
+//         if (event && event.startsWith("payment_link.")) {
+//             const linkEntity = eventPayload.payload.payment_link?.entity;
+//             if (!linkEntity) {
+//                 console.warn("payment_link event with no entity", eventPayload);
+//                 return res.status(200).json({ status: "ok" });
+//             }
+
+//             // update order(s) that reference this payment link
+//             const order = await Order.findOne({ "paymentLink.id": linkEntity.id }).populate("user");
+//             if (order) {
+//                 // update link meta on order
+//                 order.paymentLink = order.paymentLink || {};
+//                 order.paymentLink.status = linkEntity.status;
+//                 order.paymentLink.updatedAt = new Date();
+//                 await order.save();
+//             }
+
+//             // If payments array is present (customer paid), iterate and finalize
+//             if (Array.isArray(linkEntity.payments) && linkEntity.payments.length) {
+//                 for (const p of linkEntity.payments) {
+//                     try {
+//                         // p might be simple id or object depending on payload; attempt to fetch payment details
+//                         const paymentId = p.id || p;
+//                         const rpPayment = await razorpay.payments.fetch(paymentId);
+//                         // find corresponding order as above
+//                         const linkedOrder = order || await Order.findOne({
+//                             $or: [
+//                                 { razorpayOrderId: rpPayment.order_id },
+//                                 { "paymentLink.id": rpPayment.link_id },
+//                                 { _id: rpPayment.notes?.orderId },
+//                             ],
+//                         }).populate("user");
+
+//                         if (linkedOrder && !linkedOrder.paid) {
+//                             await finalizeOrderPayment(linkedOrder, rpPayment);
+//                             console.log(`💳 Finalized payment for order ${linkedOrder._id} (payment_link event)`);
+//                         }
+//                     } catch (err) {
+//                         console.error("❌ Error handling payment_link payment:", err);
+//                     }
+//                 }
 //             }
 //         }
 
-//         // ================= PAYMENT FAILED =================
+//         // payment.failed -> mark order failed if we can map it
 //         if (event === "payment.failed") {
 //             const payment = eventPayload.payload.payment.entity;
-//             const order = await Order.findOne({ razorpayOrderId: payment.order_id });
-
+//             const order = await Order.findOne({ $or: [{ razorpayOrderId: payment.order_id }, { "paymentLink.id": payment.link_id }, { _id: payment.notes?.orderId }] });
 //             if (order) {
 //                 order.paymentStatus = "failed";
 //                 order.orderStatus = "Payment Failed";
 //                 await order.save();
-
-//                 // ✅ Notify user via socket
-//                 io.to(order.user._id.toString()).emit("orderUpdated", {
-//                     orderId: order._id,
-//                     status: "Payment Failed",
-//                 });
-
-//                 console.log(
-//                     `⚠️ Order ${order._id} marked Failed & user notified`
-//                 );
+//                 try { io.to(order.user._id.toString()).emit("orderUpdated", { orderId: order._id, status: "Payment Failed" }); } catch (e) { }
+//                 console.log(`⚠️ Order ${order._id} marked Failed (webhook payment.failed)`);
 //             }
 //         }
 
+//         // Always respond 200 quickly
 //         return res.status(200).json({ status: "ok" });
+
 //     } catch (err) {
 //         console.error("🔥 Razorpay Webhook Error:", err);
-//         return res.status(500).json({ status: "error", error: err.message });
+//         // Don't return 500 (Razorpay will retry); return 200 and log
+//         return res.status(200).json({ status: "error_logged" });
 //     }
 // };
-
 export const razorpayWebhook = async (req, res) => {
     try {
         const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
         const signature = req.headers["x-razorpay-signature"];
 
-        // raw body (req.body is Buffer because we used express.raw middleware)
         const rawBody = req.body instanceof Buffer ? req.body.toString() : JSON.stringify(req.body);
 
-        // Verify signature (skip only in development if you intentionally set SKIP_SIGNATURE)
+        // Verify signature
         if (!(process.env.NODE_ENV === "development" || process.env.SKIP_SIGNATURE === "true")) {
             const expectedSignature = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
             if (signature !== expectedSignature) {
                 console.error("❌ Invalid Razorpay Signature (webhook)");
-                // respond 200 to avoid retries but mark ignored
                 return res.status(200).json({ status: "ignored", reason: "invalid signature" });
             }
         }
@@ -155,22 +149,23 @@ export const razorpayWebhook = async (req, res) => {
         const event = eventPayload.event;
         console.log("✅ Razorpay Webhook Event:", event);
 
-        // Handle payment captured (covers regular orders and some payment-link captures)
+        // ------------------------------------
+        // 🧾 PAYMENT EVENTS
+        // ------------------------------------
         if (event === "payment.captured") {
             const payment = eventPayload.payload.payment.entity;
 
-            // find order either by razorpayOrderId (order_id), by payment.link_id (payment link), or by notes.orderId
             const order = await Order.findOne({
                 $or: [
                     { razorpayOrderId: payment.order_id },
                     { "paymentLink.id": payment.link_id },
                     { _id: payment.notes?.orderId },
-                    { "paymentLink.referenceId": payment.reference_id }, // defensive
+                    { "paymentLink.referenceId": payment.reference_id },
                 ],
             }).populate("user");
 
             if (!order) {
-                console.error("❌ Order not found for Razorpay payment:", payment.order_id, payment.link_id, payment.notes);
+                console.error("❌ Order not found for Razorpay payment:", payment.order_id);
                 return res.status(200).json({ status: "ignored", reason: "order not found" });
             }
 
@@ -183,61 +178,56 @@ export const razorpayWebhook = async (req, res) => {
                 }
             }
 
-            // emit socket notify
             try {
                 io.to(order.user._id.toString()).emit("orderUpdated", { orderId: order._id, status: "Paid", paymentId: payment.id });
-            } catch (err) { /* ignore */ }
+            } catch (err) { }
         }
 
-        // Handle payment link events (e.g., payment_link.paid: you might get link entity with payments array)
         if (event && event.startsWith("payment_link.")) {
             const linkEntity = eventPayload.payload.payment_link?.entity;
-            if (!linkEntity) {
-                console.warn("payment_link event with no entity", eventPayload);
-                return res.status(200).json({ status: "ok" });
-            }
+            if (linkEntity) {
+                const order = await Order.findOne({ "paymentLink.id": linkEntity.id }).populate("user");
+                if (order) {
+                    order.paymentLink = order.paymentLink || {};
+                    order.paymentLink.status = linkEntity.status;
+                    order.paymentLink.updatedAt = new Date();
+                    await order.save();
+                }
 
-            // update order(s) that reference this payment link
-            const order = await Order.findOne({ "paymentLink.id": linkEntity.id }).populate("user");
-            if (order) {
-                // update link meta on order
-                order.paymentLink = order.paymentLink || {};
-                order.paymentLink.status = linkEntity.status;
-                order.paymentLink.updatedAt = new Date();
-                await order.save();
-            }
+                if (Array.isArray(linkEntity.payments) && linkEntity.payments.length) {
+                    for (const p of linkEntity.payments) {
+                        try {
+                            const paymentId = p.id || p;
+                            const rpPayment = await razorpay.payments.fetch(paymentId);
+                            const linkedOrder = order || await Order.findOne({
+                                $or: [
+                                    { razorpayOrderId: rpPayment.order_id },
+                                    { "paymentLink.id": rpPayment.link_id },
+                                    { _id: rpPayment.notes?.orderId },
+                                ],
+                            }).populate("user");
 
-            // If payments array is present (customer paid), iterate and finalize
-            if (Array.isArray(linkEntity.payments) && linkEntity.payments.length) {
-                for (const p of linkEntity.payments) {
-                    try {
-                        // p might be simple id or object depending on payload; attempt to fetch payment details
-                        const paymentId = p.id || p;
-                        const rpPayment = await razorpay.payments.fetch(paymentId);
-                        // find corresponding order as above
-                        const linkedOrder = order || await Order.findOne({
-                            $or: [
-                                { razorpayOrderId: rpPayment.order_id },
-                                { "paymentLink.id": rpPayment.link_id },
-                                { _id: rpPayment.notes?.orderId },
-                            ],
-                        }).populate("user");
-
-                        if (linkedOrder && !linkedOrder.paid) {
-                            await finalizeOrderPayment(linkedOrder, rpPayment);
-                            console.log(`💳 Finalized payment for order ${linkedOrder._id} (payment_link event)`);
+                            if (linkedOrder && !linkedOrder.paid) {
+                                await finalizeOrderPayment(linkedOrder, rpPayment);
+                                console.log(`💳 Finalized payment for order ${linkedOrder._id} (payment_link event)`);
+                            }
+                        } catch (err) {
+                            console.error("❌ Error handling payment_link payment:", err);
                         }
-                    } catch (err) {
-                        console.error("❌ Error handling payment_link payment:", err);
                     }
                 }
             }
         }
 
-        // payment.failed -> mark order failed if we can map it
         if (event === "payment.failed") {
             const payment = eventPayload.payload.payment.entity;
-            const order = await Order.findOne({ $or: [{ razorpayOrderId: payment.order_id }, { "paymentLink.id": payment.link_id }, { _id: payment.notes?.orderId }] });
+            const order = await Order.findOne({
+                $or: [
+                    { razorpayOrderId: payment.order_id },
+                    { "paymentLink.id": payment.link_id },
+                    { _id: payment.notes?.orderId },
+                ],
+            });
             if (order) {
                 order.paymentStatus = "failed";
                 order.orderStatus = "Payment Failed";
@@ -247,16 +237,67 @@ export const razorpayWebhook = async (req, res) => {
             }
         }
 
-        // Always respond 200 quickly
+        // ------------------------------------
+        // 💸 REFUND EVENTS (Step D)
+        // ------------------------------------
+        if (event.startsWith("refund.")) {
+            const refund = eventPayload.payload.refund.entity;
+
+            const order = await Order.findOne({
+                $or: [
+                    { "refund.gatewayRefundId": refund.id },
+                    { transactionId: refund.payment_id },
+                    { _id: refund.notes?.orderId },
+                ],
+            });
+
+            if (!order) {
+                console.warn("⚠️ No matching order for refund:", refund.id);
+                return res.status(200).json({ status: "ignored", reason: "refund order not found" });
+            }
+
+            // REFUND CREATED → mark initiated
+            if (event === "refund.created") {
+                order.refund.status = "initiated";
+                order.paymentStatus = "refund_initiated";
+                order.refund.gatewayRefundId = refund.id;
+                await order.save();
+                console.log(`🔄 Refund initiated for order ${order._id}`);
+            }
+
+            // REFUND PROCESSED → mark completed
+            if (event === "refund.processed") {
+                order.refund.status = "completed";
+                order.paymentStatus = "refunded";
+                order.refund.refundedAt = new Date();
+                await order.save();
+                console.log(`✅ Refund completed for order ${order._id}`);
+
+                try {
+                    io.to(order.user._id.toString()).emit("refundStatus", { orderId: order._id, status: "Refund Completed" });
+                } catch (err) { }
+            }
+
+            // REFUND FAILED → mark failed + retry worker
+            if (event === "refund.failed") {
+                order.refund.status = "failed";
+                order.paymentStatus = "refund_failed";
+                order.refund.failureReason = refund.error_reason || "Unknown failure";
+                await order.save();
+                console.log(`⚠️ Refund failed for order ${order._id}, scheduling retry...`);
+
+                refundWorker(order._id.toString()); // retry asynchronously
+            }
+        }
+
+        // ✅ Always respond quickly
         return res.status(200).json({ status: "ok" });
 
     } catch (err) {
         console.error("🔥 Razorpay Webhook Error:", err);
-        // Don't return 500 (Razorpay will retry); return 200 and log
         return res.status(200).json({ status: "error_logged" });
     }
 };
-
 /**
  * 🔹 Shiprocket Webhook
  * Handles AWB status updates (In Transit, Delivered, Cancelled, etc.)

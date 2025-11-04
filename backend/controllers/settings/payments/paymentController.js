@@ -2,13 +2,15 @@ import Payment from '../../../models/settings/payments/Payment.js';
 import PaymentMethod from '../../../models/settings/payments/PaymentMethod.js';
 import Order from '../../../models/Order.js';
 import { encrypt, decrypt } from '../../../middlewares/utils/encryption.js';
-import { createShiprocketOrder } from "../../../middlewares/services/shiprocket.js";
-import { createShipment } from "../../../middlewares/services/shippingProvider.js";
+import { createShiprocketOrder, cancelShiprocketShipment } from "../../../middlewares/services/shiprocket.js";
+import { refundQueue } from "../../../middlewares/services/refundQueue.js";
+
 import { sendEmail } from "../../../middlewares/utils/emailService.js"; // ✅ assume you already have an email service
 import Product from '../../../models/Product.js';
 import Affiliate from '../../../models/Affiliate.js';
 import mongoose from 'mongoose';
 import User from '../../../models/User.js';
+import Wallet from '../../../models/Wallet.js';
 import Referral from '../../../models/Referral.js'; // ✅ You need to import this
 import Razorpay from "razorpay";
 import crypto from "crypto";
@@ -27,6 +29,14 @@ dotenv.config();
 const razorpay = new Razorpay({
     key_id: process.env.RAZORPAY_KEY_ID,
     key_secret: process.env.RAZORPAY_KEY_SECRET
+});
+
+const razorpayAxios = axios.create({
+    baseURL: "https://api.razorpay.com/v1",
+    auth: {
+        username: process.env.RAZORPAY_KEY_ID,
+        password: process.env.RAZORPAY_KEY_SECRET,
+    },
 });
 
 // export const createRazorpayOrder = async (req, res) => {
@@ -2930,6 +2940,7 @@ const razorpay = new Razorpay({
 //     }
 // };
 
+
 /**
  * 🧾 Create Razorpay Order
  */
@@ -3265,6 +3276,678 @@ export const verifyRazorpayPayment = async (req, res) => {
         try { await session.endSession(); } catch (e) { /* ignore */ }
     }
 };
+
+// /**
+//  * 🚫 Cancel Order (allowed before dispatch)
+//  */
+// export const cancelOrder = async (req, res) => {
+//     const session = await mongoose.startSession();
+//     try {
+//         const { orderId, reason } = req.body;
+//         const userId = req.user?._id;
+
+//         if (!orderId) {
+//             return res.status(400).json({ success: false, message: "❌ orderId required" });
+//         }
+
+//         const order = await Order.findById(orderId).populate("products.productId").populate("user");
+//         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+//         // ✅ check permissions (user or admin)
+//         if (userId && order.user && String(order.user._id) !== String(userId) && !req.user?.isAdmin) {
+//             return res.status(403).json({ success: false, message: "Unauthorized to cancel this order" });
+//         }
+
+//         // 🚫 can’t cancel once dispatched
+//         if (["Shipped", "Delivered", "Returned"].includes(order.orderStatus)) {
+//             return res.status(400).json({ success: false, message: `Cannot cancel order already ${order.orderStatus}` });
+//         }
+
+//         // 🚫 can’t cancel already cancelled
+//         if (order.orderStatus === "Cancelled") {
+//             return res.status(200).json({ success: true, message: "Already cancelled", order });
+//         }
+
+//         // Begin DB transaction
+//         await session.withTransaction(async () => {
+//             // rollback product stock
+//             for (const item of order.products) {
+//                 const product = await Product.findById(item.productId._id).session(session);
+//                 if (!product) continue;
+//                 const qty = item.quantity;
+
+//                 if (item.variant?.sku) {
+//                     const variantIndex = product.variants.findIndex(v => v.sku === item.variant.sku);
+//                     if (variantIndex !== -1) {
+//                         product.variants[variantIndex].stock += qty;
+//                         product.variants[variantIndex].sales = Math.max(0, (product.variants[variantIndex].sales || 0) - qty);
+//                     }
+//                     product.quantity = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
+//                 } else {
+//                     product.quantity += qty;
+//                     product.sales = Math.max(0, (product.sales || 0) - qty);
+//                 }
+
+//                 if (product.quantity <= 0) product.status = "Out of stock";
+//                 else if (product.thresholdValue && product.quantity < product.thresholdValue) product.status = "Low stock";
+//                 else product.status = "In-stock";
+
+//                 await product.save({ session });
+//             }
+
+//             // update order status
+//             order.orderStatus = "Cancelled";
+//             order.paymentStatus = order.paid ? "refund_initiated" : "cancelled";
+//             order.trackingHistory.push({
+//                 status: "Order Cancelled",
+//                 timestamp: new Date(),
+//                 location: "Customer",
+//                 notes: reason || "Cancelled by user",
+//             });
+
+//             await order.save({ session });
+//         });
+
+//         // ✅ Post transaction: external actions
+//         if (order.shipment?.shipment_id) {
+//             try {
+//                 await cancelShiprocketShipment(order.shipment.shipment_id);
+//                 console.log("🟢 Shiprocket order cancelled successfully");
+//             } catch (shipErr) {
+//                 console.error("⚠️ Failed to cancel Shiprocket order:", shipErr.message);
+//             }
+//         }
+
+//         // ✅ If paid, initiate refund via Razorpay
+//         if (order.paid && order.transactionId) {
+//             try {
+//                 const refund = await razorpay.payments.refund(order.transactionId, {
+//                     amount: Math.round(order.amount * 100), // full refund
+//                     speed: "optimum",
+//                     notes: { orderId: order._id.toString(), reason: reason || "Order cancelled" },
+//                 });
+
+//                 console.log("💸 Refund initiated:", refund.id);
+
+//                 // update payment doc
+//                 await Payment.updateOne(
+//                     { transactionId: order.transactionId },
+//                     { $set: { status: "Refund Initiated", refundId: refund.id } }
+//                 );
+
+//                 await Order.updateOne(
+//                     { _id: order._id },
+//                     {
+//                         $set: { paymentStatus: "refunded" },
+//                         $push: {
+//                             trackingHistory: {
+//                                 status: "Refund Initiated",
+//                                 timestamp: new Date(),
+//                                 location: "Razorpay",
+//                             },
+//                         },
+//                     }
+//                 );
+//             } catch (refundErr) {
+//                 console.error("⚠️ Refund failed:", refundErr.message);
+//                 await Order.updateOne(
+//                     { _id: order._id },
+//                     {
+//                         $push: {
+//                             trackingHistory: {
+//                                 status: "Refund Failed",
+//                                 timestamp: new Date(),
+//                                 notes: refundErr.message,
+//                             },
+//                         },
+//                     }
+//                 );
+//             }
+//         }
+
+//         res.status(200).json({ success: true, message: "✅ Order cancelled successfully", order });
+
+//     } catch (err) {
+//         console.error("🔥 cancelOrder Error:", err);
+//         res.status(500).json({ success: false, message: "❌ Failed to cancel order", error: err.message });
+//     } finally {
+//         await session.endSession();
+//     }
+// };
+
+
+
+
+// export const cancelOrder = async (req, res) => {
+//     const session = await mongoose.startSession();
+//     try {
+//         const { orderId, reason } = req.body;
+//         const userId = req.user?._id;
+
+//         if (!orderId) return res.status(400).json({ success: false, message: "orderId is required" });
+
+//         const order = await Order.findById(orderId)
+//             .populate("products.productId")
+//             .populate("user");
+
+//         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+//         // ✅ Allow only owner or admin
+//         if (userId && String(order.user._id) !== String(userId) && !req.user?.isAdmin) {
+//             return res.status(403).json({ success: false, message: "Unauthorized" });
+//         }
+
+//         // 🚫 Block if shipped/delivered
+//         const nonCancelableStatuses = ["Shipped", "Out for Delivery", "Delivered"];
+//         if (nonCancelableStatuses.includes(order.orderStatus)) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: `Order cannot be cancelled once ${order.orderStatus}`,
+//             });
+//         }
+
+//         // 🚫 Already cancelled
+//         if (order.orderStatus === "Cancelled") {
+//             return res.status(200).json({ success: true, message: "Order already cancelled", order });
+//         }
+
+//         // ✅ Begin transaction
+//         await session.withTransaction(async () => {
+//             // Rollback product stock
+//             for (const item of order.products) {
+//                 const product = await Product.findById(item.productId._id).session(session);
+//                 if (!product) continue;
+
+//                 const qty = item.quantity;
+
+//                 // Handle variant stock rollback
+//                 if (item.variant?.sku) {
+//                     const vIndex = product.variants.findIndex(v => v.sku === item.variant.sku);
+//                     if (vIndex !== -1) {
+//                         product.variants[vIndex].stock += qty;
+//                         product.variants[vIndex].sales = Math.max(0, (product.variants[vIndex].sales || 0) - qty);
+//                     }
+//                     product.quantity = product.variants.reduce((s, v) => s + (v.stock || 0), 0);
+//                 } else {
+//                     product.quantity += qty;
+//                     product.sales = Math.max(0, (product.sales || 0) - qty);
+//                 }
+
+//                 // Update product status based on stock
+//                 if (product.quantity <= 0) product.status = "Out of stock";
+//                 else if (product.thresholdValue && product.quantity < product.thresholdValue)
+//                     product.status = "Low stock";
+//                 else product.status = "In-stock";
+
+//                 await product.save({ session });
+//             }
+
+//             // Update order cancellation
+//             order.orderStatus = "Cancelled";
+//             order.paymentStatus = order.paid ? "refund_initiated" : "cancelled";
+//             order.cancellation = {
+//                 cancelledBy: userId,
+//                 reason,
+//                 requestedAt: new Date(),
+//                 allowed: true,
+//             };
+//             order.trackingHistory.push({
+//                 status: "Order Cancelled",
+//                 timestamp: new Date(),
+//                 location: "Customer",
+//                 notes: reason,
+//             });
+
+//             await order.save({ session });
+//         });
+
+//         // ✅ Post-transaction Shiprocket cancel
+//         if (order.shipment?.shipment_id) {
+//             try {
+//                 await cancelShiprocketShipment(order.shipment.shipment_id);
+//                 console.log("🟢 Shiprocket order cancelled successfully");
+//             } catch (err) {
+//                 console.error("⚠️ Shiprocket cancel failed:", err.message);
+//             }
+//         }
+
+//         res.status(200).json({
+//             success: true,
+//             message: "✅ Order cancelled successfully. Refund will be initiated shortly.",
+//             order,
+//         });
+//     } catch (err) {
+//         console.error("🔥 cancelOrder Error:", err);
+//         res.status(500).json({ success: false, message: "Cancel order failed", error: err.message });
+//     } finally {
+//         await session.endSession();
+//     }
+// };
+
+export const cancelOrder = async (req, res) => {
+    const session = await mongoose.startSession();
+    try {
+        const { orderId, reason } = req.body;
+        const userId = req.user?._id;
+
+        if (!orderId) return res.status(400).json({ success: false, message: "orderId is required" });
+
+        const order = await Order.findById(orderId)
+            .populate("products.productId")
+            .populate("user");
+
+        if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+        // ✅ Only owner or admin can cancel
+        if (userId && String(order.user._id) !== String(userId) && !req.user?.isAdmin)
+            return res.status(403).json({ success: false, message: "Unauthorized" });
+
+        // 🚫 Block if shipped/delivered
+        const nonCancelableStatuses = ["Shipped", "Out for Delivery", "Delivered"];
+        if (nonCancelableStatuses.includes(order.orderStatus))
+            return res.status(400).json({ success: false, message: `Order cannot be cancelled once ${order.orderStatus}` });
+
+        // 🚫 Already cancelled
+        if (order.orderStatus === "Cancelled")
+            return res.status(200).json({ success: true, message: "Order already cancelled", order });
+
+        // 🧠 Track affected product IDs
+        const productIdsToRecalc = new Set();
+
+        // ✅ Begin Mongo transaction
+        await session.withTransaction(async () => {
+            for (const item of order.products) {
+                const product = await Product.findById(item.productId._id).session(session);
+                if (!product) continue;
+
+                const qty = Number(item.quantity);
+                if (qty <= 0) continue;
+                productIdsToRecalc.add(String(product._id));
+
+                // 🧩 Variant rollback
+                if (item.variant?.sku) {
+                    const idx = product.variants.findIndex(v => v.sku === item.variant.sku);
+                    if (idx !== -1) {
+                        product.variants[idx].stock += qty;
+                        product.variants[idx].sales = Math.max(0, (product.variants[idx].sales || 0) - qty);
+                    }
+                } else {
+                    // 🧩 Non-variant product
+                    product.quantity += qty;
+                    product.sales = Math.max(0, (product.sales || 0) - qty);
+                }
+
+                // 🧾 Update product status dynamically
+                let totalQty = 0;
+                if (Array.isArray(product.variants) && product.variants.length > 0)
+                    totalQty = product.variants.reduce((s, v) => s + (v.stock || 0), 0);
+                else totalQty = product.quantity;
+
+                product.quantity = totalQty;
+                if (totalQty <= 0) product.status = "Out of stock";
+                else if (product.thresholdValue && totalQty < product.thresholdValue)
+                    product.status = "Low stock";
+                else product.status = "In-stock";
+
+                await product.save({ session });
+            }
+
+            // 🧾 Update order state
+            order.orderStatus = "Cancelled";
+            order.paymentStatus = order.paid ? "refund_initiated" : "cancelled";
+            order.cancellation = {
+                cancelledBy: userId,
+                reason,
+                requestedAt: new Date(),
+                allowed: true,
+            };
+            order.trackingHistory.push({
+                status: "Order Cancelled",
+                timestamp: new Date(),
+                location: "Customer",
+                notes: reason,
+            });
+
+            await order.save({ session });
+        });
+
+        // ✅ Post-transaction: update products in bulk (defensive)
+        if (productIdsToRecalc.size > 0) {
+            const ids = Array.from(productIdsToRecalc).map(id => new mongoose.Types.ObjectId(id));
+            const prods = await Product.find({ _id: { $in: ids } });
+            const bulkOps = prods.map(p => {
+                let totalQty = 0;
+                if (Array.isArray(p.variants) && p.variants.length > 0)
+                    totalQty = p.variants.reduce((s, v) => s + (v.stock || 0), 0);
+                else totalQty = p.quantity;
+
+                let newStatus = "In-stock";
+                if (totalQty <= 0) newStatus = "Out of stock";
+                else if (p.thresholdValue && totalQty < p.thresholdValue)
+                    newStatus = "Low stock";
+
+                return {
+                    updateOne: {
+                        filter: { _id: p._id },
+                        update: { $set: { quantity: totalQty, status: newStatus, variants: p.variants } },
+                    },
+                };
+            });
+            if (bulkOps.length) await Product.bulkWrite(bulkOps);
+        }
+
+        // ✅ Cancel Shiprocket shipment (non-blocking)
+        if (order.shipment?.shipment_id) {
+            try {
+                await cancelShiprocketShipment(order.shipment.shipment_id);
+                console.log("🟢 Shiprocket order cancelled successfully");
+            } catch (err) {
+                console.error("⚠️ Shiprocket cancel failed:", err.message);
+            }
+        }
+
+        // ✅ Trigger refund asynchronously
+        if (order.paid) {
+            try {
+                await initiateRefund({ body: { orderId, reason, method: "razorpay" }, user: req.user }, {
+                    status: () => ({ json: () => null }) // silent internal call
+                });
+            } catch (refundErr) {
+                console.error("⚠️ Refund trigger failed:", refundErr.message);
+            }
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "✅ Order cancelled successfully. Refund initiated if applicable.",
+            order,
+        });
+
+    } catch (err) {
+        console.error("🔥 cancelOrder Error:", err);
+        res.status(500).json({ success: false, message: "Cancel order failed", error: err.message });
+    } finally {
+        await session.endSession();
+    }
+};
+
+export const initiateRefund = async (req, res) => {
+    const session = await mongoose.startSession();
+    try {
+        const { orderId, reason, method = "razorpay" } = req.body;
+        const userId = req.user?._id;
+
+        if (!orderId)
+            return res.status(400).json({ success: false, message: "orderId required" });
+
+        const order = await Order.findById(orderId)
+            .populate("user")
+            .populate("refund");
+
+        if (!order)
+            return res.status(404).json({ success: false, message: "Order not found" });
+
+        if (order.paymentStatus === "refunded")
+            return res.status(200).json({ success: true, message: "Refund already completed" });
+
+        if (!order.paid)
+            return res.status(400).json({ success: false, message: "Order not paid" });
+
+        const refundAmount = order.amount;
+
+        // ✅ Begin Mongo transaction
+        await session.withTransaction(async () => {
+            order.refund = {
+                ...order.refund,
+                amount: refundAmount,
+                method,
+                reason,
+                initiatedBy: userId,
+                status: "initiated",
+                attempts: (order.refund?.attempts || 0) + 1,
+            };
+
+            order.paymentStatus = "refund_initiated";
+            await order.save({ session });
+        });
+
+        // ✅ RAZORPAY REFUND FLOW
+        if (method === "razorpay" && order.transactionId) {
+            try {
+                const refundResp = await razorpayAxios.post(
+                    `/payments/${order.transactionId}/refund`,
+                    {
+                        amount: refundAmount * 100, // paise
+                        speed: "optimum",
+                        notes: { orderId: order._id.toString(), reason },
+                    }
+                );
+
+                order.refund.gatewayRefundId = refundResp.data.id;
+                order.refund.status = "completed";
+                order.paymentStatus = "refunded";
+                order.refund.refundedAt = new Date();
+                await order.save();
+
+                return res.status(200).json({
+                    success: true,
+                    message: "✅ Refund processed successfully via Razorpay",
+                    refund: {
+                        refundId: order.refund.gatewayRefundId,
+                        amount: order.refund.amount,
+                        method: order.refund.method,
+                        status: order.refund.status,
+                        reason: order.refund.reason,
+                        refundedAt: order.refund.refundedAt,
+                        initiatedBy: order.refund.initiatedBy,
+                        transactionId: order.transactionId,
+                        orderId: order._id,
+                    },
+                });
+            } catch (err) {
+                console.error("⚠️ Razorpay refund failed:", err.response?.data || err.message);
+
+                // Retry refund later
+                await refundQueue.add("retryRefund", { orderId: order._id.toString() });
+
+                order.refund.status = "failed";
+                order.paymentStatus = "refund_failed";
+                await order.save();
+
+                return res.status(500).json({
+                    success: false,
+                    message: "Razorpay refund failed — queued for retry",
+                    error: err.response?.data || err.message,
+                });
+            }
+        }
+
+        // ✅ WALLET REFUND FLOW
+        if (method === "wallet") {
+            const user = await User.findById(order.user._id);
+            if (!user) throw new Error("User not found for wallet refund");
+
+            // 🔹 Update user joyoryCash
+            user.joyoryCash += refundAmount;
+            await user.save();
+
+            // 🔹 Find or create wallet record
+            let wallet = await Wallet.findOne({ user: user._id });
+            if (!wallet) wallet = await Wallet.create({ user: user._id });
+
+            // 🔹 Update wallet balance + transaction
+            wallet.joyoryCash += refundAmount;
+            wallet.transactions.push({
+                type: "REFUND",
+                amount: refundAmount,
+                mode: "ONLINE",
+                description: `Refund for Order #${order._id}`,
+            });
+            await wallet.save();
+
+            // 🔹 Update order refund status
+            order.refund.status = "completed";
+            order.paymentStatus = "refunded";
+            order.refund.refundedAt = new Date();
+            await order.save();
+
+            return res.status(200).json({
+                success: true,
+                message: "💰 Refund credited to wallet successfully",
+                refund: order.refund,
+            });
+        }
+
+        // ✅ MANUAL UPI REFUND
+        if (method === "manual_upi") {
+            order.refund.status = "processing";
+            order.paymentStatus = "refund_initiated";
+            await order.save();
+
+            return res.status(200).json({
+                success: true,
+                message: "Manual refund marked as processing",
+                refund: order.refund,
+            });
+        }
+    } catch (err) {
+        console.error("🔥 initiateRefund error:", err);
+        res.status(500).json({ success: false, message: err.message });
+    } finally {
+        await session.endSession();
+    }
+};
+
+// export const initiateRefund = async (req, res) => {
+//     const session = await mongoose.startSession();
+//     try {
+//         const { orderId, reason, method = "razorpay" } = req.body;
+//         const userId = req.user?._id;
+
+//         if (!orderId)
+//             return res.status(400).json({ success: false, message: "orderId required" });
+
+//         const order = await Order.findById(orderId)
+//             .populate("user")
+//             .populate("refund");
+
+//         if (!order)
+//             return res.status(404).json({ success: false, message: "Order not found" });
+
+//         if (order.paymentStatus === "refunded")
+//             return res.status(200).json({ success: true, message: "Refund already completed" });
+
+//         if (!order.paid)
+//             return res.status(400).json({ success: false, message: "Order not paid" });
+
+//         const refundAmount = order.amount;
+
+//         // ✅ Start Mongo transaction
+//         await session.withTransaction(async () => {
+//             order.refund = {
+//                 ...order.refund,
+//                 amount: refundAmount,
+//                 method,
+//                 reason,
+//                 initiatedBy: userId,
+//                 status: "initiated",
+//                 attempts: (order.refund?.attempts || 0) + 1,
+//             };
+
+//             order.paymentStatus = "refund_initiated";
+//             await order.save({ session });
+//         });
+
+//         // ✅ RAZORPAY REFUND FLOW
+//         if (method === "razorpay" && order.transactionId) {
+//             try {
+//                 const refundResp = await razorpayAxios.post(
+//                     `/payments/${order.transactionId}/refund`,
+//                     {
+//                         amount: refundAmount * 100, // Razorpay uses paise
+//                         speed: "optimum",
+//                         notes: { orderId: order._id.toString(), reason },
+//                     }
+//                 );
+
+//                 order.refund.gatewayRefundId = refundResp.data.id;
+//                 order.refund.status = "completed";
+//                 order.paymentStatus = "refunded";
+//                 order.refund.refundedAt = new Date();
+//                 await order.save();
+
+//                 return res.status(200).json({
+//                     success: true,
+//                     message: "✅ Refund processed successfully via Razorpay",
+//                     refund: {
+//                         refundId: order.refund.gatewayRefundId,
+//                         amount: order.refund.amount,
+//                         method: order.refund.method,
+//                         status: order.refund.status,
+//                         reason: order.refund.reason,
+//                         refundedAt: order.refund.refundedAt,
+//                         initiatedBy: order.refund.initiatedBy,
+//                         transactionId: order.transactionId,
+//                         orderId: order._id,
+//                     },
+//                 });
+
+//             } catch (err) {
+//                 console.error("⚠️ Razorpay refund failed:", err.response?.data || err.message);
+
+//                 // ✅ Queue the refund for retry using BullMQ worker
+//                 await refundQueue.add("retryRefund", { orderId: order._id.toString() });
+
+//                 order.refund.status = "failed";
+//                 order.paymentStatus = "refund_failed";
+//                 await order.save();
+
+//                 return res.status(500).json({
+//                     success: false,
+//                     message: "Razorpay refund failed — queued for retry",
+//                     error: err.response?.data || err.message,
+//                 });
+//             }
+//         }
+
+//         // ✅ WALLET REFUND FLOW
+//         if (method === "wallet") {
+//             const user = await User.findById(order.user._id);
+//             if (!user) throw new Error("User not found for wallet refund");
+
+//             user.wallet.balance += refundAmount;
+//             await user.save();
+
+//             order.refund.status = "completed";
+//             order.paymentStatus = "refunded";
+//             order.refund.refundedAt = new Date();
+//             await order.save();
+
+//             return res.status(200).json({
+//                 success: true,
+//                 message: "Refund credited to wallet successfully",
+//                 refund: order.refund,
+//             });
+//         }
+
+//         // ✅ MANUAL UPI FLOW
+//         if (method === "manual_upi") {
+//             order.refund.status = "processing";
+//             order.paymentStatus = "refund_initiated";
+//             await order.save();
+//             return res.status(200).json({
+//                 success: true,
+//                 message: "Manual refund marked as processing",
+//                 refund: order.refund,
+//             });
+//         }
+//     } catch (err) {
+//         console.error("🔥 initiateRefund error:", err);
+//         res.status(500).json({ success: false, message: err.message });
+//     } finally {
+//         await session.endSession();
+//     }
+// };
 
 
 export const payForOrder = async (req, res) => {

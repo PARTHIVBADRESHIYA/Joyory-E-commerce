@@ -879,7 +879,6 @@ async function handleCart(cart, product, variants, qty) {
 
 export const getCartSummary = async (req, res) => {
   try {
-    console.log("🛒 --- getCartSummary called ---");
 
     let cartSource;
     let isGuest = false;

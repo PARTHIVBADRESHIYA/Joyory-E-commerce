@@ -1,32 +1,24 @@
 import mongoose from "mongoose";
-import Product from "./models/Product.js";
 import dotenv from "dotenv";
 dotenv.config();
+import Order from "./models/Order.js";
 
-const migrateSkinTypes = async () => {
-    try {
-        await mongoose.connect(process.env.MONGO_URI, {
-            useNewUrlParser: true,
-            useUnifiedTopology: true,
-        });
-        console.log("MongoDB connected ✅");
+async function run() {
+    await mongoose.connect(process.env.MONGO_URI, { /* options */ });
+    console.log("Connected to mongo");
 
-        const products = await Product.find({ skinTypes: { $exists: true, $ne: [] } });
-
-        for (const product of products) {
-            // ✅ Convert to ObjectId correctly
-            const converted = product.skinTypes.map(id => new mongoose.mongo.ObjectId(id));
-            product.skinTypes = converted;
-            await product.save();
-            console.log(`Migrated product ${product._id}`);
+    const cursor = Order.find({}).cursor();
+    let updated = 0;
+    for await (const o of cursor) {
+        let changed = false;
+        if (!o.refund) { o.refund = {}; changed = true; }
+        if (!o.cancellation) { o.cancellation = {}; changed = true; }
+        if (changed) {
+            await o.save();
+            updated++;
         }
-
-        console.log("Migration done ✅");
-        process.exit();
-    } catch (err) {
-        console.error("Migration error ❌", err);
-        process.exit(1);
     }
-};
-
-migrateSkinTypes();
+    console.log("Updated orders:", updated);
+    await mongoose.disconnect();
+}
+run().catch(err => { console.error(err); process.exit(1); });

@@ -5,6 +5,8 @@ const paymentSchema = new mongoose.Schema({
     method: { type: String, required: true },
     status: { type: String, enum: ['Pending', 'Completed', 'Failed'], default: 'Pending' },
     transactionId: { type: String },
+    refundId: { type: String, default: null },
+    refundStatus: { type: String, enum: ["none", "initiated", "completed", "failed"], default: "none" },
     amount: { type: Number, required: true },
     cardHolderName: { type: String },
     cardNumber: { type: String }, // Encrypted
