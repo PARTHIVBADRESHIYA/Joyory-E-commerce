@@ -3966,6 +3966,162 @@ export const confirmCodOrder = async (req, res) => {
 //     }
 // };
 
+// export const cancelOrder = async (req, res) => {
+//     const session = await mongoose.startSession();
+//     try {
+//         const { orderId, reason } = req.body;
+//         const userId = req.user?._id;
+
+//         if (!orderId) return res.status(400).json({ success: false, message: "orderId is required" });
+
+//         const order = await Order.findById(orderId)
+//             .populate("products.productId")
+//             .populate("user");
+
+//         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+//         // ✅ Only owner or admin can cancel
+//         if (userId && String(order.user._id) !== String(userId) && !req.user?.isAdmin)
+//             return res.status(403).json({ success: false, message: "Unauthorized" });
+
+//         // 🚫 Block if shipped/delivered
+//         const nonCancelableStatuses = ["Shipped", "Out for Delivery", "Delivered"];
+//         if (nonCancelableStatuses.includes(order.orderStatus))
+//             return res.status(400).json({ success: false, message: `Order cannot be cancelled once ${order.orderStatus}` });
+
+//         // 🚫 Already cancelled
+//         if (order.orderStatus === "Cancelled")
+//             return res.status(200).json({ success: true, message: "Order already cancelled", order });
+
+//         // 🧠 Track affected product IDs
+//         const productIdsToRecalc = new Set();
+
+//         // ✅ Begin Mongo transaction
+//         await session.withTransaction(async () => {
+//             for (const item of order.products) {
+//                 const product = await Product.findById(item.productId._id).session(session);
+//                 if (!product) continue;
+
+//                 const qty = Number(item.quantity);
+//                 if (qty <= 0) continue;
+//                 productIdsToRecalc.add(String(product._id));
+
+//                 // 🧩 Variant rollback
+//                 if (item.variant?.sku) {
+//                     const idx = product.variants.findIndex(v => v.sku === item.variant.sku);
+//                     if (idx !== -1) {
+//                         product.variants[idx].stock += qty;
+//                         product.variants[idx].sales = Math.max(0, (product.variants[idx].sales || 0) - qty);
+//                     }
+//                 } else {
+//                     // 🧩 Non-variant product
+//                     product.quantity += qty;
+//                     product.sales = Math.max(0, (product.sales || 0) - qty);
+//                 }
+
+//                 // 🧾 Update product status dynamically
+//                 let totalQty = 0;
+//                 if (Array.isArray(product.variants) && product.variants.length > 0)
+//                     totalQty = product.variants.reduce((s, v) => s + (v.stock || 0), 0);
+//                 else totalQty = product.quantity;
+
+//                 product.quantity = totalQty;
+//                 if (totalQty <= 0) product.status = "Out of stock";
+//                 else if (product.thresholdValue && totalQty < product.thresholdValue)
+//                     product.status = "Low stock";
+//                 else product.status = "In-stock";
+
+//                 await product.save({ session });
+//             }
+
+//             // 🧾 Update order state
+//             order.orderStatus = "Cancelled";
+//             order.paymentStatus = order.paid ? "refund_initiated" : "cancelled";
+//             order.cancellation = {
+//                 cancelledBy: userId,
+//                 reason,
+//                 requestedAt: new Date(),
+//                 allowed: true,
+//             };
+//             order.trackingHistory.push({
+//                 status: "Order Cancelled",
+//                 timestamp: new Date(),
+//                 location: "Customer",
+//                 notes: reason,
+//             });
+
+//             await order.save({ session });
+//         });
+
+//         // ✅ Post-transaction: update products in bulk (defensive)
+//         if (productIdsToRecalc.size > 0) {
+//             const ids = Array.from(productIdsToRecalc).map(id => new mongoose.Types.ObjectId(id));
+//             const prods = await Product.find({ _id: { $in: ids } });
+//             const bulkOps = prods.map(p => {
+//                 let totalQty = 0;
+//                 if (Array.isArray(p.variants) && p.variants.length > 0)
+//                     totalQty = p.variants.reduce((s, v) => s + (v.stock || 0), 0);
+//                 else totalQty = p.quantity;
+
+//                 let newStatus = "In-stock";
+//                 if (totalQty <= 0) newStatus = "Out of stock";
+//                 else if (p.thresholdValue && totalQty < p.thresholdValue)
+//                     newStatus = "Low stock";
+
+//                 return {
+//                     updateOne: {
+//                         filter: { _id: p._id },
+//                         update: { $set: { quantity: totalQty, status: newStatus, variants: p.variants } },
+//                     },
+//                 };
+//             });
+//             if (bulkOps.length) await Product.bulkWrite(bulkOps);
+//         }
+
+//         // ✅ Cancel Shiprocket shipment (non-blocking)
+//         if (order.shipment?.shipment_id) {
+//             try {
+//                 await cancelShiprocketShipment(order.shipment.shipment_id);
+//                 console.log("🟢 Shiprocket order cancelled successfully");
+//             } catch (err) {
+//                 console.error("⚠️ Shiprocket cancel failed:", err.message);
+//             }
+//         }
+
+//         // ✅ Trigger refund asynchronously
+//         if (order.paid) {
+//             try {
+//                 await initiateRefund({ body: { orderId, reason, method: "razorpay" }, user: req.user }, {
+//                     status: () => ({ json: () => null }) // silent internal call
+//                 });
+//             } catch (refundErr) {
+//                 console.error("⚠️ Refund trigger failed:", refundErr.message);
+//             }
+//         }
+//         // Determine available refund methods dynamically
+//         const refundMethodsAvailable = [];
+//         refundMethodsAvailable.push({ method: "razorpay", label: "Original Payment Method" });
+//         refundMethodsAvailable.push({ method: "wallet", label: "Add to Joyory Wallet" });
+
+//         // You can add more methods in future conditionally:
+//         // if (someCondition) refundMethodsAvailable.push({ method: "manual_upi", label: "Manual UPI Refund" });
+
+//         // ✅ Now send only what’s needed
+//         res.status(200).json({
+//             success: true,
+//             message: "✅ Order cancelled successfully. Refund initiated if applicable.",
+//             orderId: order._id,
+//             paymentStatus: order.paymentStatus,
+//             refundMethodsAvailable,
+//         });
+
+//     } catch (err) {
+//         console.error("🔥 cancelOrder Error:", err);
+//         res.status(500).json({ success: false, message: "Cancel order failed", error: err.message });
+//     } finally {
+//         await session.endSession();
+//     }
+// };
 export const cancelOrder = async (req, res) => {
     const session = await mongoose.startSession();
     try {
@@ -3980,23 +4136,18 @@ export const cancelOrder = async (req, res) => {
 
         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
 
-        // ✅ Only owner or admin can cancel
         if (userId && String(order.user._id) !== String(userId) && !req.user?.isAdmin)
             return res.status(403).json({ success: false, message: "Unauthorized" });
 
-        // 🚫 Block if shipped/delivered
         const nonCancelableStatuses = ["Shipped", "Out for Delivery", "Delivered"];
         if (nonCancelableStatuses.includes(order.orderStatus))
             return res.status(400).json({ success: false, message: `Order cannot be cancelled once ${order.orderStatus}` });
 
-        // 🚫 Already cancelled
         if (order.orderStatus === "Cancelled")
             return res.status(200).json({ success: true, message: "Order already cancelled", order });
 
-        // 🧠 Track affected product IDs
         const productIdsToRecalc = new Set();
 
-        // ✅ Begin Mongo transaction
         await session.withTransaction(async () => {
             for (const item of order.products) {
                 const product = await Product.findById(item.productId._id).session(session);
@@ -4006,35 +4157,28 @@ export const cancelOrder = async (req, res) => {
                 if (qty <= 0) continue;
                 productIdsToRecalc.add(String(product._id));
 
-                // 🧩 Variant rollback
                 if (item.variant?.sku) {
-                    const idx = product.variants.findIndex(v => v.sku === item.variant.sku);
-                    if (idx !== -1) {
-                        product.variants[idx].stock += qty;
+                    const idx = product.variants?.findIndex(v => v.sku === item.variant.sku);
+                    if (idx !== undefined && idx >= 0 && product.variants[idx]) {
+                        product.variants[idx].stock = (product.variants[idx].stock || 0) + qty;
                         product.variants[idx].sales = Math.max(0, (product.variants[idx].sales || 0) - qty);
                     }
                 } else {
-                    // 🧩 Non-variant product
-                    product.quantity += qty;
+                    product.quantity = (product.quantity || 0) + qty;
                     product.sales = Math.max(0, (product.sales || 0) - qty);
                 }
 
-                // 🧾 Update product status dynamically
                 let totalQty = 0;
                 if (Array.isArray(product.variants) && product.variants.length > 0)
                     totalQty = product.variants.reduce((s, v) => s + (v.stock || 0), 0);
                 else totalQty = product.quantity;
 
                 product.quantity = totalQty;
-                if (totalQty <= 0) product.status = "Out of stock";
-                else if (product.thresholdValue && totalQty < product.thresholdValue)
-                    product.status = "Low stock";
-                else product.status = "In-stock";
+                product.status = totalQty <= 0 ? "Out of stock" : totalQty < (product.thresholdValue || 0) ? "Low stock" : "In-stock";
 
                 await product.save({ session });
             }
 
-            // 🧾 Update order state
             order.orderStatus = "Cancelled";
             order.paymentStatus = order.paid ? "refund_initiated" : "cancelled";
             order.cancellation = {
@@ -4053,7 +4197,6 @@ export const cancelOrder = async (req, res) => {
             await order.save({ session });
         });
 
-        // ✅ Post-transaction: update products in bulk (defensive)
         if (productIdsToRecalc.size > 0) {
             const ids = Array.from(productIdsToRecalc).map(id => new mongoose.Types.ObjectId(id));
             const prods = await Product.find({ _id: { $in: ids } });
@@ -4063,10 +4206,7 @@ export const cancelOrder = async (req, res) => {
                     totalQty = p.variants.reduce((s, v) => s + (v.stock || 0), 0);
                 else totalQty = p.quantity;
 
-                let newStatus = "In-stock";
-                if (totalQty <= 0) newStatus = "Out of stock";
-                else if (p.thresholdValue && totalQty < p.thresholdValue)
-                    newStatus = "Low stock";
+                let newStatus = totalQty <= 0 ? "Out of stock" : totalQty < (p.thresholdValue || 0) ? "Low stock" : "In-stock";
 
                 return {
                     updateOne: {
@@ -4078,39 +4218,37 @@ export const cancelOrder = async (req, res) => {
             if (bulkOps.length) await Product.bulkWrite(bulkOps);
         }
 
-        // ✅ Cancel Shiprocket shipment (non-blocking)
         if (order.shipment?.shipment_id) {
             try {
                 await cancelShiprocketShipment(order.shipment.shipment_id);
-                console.log("🟢 Shiprocket order cancelled successfully");
             } catch (err) {
                 console.error("⚠️ Shiprocket cancel failed:", err.message);
             }
         }
 
-        // ✅ Trigger refund asynchronously
         if (order.paid) {
             try {
                 await initiateRefund({ body: { orderId, reason, method: "razorpay" }, user: req.user }, {
-                    status: () => ({ json: () => null }) // silent internal call
+                    status: () => ({ json: () => null })
                 });
             } catch (refundErr) {
                 console.error("⚠️ Refund trigger failed:", refundErr.message);
             }
         }
-        // Determine available refund methods dynamically
-        const refundMethodsAvailable = [];
-        refundMethodsAvailable.push({ method: "razorpay", label: "Original Payment Method" });
-        refundMethodsAvailable.push({ method: "wallet", label: "Add to Joyory Wallet" });
 
-        // You can add more methods in future conditionally:
-        // if (someCondition) refundMethodsAvailable.push({ method: "manual_upi", label: "Manual UPI Refund" });
+        // 🌟 Dynamic refund methods based on current status
+        const refundMethodsAvailable = order.paid
+            ? [
+                { method: "razorpay", label: "Original Payment Method" },
+                { method: "wallet", label: "Add to Joyory Wallet" },
+            ]
+            : []; // No refund options if unpaid
 
-        // ✅ Now send only what’s needed
         res.status(200).json({
             success: true,
             message: "✅ Order cancelled successfully. Refund initiated if applicable.",
             orderId: order._id,
+            paid: order.paid,
             paymentStatus: order.paymentStatus,
             refundMethodsAvailable,
         });
