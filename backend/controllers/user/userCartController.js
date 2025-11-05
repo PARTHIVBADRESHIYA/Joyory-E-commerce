@@ -275,19 +275,11 @@ export const getCartSummary = async (req, res) => {
     }));
 
     const promos = await Promotion.find({ status: "active" }).lean();
-
-    console.log("🧾 Promo check before applyPromotions:", promos.map(p => ({
-      name: p.campaignName,
-      trigger: p.promotionConfig?.triggerProductId,
-      free: p.promotionConfig?.freeProductId,
-    })));
-
     const promoResult = await applyPromotions(itemsInput, {
       userContext: req.user ? { isNewUser: req.user.isNewUser } : {},
     });
 
     const { items: promoItems, summary, appliedPromotions } = promoResult;
-    console.log("✅ Promotions applied:", appliedPromotions.map(p => p.campaignName));
 
     // -------------------- 🔥 Auto-add BOGO / Freebie Items --------------------
     const currentProductIds = new Set(validCartItems.map(i => String(i.product?._id || i.product)));
@@ -390,7 +382,6 @@ export const getCartSummary = async (req, res) => {
     let discountFromCoupon = 0;
 
     if (req.user && req.user._id) {
-      console.log("🎟 Checking available coupons...");
       const allDiscountDocs = await Discount.find({ status: "Active" }).lean();
       const nonPromoItemsInput = promoItems
         .filter(i => !i.discounts?.length)
@@ -431,7 +422,6 @@ export const getCartSummary = async (req, res) => {
       inapplicableCoupons = couponsChecked.filter(c => c.status !== "Applicable");
 
       if (req.query.discount && nonPromoItemsInput.length) {
-        console.log("🎯 Applying coupon:", req.query.discount);
         try {
           const result = await validateDiscountForCartInternal({
             code: req.query.discount.trim(),
@@ -490,7 +480,6 @@ export const getCartSummary = async (req, res) => {
     }
 
     // -------------------- Final Cart Build --------------------
-    console.log("🧮 Building final cart items...");
     const round2 = n => Math.round(n * 100) / 100;
     const now = new Date();
     const activePromotions = await Promotion.find({

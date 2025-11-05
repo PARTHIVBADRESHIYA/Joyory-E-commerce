@@ -22,6 +22,7 @@ import { determineOccasions, craftMessage } from "../../../middlewares/services/
 import { buildEcardPdf } from "../../../middlewares/services/ecardPdf.js";
 import { generateInvoice } from "../../../middlewares/services/invoiceService.js";
 import { splitOrderForPersistence } from '../../../middlewares/services/orderSplit.js'; // or correct path
+import { shiprocketQueue } from "../../../middlewares/services/shiprocketQueue.js";
 
 dotenv.config();
 
@@ -38,6 +39,23 @@ const razorpayAxios = axios.create({
         password: process.env.RAZORPAY_KEY_SECRET,
     },
 });
+
+export const enqueueShipmentJob = async ({ orderId }) => {
+    if (!orderId) throw new Error("orderId missing for queue enqueue");
+    await shiprocketQueue.add({ orderId });
+    console.log(`📦 Enqueued Shiprocket job for order: ${orderId}`);
+};
+
+// Simple helper - adapt rules to your business
+const isCodAllowed = ({ pincode, amount, user }) => {
+    const MAX_COD_AMOUNT = 10000; // example limit
+    const blockedPincodes = []; // fill from DB/config
+    if (!pincode) return false;
+    if (blockedPincodes.includes(String(pincode))) return false;
+    if (amount > MAX_COD_AMOUNT) return false;
+    // add any other business rules here (first order, fraud flags etc)
+    return true;
+};
 
 // export const createRazorpayOrder = async (req, res) => {
 //     try {
@@ -3276,6 +3294,677 @@ export const verifyRazorpayPayment = async (req, res) => {
         try { await session.endSession(); } catch (e) { /* ignore */ }
     }
 };
+/**
+ * Step 1 - COD Order Validation
+ */
+export const createCodOrder = async (req, res) => {
+    try {
+        const { orderId } = req.body;
+        const userId = req.user?._id;
+
+        if (!orderId)
+            return res.status(400).json({ success: false, message: "orderId is required" });
+
+        const order = await Order.findById(orderId)
+            .populate("user")
+            .populate("products.productId");
+
+        if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+        if (order.paid) return res.status(400).json({ success: false, message: "Already paid" });
+        if (order.orderType !== "COD")
+            return res.status(400).json({ success: false, message: "Invalid order type" });
+
+        return res.status(200).json({
+            success: true,
+            step: "STEP_1_VALIDATED",
+            message: "COD validation passed. Ready for confirmation.",
+            orderSummary: {
+                orderId: order._id,
+                amount: order.amount,
+                productsCount: order.products?.length || 0,
+                customer: order.user?.name || "Guest",
+            },
+        });
+    } catch (err) {
+        console.error("🔥 COD Step1 Error:", err);
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+/**
+ * Step 2 - Confirm COD Order
+ */
+export const confirmCodOrder = async (req, res) => {
+    const session = await mongoose.startSession();
+    try {
+        const { orderId, shippingAddress } = req.body;
+        const userId = req.user?._id;
+
+        if (!orderId || !userId)
+            return res.status(400).json({ success: false, message: "Invalid request" });
+
+        const order = await Order.findById(orderId).populate("user").populate("products.productId");
+        if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+        if (order.paid || order.orderStatus === "Cancelled")
+            return res.status(400).json({ success: false, message: "Order cannot be confirmed" });
+
+        const deliveryPincode = shippingAddress?.pincode || order.shippingAddress?.pincode;
+        if (!isCodAllowed({ pincode: deliveryPincode, amount: order.amount })) {
+            return res.status(400).json({ success: false, message: "COD not available for this location/amount" });
+        }
+
+        const affectedProductIds = new Set();
+
+        await session.withTransaction(async () => {
+            const txOrder = await Order.findById(orderId).session(session).populate("products.productId");
+            if (!txOrder) throw new Error("Order disappeared during transaction");
+
+            // Deduct stock safely
+            for (const item of txOrder.products) {
+                const product = await Product.findById(item.productId).session(session);
+                if (!product) throw new Error(`Product not found: ${item.productId}`);
+
+                const qty = Number(item.quantity || 0);
+                if (qty <= 0) continue;
+                affectedProductIds.add(String(product._id));
+
+                if (item.variant?.sku) {
+                    const variant = product.variants.find(v => String(v.sku) === String(item.variant.sku));
+                    if (!variant || variant.stock < qty) throw new Error(`Not enough stock for ${item.variant.sku}`);
+                    variant.stock -= qty;
+                    variant.sales += qty;
+                } else {
+                    if (product.quantity < qty) throw new Error(`Not enough stock for ${product.name}`);
+                    product.quantity -= qty;
+                    product.sales += qty;
+                }
+
+                await product.save({ session });
+            }
+
+            // Update order + create Payment doc
+            txOrder.paymentMethod = "COD";
+            txOrder.paid = false;
+            txOrder.paymentStatus = "pending";
+            txOrder.orderStatus = "Processing";
+            if (shippingAddress) txOrder.shippingAddress = shippingAddress;
+
+            const [paymentDoc] = await Payment.create(
+                [
+                    {
+                        order: txOrder._id,
+                        method: "COD",
+                        status: "Pending",
+                        amount: txOrder.amount,
+                    },
+                ],
+                { session }
+            );
+
+            if (paymentDoc) txOrder.paymentId = paymentDoc._id;
+
+            await User.updateOne({ _id: txOrder.user._id }, { $set: { cart: [] } }, { session });
+
+            txOrder.trackingHistory = [
+                ...(txOrder.trackingHistory || []),
+                { status: "Order Placed (COD)", timestamp: new Date(), location: "Store" },
+                { status: "Processing", timestamp: new Date(), location: "Store" },
+            ];
+
+            await txOrder.save({ session });
+        });
+
+        // Post-commit: enqueue for Shiprocket
+        try {
+            await enqueueShipmentJob({ orderId });
+        } catch (err) {
+            console.warn("Shiprocket queue fallback:", err.message);
+            try {
+                const result = await createShiprocketOrder(order);
+                if (result?.shipmentDetails) {
+                    order.shipment = result.shipmentDetails;
+                    order.trackingHistory.push({ status: "Shipment Created", timestamp: new Date(), location: "Shiprocket" });
+                    await order.save();
+                }
+            } catch (shipErr) {
+                console.error("Shiprocket fallback failed:", shipErr.message);
+            }
+        }
+
+        const refreshed = await Order.findById(orderId).populate("user").populate("products.productId");
+        return res.status(200).json({
+            success: true,
+            message: "✅ COD order confirmed & queued for shipment",
+            order: refreshed,
+        });
+    } catch (err) {
+        console.error("confirmCodOrder Error:", err);
+        return res.status(500).json({ success: false, message: err.message });
+    } finally {
+        await session.endSession();
+    }
+};
+// export const createCodOrder = async (req, res) => {
+//     const session = await mongoose.startSession();
+
+//     try {
+//         const { orderId, shippingAddress } = req.body;
+//         const userId = req.user?._id;
+
+//         // 🧩 Step 1: Validate input
+//         if (!orderId) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "❌ orderId is required",
+//             });
+//         }
+
+//         // Fetch order
+//         const order = await Order.findById(orderId)
+//             .populate("user")
+//             .populate("products.productId");
+
+//         if (!order) {
+//             return res.status(404).json({
+//                 success: false,
+//                 message: "❌ Order not found",
+//             });
+//         }
+
+//         // check payment / status
+//         if (order.paid) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "⚠️ This order is already paid or processed.",
+//             });
+//         }
+
+//         if (order.orderType !== "COD") {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "❌ Invalid order type. Expected COD order.",
+//             });
+//         }
+
+//         if (!order.amount || order.amount <= 0) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "❌ Invalid order amount",
+//             });
+//         }
+
+//         // Optional: verify address presence
+//         if (!shippingAddress && !order.shippingAddress) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "❌ Shipping address missing for COD order",
+//             });
+//         }
+
+//         // ✅ Step 1 complete — data validated and ready for stock deduction
+//         return res.status(200).json({
+//             step: "STEP_1_VALIDATED",
+//             success: true,
+//             message: "✅ COD order validation passed. Ready for stock transaction.",
+//             orderSummary: {
+//                 orderId: order._id,
+//                 amount: order.amount,
+//                 productsCount: order.products?.length || 0,
+//                 customer: order.user?.name || "Guest",
+//             },
+//         });
+//     } catch (err) {
+//         console.error("🔥 createCodOrder Step1 Error:", err);
+//         return res.status(500).json({
+//             success: false,
+//             message: "❌ Internal server error during COD order validation",
+//             error: err.message,
+//         });
+//     } finally {
+//         await session.endSession();
+//     }
+// };
+
+// export const confirmCodOrder = async (req, res) => {
+//     const session = await mongoose.startSession();
+//     try {
+//         const { orderId, shippingAddress, idempotencyKey } = req.body;
+//         const userId = req.user?._id;
+
+//         if (!orderId) return res.status(400).json({ success: false, message: "orderId required" });
+//         if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+//         // read-only fetch
+//         const order = await Order.findById(orderId).populate("user").populate("products.productId");
+//         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+//         // Ownership/admin check
+//         if (String(order.user._id) !== String(userId) && !req.user?.isAdmin) {
+//             return res.status(403).json({ success: false, message: "Unauthorized" });
+//         }
+
+//         // basic validations
+//         if (order.orderType !== "COD") return res.status(400).json({ success: false, message: "Order is not a COD order" });
+//         if (order.paid) return res.status(400).json({ success: false, message: "Order already paid" });
+//         if (order.orderStatus === "Cancelled") return res.status(400).json({ success: false, message: "Order is cancelled" });
+
+//         // idempotency check: if already processed for COD, return existing
+//         const alreadyProcessing = ["Processing", "Awaiting Pickup", "Shipped", "Out for Delivery", "Delivered"].includes(order.orderStatus)
+//             && order.paymentMethod === "COD";
+//         if (alreadyProcessing) {
+//             const refreshed = await Order.findById(orderId).populate("user").populate("products.productId");
+//             return res.status(200).json({ success: true, message: "Order already confirmed (idempotent)", order: refreshed });
+//         }
+
+//         // COD eligibility - check pincode and amount
+//         const deliveryPincode = (shippingAddress?.pincode || order.shippingAddress?.pincode);
+//         if (!isCodAllowed({ pincode: deliveryPincode, amount: order.amount, user: order.user })) {
+//             return res.status(400).json({ success: false, message: "COD not available for this address/amount" });
+//         }
+
+//         const affectedProductIds = new Set();
+
+//         // transaction: deduct stock, create Payment doc, clear cart, save order
+//         await session.withTransaction(async () => {
+//             const txOrder = await Order.findById(orderId).session(session).populate("products.productId");
+//             if (!txOrder) throw new Error("Order disappeared during transaction");
+
+//             // Defensive: check again
+//             if (txOrder.orderType !== "COD") throw new Error("Order is not a COD order");
+
+//             for (const item of txOrder.products) {
+//                 const productId = item.productId._id ? item.productId._id : item.productId;
+//                 const qty = Number(item.quantity || 0);
+//                 if (qty <= 0) continue;
+//                 affectedProductIds.add(String(productId));
+
+//                 const product = await Product.findById(productId).session(session);
+//                 if (!product) throw Object.assign(new Error(`Product not found: ${productId}`), { step: "STOCK" });
+
+//                 const sku = item.variant?.sku;
+//                 if (sku) {
+//                     const vIndex = product.variants.findIndex(v => String(v.sku) === String(sku));
+//                     if (vIndex === -1) throw Object.assign(new Error(`Variant not found for SKU: ${sku}`), { step: "STOCK" });
+
+//                     const variant = product.variants[vIndex];
+//                     if ((variant.stock || 0) < qty) throw Object.assign(new Error(`Not enough stock for SKU ${sku}`), { step: "STOCK" });
+
+//                     // update variant and totals
+//                     product.variants[vIndex].stock = (variant.stock || 0) - qty;
+//                     product.variants[vIndex].sales = (variant.sales || 0) + qty;
+//                     product.sales = (product.sales || 0) + qty;
+
+//                     const totalQty = product.variants.reduce((s, v) => s + (Number(v.stock) || 0), 0);
+//                     product.quantity = totalQty;
+//                     if (totalQty <= 0) product.status = "Out of stock";
+//                     else if (product.thresholdValue && totalQty < product.thresholdValue) product.status = "Low stock";
+//                     else product.status = "In-stock";
+
+//                     await product.save({ session });
+//                 } else {
+//                     if ((product.quantity || 0) < qty) throw Object.assign(new Error(`Not enough stock for ${product.name}`), { step: "STOCK" });
+
+//                     product.quantity = (product.quantity || 0) - qty;
+//                     product.sales = (product.sales || 0) + qty;
+//                     if (product.quantity <= 0) product.status = "Out of stock";
+//                     else if (product.thresholdValue && product.quantity < product.thresholdValue) product.status = "Low stock";
+//                     else product.status = "In-stock";
+
+//                     await product.save({ session });
+//                 }
+//             } // end for
+
+//             // update order inside tx
+//             txOrder.paid = false;
+//             txOrder.paymentStatus = "pending";
+//             txOrder.paymentMethod = "COD";
+//             txOrder.transactionId = null;
+//             txOrder.orderStatus = "Processing";
+//             if (shippingAddress) txOrder.shippingAddress = shippingAddress;
+
+//             // create Payment doc and link to order
+//             const [paymentDoc] = await Payment.create([{
+//                 order: txOrder._id,
+//                 method: "COD",
+//                 status: "Pending",
+//                 transactionId: null,
+//                 amount: txOrder.amount,
+//                 isActive: true,
+//             }], { session });
+
+//             if (paymentDoc && paymentDoc._id) {
+//                 txOrder.paymentId = paymentDoc._id; // add field to Order schema if not there already
+//             }
+
+//             // clear user's cart inside tx
+//             if (txOrder.user && txOrder.user._id) {
+//                 await User.updateOne({ _id: txOrder.user._id }, { $set: { cart: [] } }, { session });
+//             }
+
+//             txOrder.trackingHistory = txOrder.trackingHistory || [];
+//             txOrder.trackingHistory.push({ status: "Order Placed (COD)", timestamp: new Date(), location: "Store" });
+//             txOrder.trackingHistory.push({ status: "Processing", timestamp: new Date(), location: "Store" });
+
+//             await txOrder.save({ session });
+
+//             // bulk recalc products defensively
+//             if (affectedProductIds.size > 0) {
+//                 const ids = Array.from(affectedProductIds).map(id => new mongoose.Types.ObjectId(id));
+//                 const prods = await Product.find({ _id: { $in: ids } }).session(session);
+
+//                 const bulkOps = prods.map(p => {
+//                     let totalQty = 0;
+//                     if (Array.isArray(p.variants) && p.variants.length > 0) totalQty = p.variants.reduce((s, v) => s + (Number(v.stock) || 0), 0);
+//                     else totalQty = Number(p.quantity || 0);
+
+//                     let newStatus = "In-stock";
+//                     if (totalQty <= 0) newStatus = "Out of stock";
+//                     else if (p.thresholdValue != null && totalQty < p.thresholdValue) newStatus = "Low stock";
+
+//                     if (Array.isArray(p.variants)) {
+//                         p.variants = p.variants.map(v => { if ((v.stock ?? 0) < 0) v.stock = 0; return v; });
+//                     }
+
+//                     return {
+//                         updateOne: {
+//                             filter: { _id: p._id },
+//                             update: { $set: { status: newStatus, quantity: totalQty, variants: p.variants } }
+//                         }
+//                     };
+//                 });
+
+//                 if (bulkOps.length) await Product.bulkWrite(bulkOps, { session });
+//             }
+
+//         }); // end withTransaction
+
+//         // post-commit: fetch final order
+//         const finalOrder = await Order.findById(orderId).populate("user").populate("products.productId");
+
+//         // optionally split orders per seller (idempotent)
+//         try { await splitOrderForPersistence(finalOrder); } catch (e) { console.warn("splitOrder warning:", e?.message || e); }
+
+//         // enqueue shipment creation (recommended) - fallback to direct call if queue not available
+//         try {
+//             if (typeof enqueueShipmentJob === "function") {
+//                 await enqueueShipmentJob({ orderId: finalOrder._id.toString() });
+//             } else {
+//                 const shipRes = await createShiprocketOrder(finalOrder);
+//                 if (shipRes?.shipmentDetails) {
+//                     finalOrder.shipment = shipRes.shipmentDetails;
+//                     finalOrder.trackingHistory.push({ status: "Shipment Created", timestamp: new Date(), location: "Shiprocket" });
+//                     await finalOrder.save();
+//                 } else {
+//                     console.warn("Shiprocket responded without shipmentDetails", shipRes);
+//                 }
+//             }
+//         } catch (shipErr) {
+//             console.error("Shiprocket post-commit error:", shipErr?.message || shipErr);
+//             try {
+//                 await Order.updateOne({ _id: finalOrder._id }, { $push: { trackingHistory: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } } });
+//             } catch (e) { console.error("Failed to write shipment failure tracking:", e); }
+//         }
+
+//         // final tracking push
+//         try {
+//             await Order.updateOne({ _id: finalOrder._id }, { $push: { trackingHistory: { status: "Awaiting Pickup", timestamp: new Date(), location: "Courier" } } });
+//         } catch (e) { console.warn("push tracking failed:", e?.message || e); }
+
+//         const refreshed = await Order.findById(orderId).populate("user").populate("products.productId");
+//         return res.status(200).json({ success: true, message: "✅ COD order confirmed and processing started", order: refreshed });
+
+//     } catch (err) {
+//         if (err && err.step === "STOCK") {
+//             console.error("Stock error during COD confirm:", err.message || err);
+//             try { await session.endSession(); } catch (e) {/*ignore*/ }
+//             return res.status(400).json({ success: false, message: err.message || "Insufficient stock for one or more items" });
+//         }
+//         console.error("confirmCodOrder error:", err);
+//         try { await session.endSession(); } catch (e) {/*ignore*/ }
+//         return res.status(500).json({ success: false, message: "Failed to confirm COD order", error: err.message || err });
+//     } finally {
+//         try { await session.endSession(); } catch (e) {/*ignore*/ }
+//     }
+// };
+
+// export const confirmCodOrder = async (req, res) => {
+//     const session = await mongoose.startSession();
+//     try {
+//         const { orderId, shippingAddress } = req.body;
+//         const userId = req.user?._id;
+
+//         if (!orderId) return res.status(400).json({ success: false, message: "orderId required" });
+//         if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+//         // Fetch order (read-only) and quick checks
+//         const order = await Order.findById(orderId).populate("user").populate("products.productId");
+//         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+//         // Ownership/admin check
+//         if (String(order.user._id) !== String(userId) && !req.user?.isAdmin) {
+//             return res.status(403).json({ success: false, message: "Unauthorized" });
+//         }
+
+//         // verify it's a COD order and not already paid/processed
+//         if (order.orderType !== "COD") {
+//             return res.status(400).json({ success: false, message: "Order is not a COD order" });
+//         }
+//         if (order.paid) {
+//             return res.status(400).json({ success: false, message: "Order already paid" });
+//         }
+//         if (order.orderStatus === "Cancelled") {
+//             return res.status(400).json({ success: false, message: "Order is cancelled" });
+//         }
+
+//         // Start transaction: deduct stock and persist order state atomically
+//         const affectedProductIds = new Set();
+
+//         await session.withTransaction(async () => {
+//             // Re-fetch inside tx for consistency
+//             const txOrder = await Order.findById(orderId).session(session).populate("products.productId");
+//             if (!txOrder) throw new Error("Order disappeared during transaction");
+
+//             // iterate items to deduct stock
+//             for (const item of txOrder.products) {
+//                 const productId = item.productId._id ? item.productId._id : item.productId;
+//                 const qty = Number(item.quantity || 0);
+//                 if (qty <= 0) continue;
+//                 affectedProductIds.add(String(productId));
+
+//                 const product = await Product.findById(productId).session(session);
+//                 if (!product) throw Object.assign(new Error(`Product not found: ${productId}`), { step: "STOCK" });
+
+//                 // If variant present (we keep snapshot in order.products.variant)
+//                 const sku = item.variant?.sku;
+//                 if (sku) {
+//                     const vIndex = product.variants.findIndex(v => String(v.sku) === String(sku));
+//                     if (vIndex === -1) {
+//                         throw Object.assign(new Error(`Variant not found for SKU: ${sku}`), { step: "STOCK" });
+//                     }
+//                     const variant = product.variants[vIndex];
+//                     if ((variant.stock || 0) < qty) {
+//                         throw Object.assign(new Error(`Not enough stock for SKU ${sku}`), { step: "STOCK" });
+//                     }
+
+//                     // decrement and increase sales
+//                     product.variants[vIndex].stock = (variant.stock || 0) - qty;
+//                     product.variants[vIndex].sales = (variant.sales || 0) + qty;
+//                     product.sales = (product.sales || 0) + qty;
+
+//                     // recalc total product-level stock (sum variants)
+//                     const totalQty = product.variants.reduce((s, v) => s + (Number(v.stock) || 0), 0);
+//                     product.quantity = totalQty;
+
+//                     // status update
+//                     if (totalQty <= 0) product.status = "Out of stock";
+//                     else if (product.thresholdValue && totalQty < product.thresholdValue) product.status = "Low stock";
+//                     else product.status = "In-stock";
+
+//                     await product.save({ session });
+
+//                 } else {
+//                     // non-variant product
+//                     if ((product.quantity || 0) < qty) {
+//                         throw Object.assign(new Error(`Not enough stock for ${product.name}`), { step: "STOCK" });
+//                     }
+
+//                     product.quantity = (product.quantity || 0) - qty;
+//                     product.sales = (product.sales || 0) + qty;
+
+//                     if (product.quantity <= 0) product.status = "Out of stock";
+//                     else if (product.thresholdValue && product.quantity < product.thresholdValue) product.status = "Low stock";
+//                     else product.status = "In-stock";
+
+//                     await product.save({ session });
+//                 }
+//             } // end for items
+
+//             // ---- update order fields inside transaction ----
+//             txOrder.paid = false; // COD not paid now
+//             txOrder.paymentStatus = "pending"; // awaiting collection
+//             txOrder.paymentMethod = "COD";
+//             txOrder.transactionId = null;
+//             txOrder.orderStatus = "Processing";
+//             if (shippingAddress) txOrder.shippingAddress = shippingAddress;
+
+//             // create Payment record representing COD payment (pending)
+//             await Payment.create([{
+//                 order: txOrder._id,
+//                 method: "COD",
+//                 status: "Pending",
+//                 transactionId: null,
+//                 amount: txOrder.amount,
+//                 isActive: true,
+//             }], { session });
+
+//             // clear user cart within transaction
+//             if (txOrder.user && txOrder.user._id) {
+//                 await User.updateOne({ _id: txOrder.user._id }, { $set: { cart: [] } }, { session });
+//             }
+
+//             // tracking history
+//             txOrder.trackingHistory = txOrder.trackingHistory || [];
+//             txOrder.trackingHistory.push({ status: "Order Placed (COD)", timestamp: new Date(), location: "Store" });
+//             txOrder.trackingHistory.push({ status: "Processing", timestamp: new Date(), location: "Store" });
+
+//             // Save order inside transaction
+//             await txOrder.save({ session });
+
+//             // ---- recalc total quantity and status for affected products in bulk (defensive) ----
+//             if (affectedProductIds.size > 0) {
+//                 const ids = Array.from(affectedProductIds).map(id => new mongoose.Types.ObjectId(id));
+//                 const prods = await Product.find({ _id: { $in: ids } }).session(session);
+
+//                 const bulkOps = prods.map(p => {
+//                     let totalQty = 0;
+//                     if (Array.isArray(p.variants) && p.variants.length > 0) {
+//                         totalQty = p.variants.reduce((s, v) => s + (Number(v.stock) || 0), 0);
+//                     } else {
+//                         totalQty = Number(p.quantity || 0);
+//                     }
+
+//                     let newStatus = "In-stock";
+//                     if (totalQty <= 0) newStatus = "Out of stock";
+//                     else if (p.thresholdValue != null && totalQty < p.thresholdValue) newStatus = "Low stock";
+
+//                     // defensive clamp variant stock
+//                     if (Array.isArray(p.variants)) {
+//                         p.variants = p.variants.map(v => {
+//                             if ((v.stock ?? 0) < 0) v.stock = 0;
+//                             return v;
+//                         });
+//                     }
+
+//                     return {
+//                         updateOne: {
+//                             filter: { _id: p._id },
+//                             update: {
+//                                 $set: {
+//                                     status: newStatus,
+//                                     quantity: totalQty,
+//                                     variants: p.variants
+//                                 }
+//                             }
+//                         }
+//                     };
+//                 });
+
+//                 if (bulkOps.length) await Product.bulkWrite(bulkOps, { session });
+//             }
+
+//             // end transaction function - commit will be attempted after this function completes
+//         }); // end withTransaction
+
+//         // Transaction committed successfully here
+
+//         // post-commit: fetch final order and create shipment with Shiprocket (non-blocking)
+//         const finalOrder = await Order.findById(orderId).populate("user").populate("products.productId");
+
+//         // optional: split order per seller if you run split logic like in razorpay flow
+//         try {
+//             await splitOrderForPersistence(finalOrder); // safe if implemented as idempotent
+//         } catch (err) {
+//             console.warn("⚠️ splitOrderForPersistence warning:", err?.message || err);
+//         }
+
+//         // create shipment (post-commit)
+//         try {
+//             const shipRes = await createShiprocketOrder(finalOrder);
+//             if (shipRes?.shipmentDetails) {
+//                 finalOrder.shipment = shipRes.shipmentDetails;
+//                 finalOrder.trackingHistory.push({ status: "Shipment Created", timestamp: new Date(), location: "Shiprocket" });
+//                 await finalOrder.save();
+//             } else {
+//                 console.warn("⚠️ Shiprocket responded without shipmentDetails", shipRes);
+//                 // still return order; admins can retry shipment creation
+//             }
+//         } catch (shipErr) {
+//             console.error("⚠️ Shiprocket Error (post commit):", shipErr?.message || shipErr);
+//             // record failure in tracking
+//             try {
+//                 await Order.updateOne({ _id: finalOrder._id }, {
+//                     $push: { trackingHistory: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } }
+//                 });
+//             } catch (err) {
+//                 console.error("⚠️ Failed to record shipment failure:", err);
+//             }
+//         }
+
+//         // final push of tracking/payment history (best-effort)
+//         try {
+//             await Order.updateOne({ _id: finalOrder._id }, {
+//                 $push: {
+//                     trackingHistory: [
+//                         { status: "Awaiting Pickup", timestamp: new Date(), location: "Courier" }
+//                     ]
+//                 }
+//             });
+//         } catch (err) {
+//             console.warn("⚠️ push tracking after commit failed:", err?.message || err);
+//         }
+
+//         const refreshed = await Order.findById(orderId).populate("user").populate("products.productId");
+//         return res.status(200).json({
+//             success: true,
+//             message: "✅ COD order confirmed and processing started",
+//             order: refreshed,
+//         });
+
+//     } catch (err) {
+//         // STOCK errors thrown with `.step === "STOCK"` will return a friendly 400
+//         if (err && err.step === "STOCK") {
+//             console.error("🔴 Stock error during COD confirm:", err.message || err);
+//             try { await session.endSession(); } catch (e) {/*ignore*/ }
+//             return res.status(400).json({ success: false, message: err.message || "Insufficient stock for one or more items" });
+//         }
+//         console.error("🔥 confirmCodOrder error:", err);
+//         try { await session.endSession(); } catch (e) {/*ignore*/ }
+//         return res.status(500).json({ success: false, message: "Failed to confirm COD order", error: err.message || err });
+//     } finally {
+//         try { await session.endSession(); } catch (e) {/*ignore*/ }
+//     }
+// };
 
 export const cancelOrder = async (req, res) => {
     const session = await mongoose.startSession();

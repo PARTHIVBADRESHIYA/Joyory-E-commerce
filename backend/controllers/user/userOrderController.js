@@ -25,71 +25,6 @@ function mapShipmentStatus(status) {
   return map[status] || status; // fallback to raw if unknown
 }
 
-// export const getUserOrders = async (req, res) => {
-//   try {
-//     const orders = await Order.find({ user: req.user._id })
-//       .populate("products.productId")
-//       .sort({ createdAt: -1 });
-
-//     const cleanedOrders = orders.map(order => {
-//       const shipmentStatus = mapShipmentStatus(order.shipment?.status);
-//       const combinedStatus = shipmentStatus || order.status;
-//       const statusLabel = shipmentStatus || order.status;
-
-//       return {
-//         orderId: order.orderId,
-//         orderNumber: order.orderNumber,
-//         date: order.date,
-//         status: order.status, // raw DB status
-//         shipmentStatus, // normalized
-//         combinedStatus,
-//         statusLabel,
-//         amount: order.amount,
-//         discountAmount: order.discountAmount || 0,
-//         discountCode: order.discountCode || null,
-//         buyerDiscountAmount: order.buyerDiscountAmount || 0,
-//         shippingAddress: order.shippingAddress || null,
-//         products: order.products.map(item => {
-//           const product = item.productId;
-//           return {
-//             productId: product?._id,
-//             name: product?.name || "Unknown Product",
-//             variant: product?.variant || null,
-//             brand: product?.brand || null,
-//             category: product?.category || null,
-//             image: product?.images?.[0] || null,
-//             quantity: item.quantity,
-//             price: item.price,
-//             total: item.quantity * item.price,
-//           };
-//         }),
-//         payment: {
-//           method: order.paymentMethod || "Manual",
-//           status: order.paymentStatus || "pending",
-//           transactionId: order.transactionId || null,
-//         },
-//         expectedDelivery:
-//           order.expectedDelivery ||
-//           new Date(order.date.getTime() + 5 * 24 * 60 * 60 * 1000), // +5 days fallback
-//         shipment: order.shipment
-//           ? {
-//             shipment_id: order.shipment.shipment_id,
-//             awb_code: order.shipment.awb_code,
-//             courier: order.shipment.courier,
-//             status: shipmentStatus,
-//             tracking_url: order.shipment.tracking_url || null,
-//             track_now: order.shipment.tracking_url || null,
-//           }
-//           : null,
-//       };
-//     });
-
-//     res.status(200).json({ orders: cleanedOrders });
-//   } catch (err) {
-//     console.error("🔥 Error fetching user orders:", err);
-//     res.status(500).json({ message: "Failed to fetch orders" });
-//   }
-// };
 export const getUserOrders = async (req, res) => {
   try {
     const orders = await Order.find({ user: req.user._id })
@@ -143,6 +78,7 @@ export const getUserOrders = async (req, res) => {
   }
 };
 
+// ----------------------- ORDER INITIATE (unchanged) -----------------------
 // export const initiateOrderFromCart = async (req, res) => {
 //   try {
 //     if (!req.user || !req.user._id) {
@@ -154,7 +90,6 @@ export const getUserOrders = async (req, res) => {
 //     if (!user.cart?.length)
 //       return res.status(400).json({ message: "Cart is empty" });
 
-//     // -------------------- 🧮 Calculate Summary --------------------
 //     const summaryData = await calculateCartSummary(user, {
 //       discount: req.body?.discountCode || req.query?.discount,
 //       pointsToUse: req.body?.pointsToUse || req.query?.pointsToUse,
@@ -177,24 +112,15 @@ export const getUserOrders = async (req, res) => {
 //       return res.status(400).json({ message: "Cart is empty" });
 //     }
 
-//     // 🧾 Debug summary before order creation
-//     console.log("🧾 FINAL CART SUMMARY:", JSON.stringify(cart, null, 2));
-//     console.log("💰 PRICE DETAILS:", priceDetails);
-
-//     // -------------------- 🛍 Fetch DB Products --------------------
 //     const productIds = cart.map((i) => i.product);
 //     const products = await Product.find({ _id: { $in: productIds } }).lean();
 
-//     // -------------------- 🧾 Generate Order ID --------------------
 //     const latestOrder = await Order.findOne().sort({ createdAt: -1 });
 //     const nextOrderNumber = latestOrder ? latestOrder.orderNumber + 1 : 1001;
 //     const orderId = `ORDER-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-//     // -------------------- 🧩 Build Cart Snapshot --------------------
 //     const finalCart = cart.map((item) => {
-//       const product = products.find(
-//         (p) => p._id.toString() === item.product.toString()
-//       );
+//       const product = products.find((p) => p._id.toString() === item.product.toString());
 //       if (!product) throw new Error(`Product not found: ${item.product}`);
 
 //       let dbVariant =
@@ -217,17 +143,6 @@ export const getUserOrders = async (req, res) => {
 //         throw new Error(`Variant not found for product: ${product.name}`);
 //       }
 
-//       // 🧾 Debug variant matching
-//       console.log("🧾 VARIANT MATCH DETAILS:", {
-//         product: product.name,
-//         selectedSku: item.variant?.sku,
-//         dbSku: dbVariant?.sku,
-//         itemDisplayPrice: item.variant?.displayPrice,
-//         dbDiscountedPrice: dbVariant?.discountedPrice,
-//         dbDisplayPrice: dbVariant?.displayPrice,
-//       });
-
-//       // ✅ Final price priority: Use promo-applied cart variant price FIRST
 //       const finalPrice =
 //         item.variant?.discountedPrice ??
 //         item.variant?.displayPrice ??
@@ -244,8 +159,8 @@ export const getUserOrders = async (req, res) => {
 //           dbVariant.images?.length
 //             ? dbVariant.images
 //             : item.variant?.images?.length
-//             ? item.variant.images
-//             : product.images || [],
+//               ? item.variant.images
+//               : product.images || [],
 //         image:
 //           dbVariant.images?.[0] ||
 //           item.variant?.image ||
@@ -263,10 +178,10 @@ export const getUserOrders = async (req, res) => {
 //           item.variant?.discountPercent ??
 //           (dbVariant.originalPrice && dbVariant.discountedPrice
 //             ? Math.round(
-//                 ((dbVariant.originalPrice - dbVariant.discountedPrice) /
-//                   dbVariant.originalPrice) *
-//                   100
-//               )
+//               ((dbVariant.originalPrice - dbVariant.discountedPrice) /
+//                 dbVariant.originalPrice) *
+//               100
+//             )
 //             : 0),
 //         discountAmount:
 //           item.variant?.discountAmount ??
@@ -274,13 +189,6 @@ export const getUserOrders = async (req, res) => {
 //             ? dbVariant.originalPrice - dbVariant.discountedPrice
 //             : 0),
 //       };
-
-//       // 🧾 Debug final price decision
-//       console.log("✅ FINAL VARIANT PRICE USED:", {
-//         product: product.name,
-//         finalPrice,
-//         variantSnapshot,
-//       });
 
 //       const productSnapshot = {
 //         id: product._id,
@@ -299,7 +207,6 @@ export const getUserOrders = async (req, res) => {
 //       };
 //     });
 
-//     // -------------------- 💾 Save Order --------------------
 //     const newOrder = new Order({
 //       products: finalCart,
 //       orderId,
@@ -326,14 +233,6 @@ export const getUserOrders = async (req, res) => {
 
 //     await newOrder.save();
 
-//     // 🧾 Final confirmation log
-//     console.log("✅ ORDER CREATED:", {
-//       id: newOrder._id,
-//       total: grandTotal,
-//       productsCount: finalCart.length,
-//     });
-
-//     // -------------------- 📦 Response --------------------
 //     return res.status(200).json({
 //       message: "✅ Order initiated",
 //       orderId: newOrder._id,
@@ -354,18 +253,20 @@ export const getUserOrders = async (req, res) => {
 //     });
 //   }
 // };
-// ----------------------- ORDER INITIATE (unchanged) -----------------------
 export const initiateOrderFromCart = async (req, res) => {
   try {
+    // ✅ Authentication check
     if (!req.user || !req.user._id) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
+    // ✅ Fetch user + cart
     const user = await User.findById(req.user._id).populate("cart.product");
     if (!user) return res.status(404).json({ message: "User not found" });
     if (!user.cart?.length)
       return res.status(400).json({ message: "Cart is empty" });
 
+    // ✅ Recalculate latest cart summary
     const summaryData = await calculateCartSummary(user, {
       discount: req.body?.discountCode || req.query?.discount,
       pointsToUse: req.body?.pointsToUse || req.query?.pointsToUse,
@@ -388,15 +289,26 @@ export const initiateOrderFromCart = async (req, res) => {
       return res.status(400).json({ message: "Cart is empty" });
     }
 
+    // ✅ Fetch products referenced in cart
     const productIds = cart.map((i) => i.product);
     const products = await Product.find({ _id: { $in: productIds } }).lean();
 
+    // ✅ Generate unique order IDs
     const latestOrder = await Order.findOne().sort({ createdAt: -1 });
     const nextOrderNumber = latestOrder ? latestOrder.orderNumber + 1 : 1001;
     const orderId = `ORDER-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
+    // ✅ Safe enum-based order type validation with fallback
+    const validOrderTypes = ["Online", "COD", "Wallet"];
+    const orderType = validOrderTypes.includes(req.body.orderType)
+      ? req.body.orderType
+      : "Online";
+
+    // ✅ Finalize cart item structure
     const finalCart = cart.map((item) => {
-      const product = products.find((p) => p._id.toString() === item.product.toString());
+      const product = products.find(
+        (p) => p._id.toString() === item.product.toString()
+      );
       if (!product) throw new Error(`Product not found: ${item.product}`);
 
       let dbVariant =
@@ -483,6 +395,7 @@ export const initiateOrderFromCart = async (req, res) => {
       };
     });
 
+    // ✅ Create and save new order
     const newOrder = new Order({
       products: finalCart,
       orderId,
@@ -491,7 +404,7 @@ export const initiateOrderFromCart = async (req, res) => {
       customerName: user.name,
       date: new Date(),
       status: "Pending",
-      orderType: "Online",
+      orderType, // ✅ validated + safe fallback
       amount: grandTotal,
       subtotal: priceDetails.bagMrp,
       totalSavings:
@@ -529,6 +442,7 @@ export const initiateOrderFromCart = async (req, res) => {
     });
   }
 };
+
 export const getOrderTracking = async (req, res) => {
   try {
     const { id } = req.params;
