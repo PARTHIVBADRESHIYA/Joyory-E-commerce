@@ -1,10 +1,10 @@
+import validator from "validator";
 import Payment from '../../../models/settings/payments/Payment.js';
 import PaymentMethod from '../../../models/settings/payments/PaymentMethod.js';
 import Order from '../../../models/Order.js';
 import { encrypt, decrypt } from '../../../middlewares/utils/encryption.js';
 import { createShiprocketOrder, cancelShiprocketShipment } from "../../../middlewares/services/shiprocket.js";
 import { refundQueue } from "../../../middlewares/services/refundQueue.js";
-
 import { sendEmail } from "../../../middlewares/utils/emailService.js"; // ✅ assume you already have an email service
 import Product from '../../../models/Product.js';
 import Affiliate from '../../../models/Affiliate.js';
@@ -55,6 +55,53 @@ const isCodAllowed = ({ pincode, amount, user }) => {
     if (amount > MAX_COD_AMOUNT) return false;
     // add any other business rules here (first order, fraud flags etc)
     return true;
+};
+
+export const isFraudulentCodOrder = async (order, user, shippingAddress) => {
+    const { amount } = order || {};
+    const userId = user?._id;
+    const phone = user?.addresses?.[0]?.phone;
+    const email = user?.email;
+
+    // Basic email and phone validation
+    if (!validator.isEmail(email || "")) {
+        return { isFraud: true, reason: "Invalid or fake email address provided" };
+    }
+    if (!validator.isMobilePhone(phone || "", "en-IN")) {
+        return { isFraud: true, reason: "Invalid phone number format" };
+    }
+
+    // Check high value COD
+    if (amount > 10000) {
+        return { isFraud: true, reason: "High-value COD orders need verification" };
+    }
+
+    // Check COD history
+    const recentCodOrders = await Order.countDocuments({
+        user: userId,
+        paymentMethod: "COD",
+        createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+    });
+    if (recentCodOrders >= 2) {
+        return { isFraud: true, reason: "Too many COD attempts in the last 7 days" };
+    }
+
+    // Past issues
+    const pastRTOIssues = await Order.countDocuments({
+        user: userId,
+        orderStatus: { $in: ["Returned", "Cancelled by Seller"] },
+        paymentMethod: "COD",
+    });
+    if (pastRTOIssues >= 1) {
+        return { isFraud: true, reason: "Past COD returns/cancellations detected" };
+    }
+
+    // ✅ Validate shipping address pincode
+    if (!shippingAddress?.pincode || String(shippingAddress.pincode).length !== 6) {
+        return { isFraud: true, reason: "Incomplete or invalid pincode in the shipping address" };
+    }
+
+    return { isFraud: false };
 };
 
 // export const createRazorpayOrder = async (req, res) => {
@@ -3294,9 +3341,40 @@ export const verifyRazorpayPayment = async (req, res) => {
         try { await session.endSession(); } catch (e) { /* ignore */ }
     }
 };
-/**
- * Step 1 - COD Order Validation
- */
+
+// export const createCodOrder = async (req, res) => {
+//     try {
+//         const { orderId } = req.body;
+//         const userId = req.user?._id;
+
+//         if (!orderId)
+//             return res.status(400).json({ success: false, message: "orderId is required" });
+
+//         const order = await Order.findById(orderId)
+//             .populate("user")
+//             .populate("products.productId");
+
+//         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+//         if (order.paid) return res.status(400).json({ success: false, message: "Already paid" });
+//         if (order.orderType !== "COD")
+//             return res.status(400).json({ success: false, message: "Invalid order type" });
+
+//         return res.status(200).json({
+//             success: true,
+//             step: "STEP_1_VALIDATED",
+//             message: "COD validation passed. Ready for confirmation.",
+//             orderSummary: {
+//                 orderId: order._id,
+//                 amount: order.amount,
+//                 productsCount: order.products?.length || 0,
+//                 customer: order.user?.name || "Guest",
+//             },
+//         });
+//     } catch (err) {
+//         console.error("🔥 COD Step1 Error:", err);
+//         return res.status(500).json({ success: false, message: err.message });
+//     }
+// };
 export const createCodOrder = async (req, res) => {
     try {
         const { orderId } = req.body;
@@ -3313,6 +3391,26 @@ export const createCodOrder = async (req, res) => {
         if (order.paid) return res.status(400).json({ success: false, message: "Already paid" });
         if (order.orderType !== "COD")
             return res.status(400).json({ success: false, message: "Invalid order type" });
+
+        // Check if fraud flagged
+        const fraudCheck = await isFraudulentCodOrder(order, order.user, req.body.shippingAddress);
+        if (fraudCheck.isFraud) {
+            // Send warning email to the user
+            await sendEmail(
+                order.user.email,
+                "⚠️ COD Order Rejected (Fraudulent Activity Detected)",
+                `<p>Hi ${order.user.name},</p>
+                <p>Your Cash on Delivery order <strong>#${order._id}</strong> has been rejected because: <em>${fraudCheck.reason}</em>.</p>
+                <p>Please use prepaid payment for secure delivery.</p>
+                <p>Regards,<br/>Team Joyory Beauty</p>`
+            );
+
+            return res.status(400).json({
+                success: false,
+                step: "DENIED_FRAUD_RISK",
+                message: "COD not available: " + fraudCheck.reason,
+            });
+        }
 
         return res.status(200).json({
             success: true,
@@ -3331,9 +3429,6 @@ export const createCodOrder = async (req, res) => {
     }
 };
 
-/**
- * Step 2 - Confirm COD Order
- */
 export const confirmCodOrder = async (req, res) => {
     const session = await mongoose.startSession();
     try {
@@ -3349,25 +3444,38 @@ export const confirmCodOrder = async (req, res) => {
         if (order.paid || order.orderStatus === "Cancelled")
             return res.status(400).json({ success: false, message: "Order cannot be confirmed" });
 
+        // Final fraud check (e.g., between step 1 and confirm, user might change info)
+        const fraudCheck = await isFraudulentCodOrder(order, order.user, req.body.shippingAddress);
+        if (fraudCheck.isFraud) {
+            await sendEmail(
+                order.user.email,
+                "⚠️ COD Order Blocked (Fraud Risk)",
+                `<p>Hi ${order.user.name},</p>
+                <p>Unfortunately we could not proceed with your order <strong>#${order._id}</strong> due to:</p>
+                <p><em>${fraudCheck.reason}</em>.</p>
+                <p>Please try prepaid payment to confirm delivery.</p>
+                <p>Regards,<br/>Team Joyory Beauty</p>`
+            );
+            return res.status(400).json({ success: false, message: "COD denied: " + fraudCheck.reason });
+        }
+
+        // COD eligibility check based on pincode or amount
         const deliveryPincode = shippingAddress?.pincode || order.shippingAddress?.pincode;
         if (!isCodAllowed({ pincode: deliveryPincode, amount: order.amount })) {
             return res.status(400).json({ success: false, message: "COD not available for this location/amount" });
         }
 
-        const affectedProductIds = new Set();
-
         await session.withTransaction(async () => {
             const txOrder = await Order.findById(orderId).session(session).populate("products.productId");
             if (!txOrder) throw new Error("Order disappeared during transaction");
 
-            // Deduct stock safely
+            // ✅ Deduct stock
             for (const item of txOrder.products) {
                 const product = await Product.findById(item.productId).session(session);
                 if (!product) throw new Error(`Product not found: ${item.productId}`);
 
                 const qty = Number(item.quantity || 0);
                 if (qty <= 0) continue;
-                affectedProductIds.add(String(product._id));
 
                 if (item.variant?.sku) {
                     const variant = product.variants.find(v => String(v.sku) === String(item.variant.sku));
@@ -3379,11 +3487,10 @@ export const confirmCodOrder = async (req, res) => {
                     product.quantity -= qty;
                     product.sales += qty;
                 }
-
                 await product.save({ session });
             }
 
-            // Update order + create Payment doc
+            // ✅ Update order + create payment
             txOrder.paymentMethod = "COD";
             txOrder.paid = false;
             txOrder.paymentStatus = "pending";
@@ -3403,7 +3510,6 @@ export const confirmCodOrder = async (req, res) => {
             );
 
             if (paymentDoc) txOrder.paymentId = paymentDoc._id;
-
             await User.updateOne({ _id: txOrder.user._id }, { $set: { cart: [] } }, { session });
 
             txOrder.trackingHistory = [
@@ -3411,26 +3517,31 @@ export const confirmCodOrder = async (req, res) => {
                 { status: "Order Placed (COD)", timestamp: new Date(), location: "Store" },
                 { status: "Processing", timestamp: new Date(), location: "Store" },
             ];
-
             await txOrder.save({ session });
         });
 
-        // Post-commit: enqueue for Shiprocket
+        // Post Transaction – Queue for Shipment
         try {
             await enqueueShipmentJob({ orderId });
         } catch (err) {
             console.warn("Shiprocket queue fallback:", err.message);
-            try {
-                const result = await createShiprocketOrder(order);
-                if (result?.shipmentDetails) {
-                    order.shipment = result.shipmentDetails;
-                    order.trackingHistory.push({ status: "Shipment Created", timestamp: new Date(), location: "Shiprocket" });
-                    await order.save();
-                }
-            } catch (shipErr) {
-                console.error("Shiprocket fallback failed:", shipErr.message);
+            const result = await createShiprocketOrder(order);
+            if (result?.shipmentDetails) {
+                order.shipment = result.shipmentDetails;
+                order.trackingHistory.push({ status: "Shipment Created", timestamp: new Date(), location: "Shiprocket" });
+                await order.save();
             }
         }
+
+        // Send COD confirmation email
+        await sendEmail(
+            order.user.email,
+            "🎉 Your COD Order is Confirmed!",
+            `<p>Hi ${order.user.name},</p>
+            <p>Your COD order <strong>#${order._id}</strong> has been confirmed and is now being processed.</p>
+            <p>We’ll notify you once it’s shipped.</p>
+            <p>Regards,<br/>Team Joyory Beauty</p>`
+        );
 
         const refreshed = await Order.findById(orderId).populate("user").populate("products.productId");
         return res.status(200).json({
@@ -3445,6 +3556,119 @@ export const confirmCodOrder = async (req, res) => {
         await session.endSession();
     }
 };
+
+// export const confirmCodOrder = async (req, res) => {
+//     const session = await mongoose.startSession();
+//     try {
+//         const { orderId, shippingAddress } = req.body;
+//         const userId = req.user?._id;
+
+//         if (!orderId || !userId)
+//             return res.status(400).json({ success: false, message: "Invalid request" });
+
+//         const order = await Order.findById(orderId).populate("user").populate("products.productId");
+//         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+//         if (order.paid || order.orderStatus === "Cancelled")
+//             return res.status(400).json({ success: false, message: "Order cannot be confirmed" });
+
+//         const deliveryPincode = shippingAddress?.pincode || order.shippingAddress?.pincode;
+//         if (!isCodAllowed({ pincode: deliveryPincode, amount: order.amount })) {
+//             return res.status(400).json({ success: false, message: "COD not available for this location/amount" });
+//         }
+
+//         const affectedProductIds = new Set();
+
+//         await session.withTransaction(async () => {
+//             const txOrder = await Order.findById(orderId).session(session).populate("products.productId");
+//             if (!txOrder) throw new Error("Order disappeared during transaction");
+
+//             // Deduct stock safely
+//             for (const item of txOrder.products) {
+//                 const product = await Product.findById(item.productId).session(session);
+//                 if (!product) throw new Error(`Product not found: ${item.productId}`);
+
+//                 const qty = Number(item.quantity || 0);
+//                 if (qty <= 0) continue;
+//                 affectedProductIds.add(String(product._id));
+
+//                 if (item.variant?.sku) {
+//                     const variant = product.variants.find(v => String(v.sku) === String(item.variant.sku));
+//                     if (!variant || variant.stock < qty) throw new Error(`Not enough stock for ${item.variant.sku}`);
+//                     variant.stock -= qty;
+//                     variant.sales += qty;
+//                 } else {
+//                     if (product.quantity < qty) throw new Error(`Not enough stock for ${product.name}`);
+//                     product.quantity -= qty;
+//                     product.sales += qty;
+//                 }
+
+//                 await product.save({ session });
+//             }
+
+//             // Update order + create Payment doc
+//             txOrder.paymentMethod = "COD";
+//             txOrder.paid = false;
+//             txOrder.paymentStatus = "pending";
+//             txOrder.orderStatus = "Processing";
+//             if (shippingAddress) txOrder.shippingAddress = shippingAddress;
+
+//             const [paymentDoc] = await Payment.create(
+//                 [
+//                     {
+//                         order: txOrder._id,
+//                         method: "COD",
+//                         status: "Pending",
+//                         amount: txOrder.amount,
+//                     },
+//                 ],
+//                 { session }
+//             );
+
+//             if (paymentDoc) txOrder.paymentId = paymentDoc._id;
+
+//             await User.updateOne({ _id: txOrder.user._id }, { $set: { cart: [] } }, { session });
+
+//             txOrder.trackingHistory = [
+//                 ...(txOrder.trackingHistory || []),
+//                 { status: "Order Placed (COD)", timestamp: new Date(), location: "Store" },
+//                 { status: "Processing", timestamp: new Date(), location: "Store" },
+//             ];
+
+//             await txOrder.save({ session });
+//         });
+
+//         // Post-commit: enqueue for Shiprocket
+//         try {
+//             await enqueueShipmentJob({ orderId });
+//         } catch (err) {
+//             console.warn("Shiprocket queue fallback:", err.message);
+//             try {
+//                 const result = await createShiprocketOrder(order);
+//                 if (result?.shipmentDetails) {
+//                     order.shipment = result.shipmentDetails;
+//                     order.trackingHistory.push({ status: "Shipment Created", timestamp: new Date(), location: "Shiprocket" });
+//                     await order.save();
+//                 }
+//             } catch (shipErr) {
+//                 console.error("Shiprocket fallback failed:", shipErr.message);
+//             }
+//         }
+
+//         const refreshed = await Order.findById(orderId).populate("user").populate("products.productId");
+//         return res.status(200).json({
+//             success: true,
+//             message: "✅ COD order confirmed & queued for shipment",
+//             order: refreshed,
+//         });
+//     } catch (err) {
+//         console.error("confirmCodOrder Error:", err);
+//         return res.status(500).json({ success: false, message: err.message });
+//     } finally {
+//         await session.endSession();
+//     }
+// };
+
 // export const createCodOrder = async (req, res) => {
 //     const session = await mongoose.startSession();
 
