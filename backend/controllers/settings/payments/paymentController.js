@@ -4098,11 +4098,21 @@ export const cancelOrder = async (req, res) => {
                 console.error("⚠️ Refund trigger failed:", refundErr.message);
             }
         }
+        // Determine available refund methods dynamically
+        const refundMethodsAvailable = [];
+        refundMethodsAvailable.push({ method: "razorpay", label: "Original Payment Method" });
+        refundMethodsAvailable.push({ method: "wallet", label: "Add to Joyory Wallet" });
 
+        // You can add more methods in future conditionally:
+        // if (someCondition) refundMethodsAvailable.push({ method: "manual_upi", label: "Manual UPI Refund" });
+
+        // ✅ Now send only what’s needed
         res.status(200).json({
             success: true,
             message: "✅ Order cancelled successfully. Refund initiated if applicable.",
-            order,
+            orderId: order._id,
+            paymentStatus: order.paymentStatus,
+            refundMethodsAvailable,
         });
 
     } catch (err) {
