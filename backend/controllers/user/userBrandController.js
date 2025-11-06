@@ -8,7 +8,7 @@ import Promotion from "../../models/Promotion.js";
 import SkinType from "../../models/SkinType.js";
 
 // 🔹 helpers (same as category controller)
-import {  enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
+import { enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
 import { normalizeFilters, applyDynamicFilters, normalizeImages } from "../../controllers/user/userProductController.js";
 
 export const getAllBrands = async (req, res) => {
@@ -124,8 +124,16 @@ export const getBrandCategoryProducts = async (req, res) => {
             skinTypes: products[i].skinTypes || []
         }));
 
+        const brandData = {
+            _id: brand._id,
+            name: brand.name,
+            slug: brand.slug,
+            logo: brand.logo || null,
+            banner: brand.banner || null
+        };
+
         return res.status(200).json({
-            brand,
+            brand: brandData,
             category,
             products: productsWithRelations,
             pagination: {
@@ -210,8 +218,7 @@ export const getBrandLanding = async (req, res) => {
             .lean();
 
         return res.status(200).json({
-            brandBanner: brand.banner || null,
-            brand: { _id: brand._id, name: brand.name, logo: brand.logo },
+            brand: { _id: brand._id, name: brand.name, logo: brand.logo , banner: brand.banner},
             products: productsWithRelations,
             categories,
             pagination: {
