@@ -752,3 +752,11 @@ export const updateOrderStatus = async (req, res) => {
     }
 };
 
+export const retryFailedShipments = async (req, res) => {
+    try {
+        await retryFailedShipments();
+        res.json({ success: true, message: "Retried all failed shipments" });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+}

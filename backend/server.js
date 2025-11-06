@@ -416,6 +416,7 @@ import connectDB from "./config/db.js";
 import cron from "node-cron";
 import "./middlewares/utils/cron/scheduler.js";
 import "./middlewares/utils/cron/promotionScheduler.js";
+import "./middlewares/utils/cron/shiprocketRetry.js";
 import { startTrackingJob } from "./middlewares/utils/cron/shiprocketTrackingJob.js";
 import "./middlewares/utils/cron/autoPayout.js";
 
