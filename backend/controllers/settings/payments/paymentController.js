@@ -76,15 +76,15 @@ export const isFraudulentCodOrder = async (order, user, shippingAddress) => {
         return { isFraud: true, reason: "High-value COD orders need verification" };
     }
 
-    // Check COD history
-    const recentCodOrders = await Order.countDocuments({
-        user: userId,
-        paymentMethod: "COD",
-        createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
-    });
-    if (recentCodOrders >= 5) {
-        return { isFraud: true, reason: "Too many COD attempts in the last 7 days" };
-    }
+    // // Check COD history
+    // const recentCodOrders = await Order.countDocuments({
+    //     user: userId,
+    //     paymentMethod: "COD",
+    //     createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+    // });
+    // if (recentCodOrders >= 5) {
+    //     return { isFraud: true, reason: "Too many COD attempts in the last 7 days" };
+    // }
 
     // Past issues
     const pastRTOIssues = await Order.countDocuments({
