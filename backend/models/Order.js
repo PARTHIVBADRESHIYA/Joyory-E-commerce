@@ -69,8 +69,10 @@ const orderSchema = new mongoose.Schema({
     date: { type: Date, required: true },
     customerName: { type: String, required: true },
     status: { type: String, enum: ['Pending', 'Delivered', 'Cancelled', 'Completed'], default: 'Pending' },
-    orderType: { type: String, enum: ['COD', 'Online', 'Credit card'], required: true },
-    discount: { type: mongoose.Schema.Types.ObjectId, ref: 'Discount', default: null },
+    orderType: {
+        type: String, enum: ['COD', 'Online', 'Credit card'], default: null // ✅ we set it later
+    },
+    discount: { type: String, default: null },
     discountCode: String,
     discountAmount: Number,
     affiliate: { type: mongoose.Schema.Types.ObjectId, ref: 'Affiliate' },

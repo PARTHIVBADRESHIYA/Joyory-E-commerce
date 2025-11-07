@@ -1,9 +1,12 @@
 import express from 'express';
 import { verifyAdminOrTeamMember, authenticateUser, verifyOrderOwnership } from '../../../middlewares/authMiddleware.js';
-import {  filterPaymentsByDate, getDashboardSummary, getPaymentsFiltered, payForOrder,cancelOrder,getActivePaymentMethods,createCodOrder,confirmCodOrder, initiateRefund,createRazorpayOrder,verifyRazorpayPayment } from '../../../controllers/settings/payments/paymentController.js';
+import {  filterPaymentsByDate, getDashboardSummary, getPaymentsFiltered, payForOrder,cancelOrder,setPaymentMethod,getActivePaymentMethods,createCodOrder,confirmCodOrder, initiateRefund,createRazorpayOrder,verifyRazorpayPayment } from '../../../controllers/settings/payments/paymentController.js';
 // import { userPaymentValidation } from "../../../middlewares/paymentValidation.js";
 
 const router = express.Router();
+
+
+router.post('/set-payment-method', authenticateUser, setPaymentMethod);
 
 router.post(
     '/pay/:orderId',

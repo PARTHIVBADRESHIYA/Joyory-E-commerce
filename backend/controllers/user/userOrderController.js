@@ -253,6 +253,7 @@ export const getUserOrders = async (req, res) => {
 //     });
 //   }
 // };
+
 export const initiateOrderFromCart = async (req, res) => {
   try {
     // ✅ Authentication check
@@ -298,11 +299,11 @@ export const initiateOrderFromCart = async (req, res) => {
     const nextOrderNumber = latestOrder ? latestOrder.orderNumber + 1 : 1001;
     const orderId = `ORDER-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-    // ✅ Safe enum-based order type validation with fallback
-    const validOrderTypes = ["Online", "COD", "Wallet"];
-    const orderType = validOrderTypes.includes(req.body.orderType)
-      ? req.body.orderType
-      : "Online";
+    // // ✅ Safe enum-based order type validation with fallback
+    // const validOrderTypes = ["Online", "COD", "Wallet"];
+    // const orderType = validOrderTypes.includes(req.body.orderType)
+    //   ? req.body.orderType
+    //   : "Online";
 
     // ✅ Finalize cart item structure
     const finalCart = cart.map((item) => {
@@ -404,7 +405,7 @@ export const initiateOrderFromCart = async (req, res) => {
       customerName: user.name,
       date: new Date(),
       status: "Pending",
-      orderType, // ✅ validated + safe fallback
+      orderType: null, // ✅ will be updated later
       amount: grandTotal,
       subtotal: priceDetails.bagMrp,
       totalSavings:
@@ -426,6 +427,7 @@ export const initiateOrderFromCart = async (req, res) => {
       message: "✅ Order initiated",
       orderId: newOrder._id,
       displayOrderId: newOrder.orderId,
+      nextStep: "SELECT_PAYMENT_METHOD",   // ✅ add this
       finalAmount: grandTotal,
       priceBreakdown: priceDetails,
       cart: finalCart,

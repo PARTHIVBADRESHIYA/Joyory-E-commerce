@@ -3005,6 +3005,54 @@ export const isFraudulentCodOrder = async (order, user, shippingAddress) => {
 //     }
 // };
 
+export const setPaymentMethod = async (req, res) => {
+    try {
+        const { orderId, paymentMethod } = req.body;
+
+        if (!orderId || !paymentMethod)
+            return res.status(400).json({ success: false, message: "orderId & paymentMethod required" });
+
+        // ✅ Normalize input
+        const normalized = paymentMethod.toUpperCase();
+
+        const valid = ["COD", "ONLINE"];
+        if (!valid.includes(normalized))
+            return res.status(400).json({ success: false, message: "Invalid payment method" });
+
+        const order = await Order.findById(orderId);
+        if (!order) return res.status(404).json({ message: "Order not found" });
+
+        if (order.paid)
+            return res.status(400).json({ message: "Order already paid" });
+
+        // ✅ Normalize and FIX save value (schema uses "Online")
+        if (normalized === "ONLINE") {
+            order.orderType = "Online";       // ✅ correct
+            order.paymentMethod = "Online";   // ✅ correct
+        }
+
+        if (normalized === "COD") {
+            order.orderType = "COD";
+            order.paymentMethod = "COD";
+        }
+
+        await order.save();  // ✅ now we save actual updated value
+
+        // ✅ return flow
+        return res.json({
+            success: true,
+            next: normalized === "COD" ? "COD_FLOW" : "ONLINE_FLOW",
+            message:
+                normalized === "COD"
+                    ? "COD selected. Proceed to /createCodOrder"
+                    : "Online payment selected. Proceed to /createRazorpayOrder",
+        });
+
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};
+
 
 /**
  * 🧾 Create Razorpay Order
@@ -3040,6 +3088,14 @@ export const createRazorpayOrder = async (req, res) => {
         if (!order.amount || order.amount <= 0) {
             return res.status(400).json({ success: false, message: "❌ Invalid order amount" });
         }
+
+        if (order.orderType !== "Online") {
+            return res.status(400).json({
+                success: false,
+                message: "Payment method must be ONLINE before creating Razorpay order",
+            });
+        }
+
 
         const amountInPaise = Math.round(order.amount * 100);
 
