@@ -174,9 +174,191 @@ export const addOrder = async (req, res) => {
     }
 };
 
+// export const getAllOrders = async (req, res) => {
+//     try {
+//         const { status, orderType, fromDate, toDate } = req.query;
+//         const query = {};
+
+//         // ✅ Filter by status
+//         if (status && status !== "all") {
+//             query.status = status;
+//         }
+
+//         // ✅ Filter by orderType
+//         if (orderType && orderType !== "all") {
+//             query.orderType = orderType;
+//         }
+
+//         // ✅ Filter by date range
+//         if (fromDate && toDate) {
+//             query.date = {
+//                 $gte: new Date(fromDate),
+//                 $lte: new Date(toDate)
+//             };
+//         } else if (fromDate) {
+//             query.date = { $gte: new Date(fromDate) };
+//         } else if (toDate) {
+//             query.date = { $lte: new Date(toDate) };
+//         }
+
+//         const orders = await Order.find(query)
+//             .populate('products.productId', 'name')
+//             .sort({ createdAt: -1 });
+
+//         const formatted = orders.map(order => ({
+//             _id: order._id,                  // Mongo default
+//             orderId: order.orderId,
+//             date: order.date?.toDateString() || "N/A",
+//             customerName: order.customerName || "Unknown",
+//             status: order.status,
+//             orderType: order.orderType,
+//             amount: `₹${order.amount}`,
+//             products: order.products.map(p => ({
+//                 name: p.productId?.name || 'Unknown',
+//                 quantity: p.quantity,
+//                 price: `₹${p.price}`
+//             }))
+//         }));
+
+//         res.status(200).json(formatted);
+//     } catch (error) {
+//         console.error(error);
+//         res.status(500).json({ message: 'Failed to fetch orders', error });
+//     }
+// };
+
+// Get summary metrics for dashboard
+
+// export const getOrderSummary = async (req, res) => {
+//     try {
+//         const { range = "7d" } = req.query; // options: 1d, 7d, 1m, 1y
+
+//         // ---- Helper: Date Range Builder ----
+//         const now = new Date();
+//         const getDateRange = (type) => {
+//             const end = new Date(now);
+//             const start = new Date(now);
+//             switch (type) {
+//                 case "1d":
+//                     start.setDate(now.getDate() - 1);
+//                     break;
+//                 case "7d":
+//                     start.setDate(now.getDate() - 7);
+//                     break;
+//                 case "1m":
+//                     start.setMonth(now.getMonth() - 1);
+//                     break;
+//                 case "1y":
+//                     start.setFullYear(now.getFullYear() - 1);
+//                     break;
+//                 default:
+//                     start.setDate(now.getDate() - 7);
+//             }
+//             return { start, end };
+//         };
+
+//         const { start: currentStart, end: currentEnd } = getDateRange(range);
+
+//         // ---- Helper: Previous Range ----
+//         const getPreviousRange = (type) => {
+//             const prevEnd = new Date(currentStart);
+//             const prevStart = new Date(currentStart);
+//             switch (type) {
+//                 case "1d":
+//                     prevStart.setDate(prevEnd.getDate() - 1);
+//                     break;
+//                 case "7d":
+//                     prevStart.setDate(prevEnd.getDate() - 7);
+//                     break;
+//                 case "1m":
+//                     prevStart.setMonth(prevEnd.getMonth() - 1);
+//                     break;
+//                 case "1y":
+//                     prevStart.setFullYear(prevEnd.getFullYear() - 1);
+//                     break;
+//                 default:
+//                     prevStart.setDate(prevEnd.getDate() - 7);
+//             }
+//             return { prevStart, prevEnd };
+//         };
+
+//         const { prevStart, prevEnd } = getPreviousRange(range);
+
+//         // ---- Helper: Percentage Change ----
+//         const pctChange = (curr, prev) => {
+//             if (prev === 0 && curr > 0) return { change: 100, trend: "up" };
+//             if (prev === 0 && curr === 0) return { change: 0, trend: "no-change" };
+
+//             const diff = ((curr - prev) / prev) * 100;
+//             return {
+//                 change: Math.abs(diff.toFixed(2)),
+//                 trend: diff > 0 ? "up" : diff < 0 ? "down" : "no-change",
+//             };
+//         };
+
+//         // ===== Current Range Data =====
+//         const [totalOrders, newOrders, completedOrders, cancelledOrders] = await Promise.all([
+//             Order.countDocuments({ createdAt: { $gte: currentStart, $lte: currentEnd } }), // ✅ range-based total
+//             Order.countDocuments({ createdAt: { $gte: currentStart, $lte: currentEnd } }), // ✅ same as total for now
+//             Order.countDocuments({
+//                 status: { $in: ["Delivered", "Completed"] },
+//                 createdAt: { $gte: currentStart, $lte: currentEnd },
+//             }),
+//             Order.countDocuments({
+//                 status: "Cancelled",
+//                 createdAt: { $gte: currentStart, $lte: currentEnd },
+//             }),
+//         ]);
+
+//         // ===== Previous Range Data =====
+//         const [prevTotalOrders, prevNewOrders, prevCompletedOrders, prevCancelledOrders] = await Promise.all([
+//             Order.countDocuments({ createdAt: { $gte: prevStart, $lt: prevEnd } }),
+//             Order.countDocuments({ createdAt: { $gte: prevStart, $lt: prevEnd } }),
+//             Order.countDocuments({
+//                 status: { $in: ["Delivered", "Completed"] },
+//                 createdAt: { $gte: prevStart, $lt: prevEnd },
+//             }),
+//             Order.countDocuments({
+//                 status: "Cancelled",
+//                 createdAt: { $gte: prevStart, $lt: prevEnd },
+//             }),
+//         ]);
+
+//         // ===== Response =====
+//         res.json({
+//             range,
+//             totalOrders: {
+//                 count: totalOrders,
+//                 change: pctChange(totalOrders, prevTotalOrders),
+//                 note: `Last ${range}`,
+//             },
+//             newOrders: {
+//                 count: newOrders,
+//                 change: pctChange(newOrders, prevNewOrders),
+//                 note: `Last ${range}`,
+//             },
+//             completedOrders: {
+//                 count: completedOrders,
+//                 change: pctChange(completedOrders, prevCompletedOrders),
+//                 note: `Last ${range}`,
+//             },
+//             cancelledOrders: {
+//                 count: cancelledOrders,
+//                 change: pctChange(cancelledOrders, prevCancelledOrders),
+//                 note: `Last ${range}`,
+//             },
+//         });
+//     } catch (error) {
+//         console.error(error);
+//         res.status(500).json({
+//             message: "Error generating order summary",
+//             error: error.message,
+//         });
+//     }
+// };
 export const getAllOrders = async (req, res) => {
     try {
-        const { status, orderType, fromDate, toDate } = req.query;
+        const { status, orderType, fromDate, toDate, paid } = req.query;
         const query = {};
 
         // ✅ Filter by status
@@ -187,6 +369,20 @@ export const getAllOrders = async (req, res) => {
         // ✅ Filter by orderType
         if (orderType && orderType !== "all") {
             query.orderType = orderType;
+        }
+
+        // ✅ Filter by PAID / UNPAID
+        if (paid === "true") {
+            query.$or = [
+                { paid: true },
+                { paymentStatus: /paid/i },
+                { paymentStatus: "success" }
+            ];
+        } else if (paid === "false") {
+            query.$or = [
+                { paid: false },
+                { paymentStatus: /pending|failed|cancelled/i }
+            ];
         }
 
         // ✅ Filter by date range
@@ -201,17 +397,23 @@ export const getAllOrders = async (req, res) => {
             query.date = { $lte: new Date(toDate) };
         }
 
+        // ✅ Fetch orders
         const orders = await Order.find(query)
             .populate('products.productId', 'name')
             .sort({ createdAt: -1 });
 
+        // ✅ Format response
         const formatted = orders.map(order => ({
-            _id: order._id,                  // Mongo default
+            _id: order._id,
             orderId: order.orderId,
             date: order.date?.toDateString() || "N/A",
             customerName: order.customerName || "Unknown",
             status: order.status,
             orderType: order.orderType,
+
+            paid: order.paid,
+            paymentStatus: order.paymentStatus,
+
             amount: `₹${order.amount}`,
             products: order.products.map(p => ({
                 name: p.productId?.name || 'Unknown',
@@ -226,321 +428,362 @@ export const getAllOrders = async (req, res) => {
         res.status(500).json({ message: 'Failed to fetch orders', error });
     }
 };
-// Get summary metrics for dashboard
 
-export const getOrderSummary = async (req, res) => {
-    try {
-        const { range = "7d" } = req.query; // options: 1d, 7d, 1m, 1y
-
-        // ---- Helper: Date Range Builder ----
-        const now = new Date();
-        const getDateRange = (type) => {
-            const end = new Date(now);
-            const start = new Date(now);
-            switch (type) {
-                case "1d":
-                    start.setDate(now.getDate() - 1);
-                    break;
-                case "7d":
-                    start.setDate(now.getDate() - 7);
-                    break;
-                case "1m":
-                    start.setMonth(now.getMonth() - 1);
-                    break;
-                case "1y":
-                    start.setFullYear(now.getFullYear() - 1);
-                    break;
-                default:
-                    start.setDate(now.getDate() - 7);
-            }
-            return { start, end };
-        };
-
-        const { start: currentStart, end: currentEnd } = getDateRange(range);
-
-        // ---- Helper: Previous Range ----
-        const getPreviousRange = (type) => {
-            const prevEnd = new Date(currentStart);
-            const prevStart = new Date(currentStart);
-            switch (type) {
-                case "1d":
-                    prevStart.setDate(prevEnd.getDate() - 1);
-                    break;
-                case "7d":
-                    prevStart.setDate(prevEnd.getDate() - 7);
-                    break;
-                case "1m":
-                    prevStart.setMonth(prevEnd.getMonth() - 1);
-                    break;
-                case "1y":
-                    prevStart.setFullYear(prevEnd.getFullYear() - 1);
-                    break;
-                default:
-                    prevStart.setDate(prevEnd.getDate() - 7);
-            }
-            return { prevStart, prevEnd };
-        };
-
-        const { prevStart, prevEnd } = getPreviousRange(range);
-
-        // ---- Helper: Percentage Change ----
-        const pctChange = (curr, prev) => {
-            if (prev === 0 && curr > 0) return { change: 100, trend: "up" };
-            if (prev === 0 && curr === 0) return { change: 0, trend: "no-change" };
-
-            const diff = ((curr - prev) / prev) * 100;
-            return {
-                change: Math.abs(diff.toFixed(2)),
-                trend: diff > 0 ? "up" : diff < 0 ? "down" : "no-change",
-            };
-        };
-
-        // ===== Current Range Data =====
-        const [totalOrders, newOrders, completedOrders, cancelledOrders] = await Promise.all([
-            Order.countDocuments({ createdAt: { $gte: currentStart, $lte: currentEnd } }), // ✅ range-based total
-            Order.countDocuments({ createdAt: { $gte: currentStart, $lte: currentEnd } }), // ✅ same as total for now
-            Order.countDocuments({
-                status: { $in: ["Delivered", "Completed"] },
-                createdAt: { $gte: currentStart, $lte: currentEnd },
-            }),
-            Order.countDocuments({
-                status: "Cancelled",
-                createdAt: { $gte: currentStart, $lte: currentEnd },
-            }),
-        ]);
-
-        // ===== Previous Range Data =====
-        const [prevTotalOrders, prevNewOrders, prevCompletedOrders, prevCancelledOrders] = await Promise.all([
-            Order.countDocuments({ createdAt: { $gte: prevStart, $lt: prevEnd } }),
-            Order.countDocuments({ createdAt: { $gte: prevStart, $lt: prevEnd } }),
-            Order.countDocuments({
-                status: { $in: ["Delivered", "Completed"] },
-                createdAt: { $gte: prevStart, $lt: prevEnd },
-            }),
-            Order.countDocuments({
-                status: "Cancelled",
-                createdAt: { $gte: prevStart, $lt: prevEnd },
-            }),
-        ]);
-
-        // ===== Response =====
-        res.json({
-            range,
-            totalOrders: {
-                count: totalOrders,
-                change: pctChange(totalOrders, prevTotalOrders),
-                note: `Last ${range}`,
-            },
-            newOrders: {
-                count: newOrders,
-                change: pctChange(newOrders, prevNewOrders),
-                note: `Last ${range}`,
-            },
-            completedOrders: {
-                count: completedOrders,
-                change: pctChange(completedOrders, prevCompletedOrders),
-                note: `Last ${range}`,
-            },
-            cancelledOrders: {
-                count: cancelledOrders,
-                change: pctChange(cancelledOrders, prevCancelledOrders),
-                note: `Last ${range}`,
-            },
-        });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({
-            message: "Error generating order summary",
-            error: error.message,
-        });
-    }
-};
 // export const getOrderSummary = async (req, res) => {
 //     try {
+//         const { range = "7d" } = req.query;
+
+//         // ---------------- Range Helpers ----------------
 //         const now = new Date();
+//         const buildRange = (r) => {
+//             const end = new Date(now);
+//             const start = new Date(now);
 
-//         // Current week (last 7 days)
-//         const lastWeekStart = new Date();
-//         lastWeekStart.setDate(now.getDate() - 7);
-
-//         // Previous week (7–14 days ago)
-//         const prevWeekStart = new Date();
-//         prevWeekStart.setDate(now.getDate() - 14);
-
-//         // --- Current stats ---
-//         const current = {
-//             totalOrders: await Order.countDocuments(), // ✅ all time
-//             totalOrdersWeek: await Order.countDocuments({ createdAt: { $gte: lastWeekStart } }), // ✅ for trend only
-
-//             newOrders: await Order.countDocuments({ createdAt: { $gte: lastWeekStart } }),
-
-//             completedOrders: await Order.countDocuments({
-//                 status: { $in: ["Delivered", "Completed"] },
-//                 createdAt: { $gte: lastWeekStart }
-//             }),
-
-//             cancelledOrders: await Order.countDocuments({
-//                 status: "Cancelled",
-//                 createdAt: { $gte: lastWeekStart }
-//             })
+//             switch (r) {
+//                 case "1d": start.setDate(now.getDate() - 1); break;
+//                 case "7d": start.setDate(now.getDate() - 7); break;
+//                 case "1m": start.setMonth(now.getMonth() - 1); break;
+//                 case "1y": start.setFullYear(now.getFullYear() - 1); break;
+//                 default: start.setDate(now.getDate() - 7);
+//             }
+//             return { start, end };
 //         };
 
-//         // --- Previous week stats ---
-//         const prev = {
-//             totalOrdersWeek: await Order.countDocuments({
-//                 createdAt: { $gte: prevWeekStart, $lt: lastWeekStart }
-//             }),
+//         const { start: currentStart, end: currentEnd } = buildRange(range);
 
-//             newOrders: await Order.countDocuments({
-//                 createdAt: { $gte: prevWeekStart, $lt: lastWeekStart }
-//             }),
+//         const buildPrevRange = (r, currentStart) => {
+//             const prevEnd = new Date(currentStart);
+//             const prevStart = new Date(currentStart);
 
-//             completedOrders: await Order.countDocuments({
-//                 status: { $in: ["Delivered", "Completed"] },
-//                 createdAt: { $gte: prevWeekStart, $lt: lastWeekStart }
-//             }),
-
-//             cancelledOrders: await Order.countDocuments({
-//                 status: "Cancelled",
-//                 createdAt: { $gte: prevWeekStart, $lt: lastWeekStart }
-//             })
+//             switch (r) {
+//                 case "1d": prevStart.setDate(prevEnd.getDate() - 1); break;
+//                 case "7d": prevStart.setDate(prevEnd.getDate() - 7); break;
+//                 case "1m": prevStart.setMonth(prevEnd.getMonth() - 1); break;
+//                 case "1y": prevStart.setFullYear(prevEnd.getFullYear() - 1); break;
+//                 default: prevStart.setDate(prevEnd.getDate() - 7);
+//             }
+//             return { prevStart, prevEnd };
 //         };
 
-//         // Always return { change, trend }
+//         const { prevStart, prevEnd } = buildPrevRange(range, currentStart);
+
+//         // ---------------- % Helper ----------------
 //         const pctChange = (curr, prev) => {
 //             if (prev === 0 && curr > 0) return { change: 100, trend: "up" };
 //             if (prev === 0 && curr === 0) return { change: 0, trend: "no-change" };
-
 //             const diff = ((curr - prev) / prev) * 100;
 //             return {
-//                 change: Math.abs(diff.toFixed(2)),
+//                 change: Number(Math.abs(diff).toFixed(2)),
 //                 trend: diff > 0 ? "up" : diff < 0 ? "down" : "no-change"
 //             };
 //         };
 
+//         // ---------------- TOTAL ORDERS ----------------
+//         const [totalOrders, prevTotalOrders] = await Promise.all([
+//             Order.countDocuments({ createdAt: { $gte: currentStart, $lte: currentEnd } }),
+//             Order.countDocuments({ createdAt: { $gte: prevStart, $lt: prevEnd } })
+//         ]);
+
+//         // ---------------- REFUNDED ORDERS ----------------
+//         const refundedFilterCurrent = {
+//             "refund.isRefunded": true,
+//             $or: [
+//                 { "refund.refundAt": { $gte: currentStart, $lte: currentEnd } },
+//                 { updatedAt: { $gte: currentStart, $lte: currentEnd } }
+//             ]
+//         };
+
+//         const refundedFilterPrev = {
+//             "refund.isRefunded": true,
+//             $or: [
+//                 { "refund.refundAt": { $gte: prevStart, $lt: prevEnd } },
+//                 { updatedAt: { $gte: prevStart, $lt: prevEnd } }
+//             ]
+//         };
+
+//         const [refundOrders, prevRefundOrders] = await Promise.all([
+//             Order.countDocuments(refundedFilterCurrent),
+//             Order.countDocuments(refundedFilterPrev)
+//         ]);
+
+//         // ---------------- COMPLETED VIA TIMELINE ----------------
+//         const deliveredRegex = /delivered|completed/i;
+
+//         const [completedAgg, prevCompletedAgg] = await Promise.all([
+//             Order.aggregate([
+//                 { $unwind: "$trackingHistory" },
+//                 {
+//                     $match: {
+//                         "trackingHistory.status": deliveredRegex,
+//                         "trackingHistory.timestamp": { $gte: currentStart, $lte: currentEnd }
+//                     }
+//                 },
+//                 { $group: { _id: "$_id" } },
+//                 { $count: "count" }
+//             ]),
+//             Order.aggregate([
+//                 { $unwind: "$trackingHistory" },
+//                 {
+//                     $match: {
+//                         "trackingHistory.status": deliveredRegex,
+//                         "trackingHistory.timestamp": { $gte: prevStart, $lt: prevEnd }
+//                     }
+//                 },
+//                 { $group: { _id: "$_id" } },
+//                 { $count: "count" }
+//             ])
+//         ]);
+
+//         const completedOrders = completedAgg?.[0]?.count || 0;
+//         const prevCompletedOrders = prevCompletedAgg?.[0]?.count || 0;
+
+//         // ---------------- CANCELLED ORDERS ----------------
+//         const cancelRegex = /cancel/i;
+
+//         const [cancelledAgg, prevCancelledAgg] = await Promise.all([
+//             Order.aggregate([
+//                 { $unwind: "$trackingHistory" },
+//                 {
+//                     $match: {
+//                         "trackingHistory.status": cancelRegex,
+//                         "trackingHistory.timestamp": { $gte: currentStart, $lte: currentEnd }
+//                     }
+//                 },
+//                 { $group: { _id: "$_id" } },
+//                 { $count: "count" }
+//             ]),
+//             Order.aggregate([
+//                 { $unwind: "$trackingHistory" },
+//                 {
+//                     $match: {
+//                         "trackingHistory.status": cancelRegex,
+//                         "trackingHistory.timestamp": { $gte: prevStart, $lt: prevEnd }
+//                     }
+//                 },
+//                 { $group: { _id: "$_id" } },
+//                 { $count: "count" }
+//             ])
+//         ]);
+
+//         const cancelledOrders = cancelledAgg?.[0]?.count || 0;
+//         const prevCancelledOrders = prevCancelledAgg?.[0]?.count || 0;
+
+//         // ---------------- RESPONSE ----------------
 //         res.json({
+//             range,
+
 //             totalOrders: {
-//                 count: current.totalOrders, // ✅ all-time total
-//                 change: pctChange(current.totalOrdersWeek, prev.totalOrdersWeek), // ✅ weekly trend
+//                 count: totalOrders,
+//                 change: pctChange(totalOrders, prevTotalOrders),
+//                 note: `Last ${range}`
 //             },
-//             newOrders: {
-//                 count: current.newOrders,
-//                 change: pctChange(current.newOrders, prev.newOrders),
-//                 note: "last 7 days"
+
+//             refundOrders: {
+//                 count: refundOrders,
+//                 change: pctChange(refundOrders, prevRefundOrders),
+//                 note: `Refunded in ${range}`
 //             },
+
 //             completedOrders: {
-//                 count: current.completedOrders,
-//                 change: pctChange(current.completedOrders, prev.completedOrders),
-//                 note: "last 7 days"
+//                 count: completedOrders,
+//                 change: pctChange(completedOrders, prevCompletedOrders),
+//                 note: `Last ${range}`
 //             },
+
 //             cancelledOrders: {
-//                 count: current.cancelledOrders,
-//                 change: pctChange(current.cancelledOrders, prev.cancelledOrders),
-//                 note: "last 7 days"
+//                 count: cancelledOrders,
+//                 change: pctChange(cancelledOrders, prevCancelledOrders),
+//                 note: `Last ${range}`
 //             }
 //         });
 
 //     } catch (error) {
 //         console.error(error);
 //         res.status(500).json({
-//             message: "Error getting summary",
+//             message: "Error generating order summary",
 //             error: error.message
 //         });
 //     }
 // };
+export const getOrderSummary = async (req, res) => {
+    try {
+        const { range = "7d" } = req.query;
 
-// export const getOrderById = async (req, res) => {
-//     try {
-//         const { id } = req.params;
+        // ---------------- Range Helpers ----------------
+        const now = new Date();
+        const buildRange = (r) => {
+            const end = new Date(now);
+            const start = new Date(now);
 
-//         const order = await Order.findById(id)
-//             .populate("user", "name email phone")
-//             .populate("products.productId", "name brand category images price")
-//             .populate("affiliate", "name referralCode")
-//             .populate("discount", "code type value")
-//             .lean();
+            switch (r) {
+                case "1d": start.setDate(now.getDate() - 1); break;
+                case "7d": start.setDate(now.getDate() - 7); break;
+                case "1m": start.setMonth(now.getMonth() - 1); break;
+                case "1y": start.setFullYear(now.getFullYear() - 1); break;
+                default: start.setDate(now.getDate() - 7);
+            }
+            return { start, end };
+        };
 
-//         if (!order) return res.status(404).json({ message: "Order not found" });
+        const { start: currentStart, end: currentEnd } = buildRange(range);
 
-//         // --- Build timeline from trackingHistory & shipment ---
-//         const timeline = (order.trackingHistory || []).map(t => ({
-//             status: t.status,
-//             timestamp: t.timestamp,
-//             location: t.location || null
-//         }));
+        const buildPrevRange = (r, currentStart) => {
+            const prevEnd = new Date(currentStart);
+            const prevStart = new Date(currentStart);
 
-//         // Include shipment status as a final step if available
-//         if (order.shipment?.status) {
-//             timeline.push({
-//                 status: order.shipment.status,
-//                 timestamp: order.shipment.assignedAt || null,
-//                 location: order.shipment.courier_name || null
-//             });
-//         }
+            switch (r) {
+                case "1d": prevStart.setDate(prevEnd.getDate() - 1); break;
+                case "7d": prevStart.setDate(prevEnd.getDate() - 7); break;
+                case "1m": prevStart.setMonth(prevEnd.getMonth() - 1); break;
+                case "1y": prevStart.setFullYear(prevEnd.getFullYear() - 1); break;
+                default: prevStart.setDate(prevEnd.getDate() - 7);
+            }
+            return { prevStart, prevEnd };
+        };
 
-//         const response = {
-//             // --- Summary ---
-//             _id: order._id,
-//             orderId: order.orderId,
-//             orderNumber: order.orderNumber,
-//             date: order.date,
-//             status: order.status,
-//             currentStatus: order.orderStatus || order.shipment?.status || order.status,
-//             orderType: order.orderType,
-//             amount: order.amount,
+        const { prevStart, prevEnd } = buildPrevRange(range, currentStart);
 
-//             // --- Customer ---
-//             customer: {
-//                 id: order.user?._id,
-//                 name: order.user?.name || order.customerName,
-//                 email: order.user?.email,
-//                 phone: order.user?.phone,
-//             },
+        // ---------------- % Helper ----------------
+        const pctChange = (curr, prev) => {
+            if (prev === 0 && curr > 0) return { change: 100, trend: "up" };
+            if (prev === 0 && curr === 0) return { change: 0, trend: "no-change" };
+            const diff = ((curr - prev) / prev) * 100;
+            return {
+                change: Number(Math.abs(diff).toFixed(2)),
+                trend: diff > 0 ? "up" : diff < 0 ? "down" : "no-change"
+            };
+        };
 
-//             // --- Products ---
-//             products: order.products.map(p => ({
-//                 id: p.productId?._id,
-//                 name: p.productId?.name,
-//                 brand: p.productId?.brand,
-//                 category: p.productId?.category,
-//                 image: p.productId?.images?.[0] || null,
-//                 quantity: p.quantity,
-//                 price: p.price,
-//                 total: p.quantity * p.price
-//             })),
+        // ---------------- TOTAL ORDERS ----------------
+        const [totalOrders, prevTotalOrders] = await Promise.all([
+            Order.countDocuments({ createdAt: { $gte: currentStart, $lte: currentEnd } }),
+            Order.countDocuments({ createdAt: { $gte: prevStart, $lt: prevEnd } })
+        ]);
 
-//             // --- Shipping & Payment ---
-//             shippingAddress: order.shippingAddress,
-//             courierName: order.shipment?.courier_name || null,
-//             trackingNumber: order.shipment?.awb_code || null,
-//             expectedDelivery: null, // compute if you have ETA
-//             payment: {
-//                 method: order.paymentMethod || "Manual",
-//                 status: order.paymentStatus || "Pending",
-//                 transactionId: order.transactionId || null,
-//                 amount: order.amount
-//             },
+        // ---------------- REFUNDED ORDERS (FIXED) ----------------
+        const refundedFilterCurrent = {
+            $or: [
+                { paymentStatus: "refunded" },
+                { "refund.isRefunded": true },
+                { "refund.status": "completed" }
+            ],
+            "refund.refundedAt": { $gte: currentStart, $lte: currentEnd }
+        };
 
-//             // --- Discounts & Affiliates ---
-//             discount: {
-//                 code: order.discountCode,
-//                 discountAmount: order.discountAmount || 0,
-//                 buyerDiscountAmount: order.buyerDiscountAmount || 0,
-//             },
-//             affiliate: order.affiliate
-//                 ? { id: order.affiliate._id, name: order.affiliate.name, referralCode: order.affiliate.referralCode }
-//                 : null,
+        const refundedFilterPrev = {
+            $or: [
+                { paymentStatus: "refunded" },
+                { "refund.isRefunded": true },
+                { "refund.status": "completed" }
+            ],
+            "refund.refundedAt": { $gte: prevStart, $lt: prevEnd }
+        };
 
-//             // --- Timeline (with status) ---
-//             timeline
-//         };
+        const [refundOrders, prevRefundOrders] = await Promise.all([
+            Order.countDocuments(refundedFilterCurrent),
+            Order.countDocuments(refundedFilterPrev)
+        ]);
 
-//         res.json(response);
-//     } catch (err) {
-//         console.error(err);
-//         res.status(500).json({ message: "Failed to fetch order", error: err.message });
-//     }
-// };
+        // ---------------- COMPLETED VIA TIMELINE ----------------
+        const deliveredRegex = /delivered|completed/i;
+
+        const [completedAgg, prevCompletedAgg] = await Promise.all([
+            Order.aggregate([
+                { $unwind: "$trackingHistory" },
+                {
+                    $match: {
+                        "trackingHistory.status": deliveredRegex,
+                        "trackingHistory.timestamp": { $gte: currentStart, $lte: currentEnd }
+                    }
+                },
+                { $group: { _id: "$_id" } },
+                { $count: "count" }
+            ]),
+            Order.aggregate([
+                { $unwind: "$trackingHistory" },
+                {
+                    $match: {
+                        "trackingHistory.status": deliveredRegex,
+                        "trackingHistory.timestamp": { $gte: prevStart, $lt: prevEnd }
+                    }
+                },
+                { $group: { _id: "$_id" } },
+                { $count: "count" }
+            ])
+        ]);
+
+        const completedOrders = completedAgg?.[0]?.count || 0;
+        const prevCompletedOrders = prevCompletedAgg?.[0]?.count || 0;
+
+        // ---------------- CANCELLED ORDERS ----------------
+        const cancelRegex = /cancel/i;
+
+        const [cancelledAgg, prevCancelledAgg] = await Promise.all([
+            Order.aggregate([
+                { $unwind: "$trackingHistory" },
+                {
+                    $match: {
+                        "trackingHistory.status": cancelRegex,
+                        "trackingHistory.timestamp": { $gte: currentStart, $lte: currentEnd }
+                    }
+                },
+                { $group: { _id: "$_id" } },
+                { $count: "count" }
+            ]),
+            Order.aggregate([
+                { $unwind: "$trackingHistory" },
+                {
+                    $match: {
+                        "trackingHistory.status": cancelRegex,
+                        "trackingHistory.timestamp": { $gte: prevStart, $lt: prevEnd }
+                    }
+                },
+                { $group: { _id: "$_id" } },
+                { $count: "count" }
+            ])
+        ]);
+
+        const cancelledOrders = cancelledAgg?.[0]?.count || 0;
+        const prevCancelledOrders = prevCancelledAgg?.[0]?.count || 0;
+
+        // ---------------- RESPONSE ----------------
+        res.json({
+            range,
+
+            totalOrders: {
+                count: totalOrders,
+                change: pctChange(totalOrders, prevTotalOrders),
+                note: `Last ${range}`
+            },
+
+            refundOrders: {
+                count: refundOrders,
+                change: pctChange(refundOrders, prevRefundOrders),
+                note: `Refunded in ${range}`
+            },
+
+            completedOrders: {
+                count: completedOrders,
+                change: pctChange(completedOrders, prevCompletedOrders),
+                note: `Last ${range}`
+            },
+
+            cancelledOrders: {
+                count: cancelledOrders,
+                change: pctChange(cancelledOrders, prevCancelledOrders),
+                note: `Last ${range}`
+            }
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: "Error generating order summary",
+            error: error.message
+        });
+    }
+};
+
 export const getOrderById = async (req, res) => {
     try {
         const { id } = req.params;
