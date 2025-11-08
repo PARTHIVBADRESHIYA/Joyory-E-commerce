@@ -1,6 +1,6 @@
 // routes/user/userMediaRoutes.js
 import express from "express";
-import { listPublicMedia ,uploadVideoController} from "../controllers/MediaController.js";
+import { listPublicMedia ,uploadVideoController} from "../controllers/mediaController.js";
 import { isAdmin } from "../middlewares/authMiddleware.js";
 import { uploadMedia } from "../middlewares/upload.js";
 
