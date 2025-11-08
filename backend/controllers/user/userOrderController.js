@@ -25,58 +25,162 @@ function mapShipmentStatus(status) {
   return map[status] || status; // fallback to raw if unknown
 }
 
+// export const getUserOrders = async (req, res) => {
+//   try {
+//     const orders = await Order.find({ user: req.user._id })
+//       .populate("products.productId")
+//       .sort({ createdAt: -1 });
+
+//     const cleanedOrders = orders.map(order => {
+//       // Combine shipment status with order status
+//       const shipmentStatus = order.shipment?.status || null;
+//       const combinedStatus = shipmentStatus || order.orderStatus || order.status;
+
+//       return {
+//         _id: order._id, // ✅ MongoDB ObjectId
+//         orderId: order.orderId,
+//         orderNumber: order.orderNumber,
+//         date: order.date,
+//         status: order.status,
+//         shipmentStatus,
+//         combinedStatus,
+//         amount: order.amount,
+//         discountAmount: order.discountAmount || 0,
+//         discountCode: order.discountCode || null,
+//         buyerDiscountAmount: order.buyerDiscountAmount || 0,
+//         shippingAddress: order.shippingAddress || null,
+//         products: order.products.map(item => ({
+//           productId: item.productId?._id,
+//           name: item.productId?.name || "Unknown Product",
+//           variant: item.productId?.variant || null,
+//           brand: item.productId?.brand || null,
+//           category: item.productId?.category || null,
+//           image: item.productId?.images?.[0] || null,
+//           quantity: item.quantity,
+//           price: item.price,
+//           total: item.quantity * item.price,
+//         })),
+//         payment: {
+//           method: order.paymentMethod || "Manual",
+//           status: order.paymentStatus || "pending",
+//           transactionId: order.transactionId || null,
+//         },
+//         expectedDelivery:
+//           order.expectedDelivery ||
+//           new Date(order.date.getTime() + 5 * 24 * 60 * 60 * 1000),
+//       };
+//     });
+
+//     res.status(200).json({ orders: cleanedOrders });
+//   } catch (err) {
+//     console.error("🔥 Error fetching user orders:", err);
+//     res.status(500).json({ message: "Failed to fetch orders" });
+//   }
+// };
+
 export const getUserOrders = async (req, res) => {
   try {
+    // ✅ Fetch all user orders sorted by latest first
     const orders = await Order.find({ user: req.user._id })
-      .populate("products.productId")
-      .sort({ createdAt: -1 });
+      .populate({
+        path: "products.productId",
+        select: "name images brand category variants",
+      })
+      .sort({ createdAt: -1 })
+      .lean();
 
-    const cleanedOrders = orders.map(order => {
-      // Combine shipment status with order status
-      const shipmentStatus = order.shipment?.status || null;
-      const combinedStatus = shipmentStatus || order.orderStatus || order.status;
+    if (!orders.length) {
+      return res.status(200).json({
+        success: true,
+        message: "You haven’t placed any orders yet.",
+        orders: [],
+      });
+    }
+
+    // ✅ Remove duplicate orders by orderId (keep latest)
+    const uniqueOrdersMap = new Map();
+    orders.forEach(order => {
+      if (!uniqueOrdersMap.has(order.orderId)) {
+        uniqueOrdersMap.set(order.orderId, order);
+      }
+    });
+    const uniqueOrders = Array.from(uniqueOrdersMap.values());
+
+    // ✅ Format final clean response
+    const cleanedOrders = uniqueOrders.map(order => {
+      const shipmentStatus = order.shipment?.status || order.shipmentStatus || "Created";
+      const combinedStatus = shipmentStatus || order.status;
 
       return {
-        _id: order._id, // ✅ MongoDB ObjectId
+        _id: order._id,
         orderId: order.orderId,
         orderNumber: order.orderNumber,
         date: order.date,
-        status: order.status,
+        status: order.status || "Pending",
         shipmentStatus,
         combinedStatus,
         amount: order.amount,
         discountAmount: order.discountAmount || 0,
         discountCode: order.discountCode || null,
         buyerDiscountAmount: order.buyerDiscountAmount || 0,
-        shippingAddress: order.shippingAddress || null,
-        products: order.products.map(item => ({
+
+        shippingAddress: order.shippingAddress
+          ? {
+            name: order.shippingAddress.name,
+            email: order.shippingAddress.email,
+            phone: order.shippingAddress.phone,
+            pincode: order.shippingAddress.pincode,
+            city: order.shippingAddress.city,
+            state: order.shippingAddress.state,
+            addressLine1: order.shippingAddress.addressLine1,
+          }
+          : null,
+
+        products: (order.products || []).map(item => ({
           productId: item.productId?._id,
-          name: item.productId?.name || "Unknown Product",
-          variant: item.productId?.variant || null,
+          name: item.productId?.name || item.name || "Unknown Product",
+          variant:
+            item.variant ||
+            item.productId?.variants?.find(v => v._id === item.variantId)?.shadeName ||
+            null,
           brand: item.productId?.brand || null,
           category: item.productId?.category || null,
-          image: item.productId?.images?.[0] || null,
-          quantity: item.quantity,
+          image:
+            item.productId?.images?.[0] ||
+            item.image ||
+            "https://cdn-icons-png.flaticon.com/512/679/679922.png",
+          quantity: item.quantity || 1,
           price: item.price,
           total: item.quantity * item.price,
         })),
+
         payment: {
           method: order.paymentMethod || "Manual",
           status: order.paymentStatus || "pending",
           transactionId: order.transactionId || null,
         },
-        expectedDelivery:
-          order.expectedDelivery ||
-          new Date(order.date.getTime() + 5 * 24 * 60 * 60 * 1000),
+
+        expectedDelivery: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+          .toLocaleDateString("en-IN", { weekday: "short", month: "short", day: "numeric", year: "numeric" })
+
       };
     });
 
-    res.status(200).json({ orders: cleanedOrders });
+    // ✅ Final response
+    res.status(200).json({
+      success: true,
+      message: `Found ${cleanedOrders.length} order${cleanedOrders.length > 1 ? "s" : ""}.`,
+      orders: cleanedOrders,
+    });
   } catch (err) {
     console.error("🔥 Error fetching user orders:", err);
-    res.status(500).json({ message: "Failed to fetch orders" });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch your orders. Please try again later.",
+    });
   }
 };
+
 
 // ----------------------- ORDER INITIATE (unchanged) -----------------------
 // export const initiateOrderFromCart = async (req, res) => {
