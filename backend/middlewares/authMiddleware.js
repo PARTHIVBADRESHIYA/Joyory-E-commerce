@@ -97,7 +97,45 @@ export const authenticateSeller = async (req, res, next) => {
     }
 };
 
+export const checkPermission = (requiredPermission) => {
+    return async (req, res, next) => {
+        try {
+            // 1️⃣ SUPER ADMIN bypass
+            if (req.isSuperAdmin) return next();
 
+            // 2️⃣ ROLE ADMIN / TEAM MEMBER
+            let user = req.roleAdmin || req.teamMember;
+            if (!user) return res.status(403).json({ message: 'Unauthorized: no role found' });
+
+            // 🔹 PermissionsList first
+            const permissionsList = user.role?.permissionsList || [];
+
+            if (permissionsList.includes(requiredPermission)) return next();
+
+            // 🔹 Fallback to nested permissions object (old-style)
+            const nestedPermissions = user.role?.permissions || {};
+
+            const checkNested = (obj, permissionString) => {
+                const parts = permissionString.split(':'); // ['orders','refund']
+                let current = obj;
+                for (const part of parts) {
+                    if (!current) return false;
+                    current = current[part];
+                }
+                return current === true;
+            };
+
+            if (checkNested(nestedPermissions, requiredPermission)) return next();
+
+            // ❌ No permission
+            return res.status(403).json({ message: 'Forbidden: permission denied' });
+
+        } catch (err) {
+            console.error('checkPermission error:', err.message);
+            return res.status(500).json({ message: 'Server error', error: err.message });
+        }
+    };
+};
 
 export const verifyAdminOrTeamMember = async (req, res, next) => {
     const token = req.headers.authorization?.split(' ')[1];

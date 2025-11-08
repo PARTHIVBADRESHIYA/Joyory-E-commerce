@@ -453,7 +453,7 @@ import securityRoutes from "./routes/settings/admin/securityRoutes.js";
 import attributeRoutes from "./routes/attributeRoutes.js";
 import testRoutes from "./routes/testRoutes.js";
 import videoRoutes from "./routes/videoRoutes.js";
-import mediaRoutes from "./routes/mediaRoutes.js";
+import mediaRoutes from "./routes/MediaRoutes.js";
 import brandRoutes from "./routes/brandRoutes.js";
 import testPickUpRoutes from "./routes/testPickUpRoutes.js";
 import mockShippingRoutes from "./routes/mockShippingRoutes.js";

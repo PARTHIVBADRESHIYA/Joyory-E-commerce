@@ -1,24 +1,44 @@
-import mongoose from "mongoose";
+import { Queue } from "bullmq";
+import IORedis from "ioredis";
 import dotenv from "dotenv";
 dotenv.config();
-import Order from "./models/Order.js";
 
-async function run() {
-    await mongoose.connect(process.env.MONGO_URI, { /* options */ });
-    console.log("Connected to mongo");
+// 🔹 Use TLS-enabled Upstash Redis
+const connection = new IORedis(process.env.REDIS_URL, {
+  tls: {},                     // Required for Upstash
+  maxRetriesPerRequest: null,  // Prevents retry issues
+  enableReadyCheck: false,
+});
 
-    const cursor = Order.find({}).cursor();
-    let updated = 0;
-    for await (const o of cursor) {
-        let changed = false;
-        if (!o.refund) { o.refund = {}; changed = true; }
-        if (!o.cancellation) { o.cancellation = {}; changed = true; }
-        if (changed) {
-            await o.save();
-            updated++;
-        }
-    }
-    console.log("Updated orders:", updated);
-    await mongoose.disconnect();
-}
-run().catch(err => { console.error(err); process.exit(1); });
+const queues = ["refundQueue", "shiprocketShipmentQueue"];
+
+const cleanQueue = async (queueName) => {
+  const queue = new Queue(queueName, { connection });
+  try {
+    console.log(`🔹 Cleaning queue: ${queueName}`);
+
+    const completed = await queue.clean(0, "completed");
+    console.log(`✅ Removed ${completed.length} completed jobs from ${queueName}`);
+
+    const failed = await queue.clean(0, "failed");
+    console.log(`✅ Removed ${failed.length} failed jobs from ${queueName}`);
+
+    const counts = await queue.getJobCounts();
+    console.log(`📊 Current job counts for ${queueName}:`, counts);
+
+  } catch (err) {
+    console.error(`❌ Error cleaning ${queueName}:`, err);
+  } finally {
+    await queue.close();
+  }
+};
+
+const run = async () => {
+  for (const q of queues) {
+    await cleanQueue(q);
+  }
+  console.log("♻️ All queues cleaned successfully!");
+  process.exit(0);
+};
+
+run();

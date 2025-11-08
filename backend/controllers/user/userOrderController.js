@@ -78,108 +78,108 @@ function mapShipmentStatus(status) {
 //   }
 // };
 
-export const getUserOrders = async (req, res) => {
-  try {
-    // ✅ Fetch all user orders sorted by latest first
-    const orders = await Order.find({ user: req.user._id })
-      .populate({
-        path: "products.productId",
-        select: "name images brand category variants",
-      })
-      .sort({ createdAt: -1 })
-      .lean();
+// export const getUserOrders = async (req, res) => {
+//   try {
+//     // ✅ Fetch all user orders sorted by latest first
+//     const orders = await Order.find({ user: req.user._id })
+//       .populate({
+//         path: "products.productId",
+//         select: "name images brand category variants",
+//       })
+//       .sort({ createdAt: -1 })
+//       .lean();
 
-    if (!orders.length) {
-      return res.status(200).json({
-        success: true,
-        message: "You haven’t placed any orders yet.",
-        orders: [],
-      });
-    }
+//     if (!orders.length) {
+//       return res.status(200).json({
+//         success: true,
+//         message: "You haven’t placed any orders yet.",
+//         orders: [],
+//       });
+//     }
 
-    // ✅ Remove duplicate orders by orderId (keep latest)
-    const uniqueOrdersMap = new Map();
-    orders.forEach(order => {
-      if (!uniqueOrdersMap.has(order.orderId)) {
-        uniqueOrdersMap.set(order.orderId, order);
-      }
-    });
-    const uniqueOrders = Array.from(uniqueOrdersMap.values());
+//     // ✅ Remove duplicate orders by orderId (keep latest)
+//     const uniqueOrdersMap = new Map();
+//     orders.forEach(order => {
+//       if (!uniqueOrdersMap.has(order.orderId)) {
+//         uniqueOrdersMap.set(order.orderId, order);
+//       }
+//     });
+//     const uniqueOrders = Array.from(uniqueOrdersMap.values());
 
-    // ✅ Format final clean response
-    const cleanedOrders = uniqueOrders.map(order => {
-      const shipmentStatus = order.shipment?.status || order.shipmentStatus || "Created";
-      const combinedStatus = shipmentStatus || order.status;
+//     // ✅ Format final clean response
+//     const cleanedOrders = uniqueOrders.map(order => {
+//       const shipmentStatus = order.shipment?.status || order.shipmentStatus || "Created";
+//       const combinedStatus = shipmentStatus || order.status;
 
-      return {
-        _id: order._id,
-        orderId: order.orderId,
-        orderNumber: order.orderNumber,
-        date: order.date,
-        status: order.status || "Pending",
-        shipmentStatus,
-        combinedStatus,
-        amount: order.amount,
-        discountAmount: order.discountAmount || 0,
-        discountCode: order.discountCode || null,
-        buyerDiscountAmount: order.buyerDiscountAmount || 0,
+//       return {
+//         _id: order._id,
+//         orderId: order.orderId,
+//         orderNumber: order.orderNumber,
+//         date: order.date,
+//         status: order.status || "Pending",
+//         shipmentStatus,
+//         combinedStatus,
+//         amount: order.amount,
+//         discountAmount: order.discountAmount || 0,
+//         discountCode: order.discountCode || null,
+//         buyerDiscountAmount: order.buyerDiscountAmount || 0,
 
-        shippingAddress: order.shippingAddress
-          ? {
-            name: order.shippingAddress.name,
-            email: order.shippingAddress.email,
-            phone: order.shippingAddress.phone,
-            pincode: order.shippingAddress.pincode,
-            city: order.shippingAddress.city,
-            state: order.shippingAddress.state,
-            addressLine1: order.shippingAddress.addressLine1,
-          }
-          : null,
+//         shippingAddress: order.shippingAddress
+//           ? {
+//             name: order.shippingAddress.name,
+//             email: order.shippingAddress.email,
+//             phone: order.shippingAddress.phone,
+//             pincode: order.shippingAddress.pincode,
+//             city: order.shippingAddress.city,
+//             state: order.shippingAddress.state,
+//             addressLine1: order.shippingAddress.addressLine1,
+//           }
+//           : null,
 
-        products: (order.products || []).map(item => ({
-          productId: item.productId?._id,
-          name: item.productId?.name || item.name || "Unknown Product",
-          variant:
-            item.variant ||
-            item.productId?.variants?.find(v => v._id === item.variantId)?.shadeName ||
-            null,
-          brand: item.productId?.brand || null,
-          category: item.productId?.category || null,
-          image:
-            item.productId?.images?.[0] ||
-            item.image ||
-            "https://cdn-icons-png.flaticon.com/512/679/679922.png",
-          quantity: item.quantity || 1,
-          price: item.price,
-          total: item.quantity * item.price,
-        })),
+//         products: (order.products || []).map(item => ({
+//           productId: item.productId?._id,
+//           name: item.productId?.name || item.name || "Unknown Product",
+//           variant:
+//             item.variant ||
+//             item.productId?.variants?.find(v => v._id === item.variantId)?.shadeName ||
+//             null,
+//           brand: item.productId?.brand || null,
+//           category: item.productId?.category || null,
+//           image:
+//             item.productId?.images?.[0] ||
+//             item.image ||
+//             "https://cdn-icons-png.flaticon.com/512/679/679922.png",
+//           quantity: item.quantity || 1,
+//           price: item.price,
+//           total: item.quantity * item.price,
+//         })),
 
-        payment: {
-          method: order.paymentMethod || "Manual",
-          status: order.paymentStatus || "pending",
-          transactionId: order.transactionId || null,
-        },
+//         payment: {
+//           method: order.paymentMethod || "Manual",
+//           status: order.paymentStatus || "pending",
+//           transactionId: order.transactionId || null,
+//         },
 
-        expectedDelivery: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-          .toLocaleDateString("en-IN", { weekday: "short", month: "short", day: "numeric", year: "numeric" })
+//         expectedDelivery: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+//           .toLocaleDateString("en-IN", { weekday: "short", month: "short", day: "numeric", year: "numeric" })
 
-      };
-    });
+//       };
+//     });
 
-    // ✅ Final response
-    res.status(200).json({
-      success: true,
-      message: `Found ${cleanedOrders.length} order${cleanedOrders.length > 1 ? "s" : ""}.`,
-      orders: cleanedOrders,
-    });
-  } catch (err) {
-    console.error("🔥 Error fetching user orders:", err);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch your orders. Please try again later.",
-    });
-  }
-};
+//     // ✅ Final response
+//     res.status(200).json({
+//       success: true,
+//       message: `Found ${cleanedOrders.length} order${cleanedOrders.length > 1 ? "s" : ""}.`,
+//       orders: cleanedOrders,
+//     });
+//   } catch (err) {
+//     console.error("🔥 Error fetching user orders:", err);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch your orders. Please try again later.",
+//     });
+//   }
+// };
 
 
 // ----------------------- ORDER INITIATE (unchanged) -----------------------
@@ -357,6 +357,108 @@ export const getUserOrders = async (req, res) => {
 //     });
 //   }
 // };
+export const getUserOrders = async (req, res) => {
+  try {
+    // ✅ Fetch all user orders sorted by latest first
+    const orders = await Order.find({ user: req.user._id })
+      .populate({
+        path: "products.productId",
+        select: "name images brand category variants",
+      })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (!orders.length) {
+      return res.status(200).json({
+        success: true,
+        message: "You haven’t placed any orders yet.",
+        orders: [],
+      });
+    }
+
+    // ✅ Remove duplicate orders by orderId, keep the latest
+    const uniqueOrdersMap = new Map();
+    orders.forEach(order => {
+      // If no entry exists, or current order is newer, set it
+      if (!uniqueOrdersMap.has(order.orderId)) {
+        uniqueOrdersMap.set(order.orderId, order);
+      }
+    });
+    const uniqueOrders = Array.from(uniqueOrdersMap.values());
+
+    // ✅ Format final clean response
+    const cleanedOrders = uniqueOrders.map(order => {
+      const shipmentStatus = order.shipment?.status || order.shipmentStatus || "Created";
+      const combinedStatus = shipmentStatus || order.status;
+
+      return {
+        _id: order._id,
+        orderId: order.orderId,
+        orderNumber: order.orderNumber,
+        date: order.date,
+        status: order.status || "Pending",
+        shipmentStatus,
+        combinedStatus,
+        amount: order.amount,
+        discountAmount: order.discountAmount || 0,
+        discountCode: order.discountCode || null,
+        buyerDiscountAmount: order.buyerDiscountAmount || 0,
+
+        shippingAddress: order.shippingAddress
+          ? {
+            name: order.shippingAddress.name,
+            email: order.shippingAddress.email,
+            phone: order.shippingAddress.phone,
+            pincode: order.shippingAddress.pincode,
+            city: order.shippingAddress.city,
+            state: order.shippingAddress.state,
+            addressLine1: order.shippingAddress.addressLine1,
+          }
+          : null,
+
+        products: (order.products || []).map(item => ({
+          productId: item.productId?._id,
+          name: item.productId?.name || item.name || "Unknown Product",
+          variant:
+            item.variant ||
+            item.productId?.variants?.find(v => v._id === item.variantId)?.shadeName ||
+            null,
+          brand: item.productId?.brand || null,
+          category: item.productId?.category || null,
+          image:
+            item.productId?.images?.[0] ||
+            item.image ||
+            "https://cdn-icons-png.flaticon.com/512/679/679922.png",
+          quantity: item.quantity || 1,
+          price: item.price,
+          total: item.quantity * item.price,
+        })),
+
+        payment: {
+          method: order.paymentMethod || "Manual",
+          status: order.paymentStatus || "pending",
+          transactionId: order.transactionId || null,
+        },
+
+        expectedDelivery: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+          .toLocaleDateString("en-IN", { weekday: "short", month: "short", day: "numeric", year: "numeric" })
+      };
+    });
+
+    // ✅ Final response
+    res.status(200).json({
+      success: true,
+      message: `Found ${cleanedOrders.length} order${cleanedOrders.length > 1 ? "s" : ""}.`,
+      orders: cleanedOrders,
+    });
+  } catch (err) {
+    console.error("🔥 Error fetching user orders:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch your orders. Please try again later.",
+    });
+  }
+};
 
 export const initiateOrderFromCart = async (req, res) => {
   try {
