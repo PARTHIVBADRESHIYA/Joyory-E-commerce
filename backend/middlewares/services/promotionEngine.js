@@ -2000,7 +2000,240 @@ import {
     bestTierForQty,
     isObjectId,
 } from "../../controllers/user/userPromotionController.js";
+import { enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
 
+// export const applyPromotions = async (itemsInput, ctx = {}) => {
+//     try {
+//         if (!Array.isArray(itemsInput)) {
+//             throw new Error("applyPromotions: itemsInput must be an array of cart items");
+//         }
+
+//         const now = new Date();
+//         const promos = await Promotion.find({
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now },
+//         })
+//             .select(
+//                 "+promotionType +promotionConfig +scope +categories +products +discountUnit +discountValue"
+//             )
+//             .lean();
+
+//         /* ---------------- Load products in cart ---------------- */
+//         const ids = itemsInput.map((i) => i.productId).filter(isObjectId);
+//         const dbProducts = await Product.find({ _id: { $in: ids } })
+//             .select("_id name images brand price mrp category categoryHierarchy discountPercent")
+//             .lean();
+
+//         const productMap = new Map(dbProducts.map((p) => [p._id.toString(), p]));
+
+//         /* ---------------- Build cart lines ---------------- */
+//         const cart = itemsInput
+//             .map((i) => {
+//                 const p = productMap.get(i.productId);
+//                 if (!p) return null;
+
+//                 const mrp = Number(p.mrp ?? p.price);
+
+//                 const basePrice =
+//                     typeof i.basePrice === "number"
+//                         ? i.basePrice
+//                         : p.discountPercent
+//                             ? Math.round(mrp - (mrp * p.discountPercent) / 100)
+//                             : Number(p.price);
+
+//                 return {
+//                     productId: p._id.toString(),
+//                     name: p.name,
+//                     image: Array.isArray(p.images) && p.images[0] ? p.images[0] : "",
+//                     brand: p.brand || "",
+//                     qty: Math.max(1, Number(i.qty || 1)),
+//                     mrp,
+//                     basePrice,
+//                     discounts: [], // will only keep best one
+//                     freebies: [],
+//                     product: p,
+//                 };
+//             })
+//             .filter(Boolean);
+
+//         const appliedPromotions = [];
+
+//         /* ---------------- STEP 1: Product-level promos ---------------- */
+//         for (const promo of promos) {
+//             // temporary collection of candidate discounts for each line
+//             for (const line of cart) {
+//                 if (!productMatchesPromo(line.product, promo)) continue;
+
+//                 let candidateDiscount = null;
+
+//                 // Flat discount
+//                 if (promo.promotionType === "discount") {
+//                     const { price: newUnitPrice } = applyFlatDiscount(line.basePrice, promo);
+//                     const totalDiscount = (line.basePrice - newUnitPrice) * line.qty;
+//                     if (totalDiscount > 0) {
+//                         candidateDiscount = {
+//                             promoId: promo._id,
+//                             type: "discount",
+//                             amount: totalDiscount,
+//                             note: "Flat discount",
+//                         };
+//                     }
+//                 }
+
+//                 // Tiered discount
+//                 if (promo.promotionType === "tieredDiscount") {
+//                     const tiers = (promo.promotionConfig?.tiers || []).sort(
+//                         (a, b) => a.minQty - b.minQty
+//                     );
+//                     const scope =
+//                         promo.promotionConfig?.tierScope === "perOrder" ? "perOrder" : "perProduct";
+
+//                     if (scope === "perProduct") {
+//                         const tier = bestTierForQty(tiers, line.qty);
+//                         if (tier) {
+//                             const unitOff = Math.floor((line.basePrice * tier.discountPercent) / 100);
+//                             const totalDiscount = unitOff * line.qty;
+//                             if (totalDiscount > 0) {
+//                                 candidateDiscount = {
+//                                     promoId: promo._id,
+//                                     type: "tieredDiscount",
+//                                     amount: totalDiscount,
+//                                     note: `Buy ${tier.minQty}+ Save ${tier.discountPercent}%`,
+//                                 };
+//                             }
+//                         }
+//                     }
+//                     // ⚠️ perOrder tier handled separately below
+//                 }
+
+//                 // Bundle discount
+//                 if (promo.promotionType === "bundle") {
+//                     const bp = (promo.promotionConfig?.bundleProducts || []).map(String);
+//                     const bundlePrice = Number(promo.promotionConfig?.bundlePrice || 0);
+
+//                     if (bp.length >= 2 && bundlePrice > 0) {
+//                         const lines = cart.filter((l) => bp.includes(l.productId));
+//                         if (lines.length === bp.length) {
+//                             const bundleQty = Math.min(
+//                                 ...bp.map((id) => cart.find((l) => l.productId === id)?.qty || 0)
+//                             );
+//                             if (bundleQty > 0) {
+//                                 const bundleMrp = lines.reduce((s, l) => s + l.basePrice, 0);
+//                                 const bundleUnitDiscount = Math.max(0, bundleMrp - bundlePrice);
+//                                 const totalBase = lines.reduce((s, l) => s + l.basePrice, 0);
+
+//                                 const share = totalBase > 0 ? line.basePrice / totalBase : 0;
+//                                 const lineDiscount =
+//                                     Math.floor(bundleUnitDiscount * share) * bundleQty;
+//                                 if (lineDiscount > 0) {
+//                                     candidateDiscount = {
+//                                         promoId: promo._id,
+//                                         type: "bundle",
+//                                         amount: lineDiscount,
+//                                         note: "Bundle deal",
+//                                     };
+//                                 }
+//                             }
+//                         }
+//                     }
+//                 }
+
+//                 // ✅ keep only the BEST discount (highest amount)
+//                 if (candidateDiscount) {
+//                     const currentBest = line.discounts[0];
+//                     if (!currentBest || candidateDiscount.amount > currentBest.amount) {
+//                         line.discounts = [candidateDiscount];
+//                     }
+//                 }
+//             }
+//         }
+
+//         // Collect applied promos
+//         for (const line of cart) {
+//             if (line.discounts.length > 0) {
+//                 const d = line.discounts[0];
+//                 if (!appliedPromotions.find((p) => p._id.toString() === d.promoId.toString())) {
+//                     const promo = promos.find((p) => p._id.toString() === d.promoId.toString());
+//                     if (promo) {
+//                         appliedPromotions.push({
+//                             _id: promo._id,
+//                             name: promo.campaignName,
+//                             type: promo.promotionType,
+//                         });
+//                     }
+//                 }
+//             }
+//         }
+
+//         /* ---------------- STEP 2: Base summary ---------------- */
+//         const summary = cart.reduce(
+//             (acc, l) => {
+//                 const lineBase = l.basePrice * l.qty;
+//                 const lineDiscounts = l.discounts.reduce((s, d) => s + d.amount, 0);
+
+//                 acc.mrpTotal += l.mrp * l.qty;
+//                 acc.savings += lineDiscounts;
+//                 acc.payable += Math.max(0, lineBase - lineDiscounts);
+
+//                 return acc;
+//             },
+//             { mrpTotal: 0, savings: 0, payable: 0 }
+//         );
+
+//         /* ---------------- STEP 3: Cart-level promos ---------------- */
+//         const isNewUser = !!ctx.userContext?.isNewUser;
+//         const paymentMethod = (ctx.paymentMethod || "").trim();
+
+//         const cartPromos = ["newUser", "paymentOffer"];
+//         for (const type of cartPromos) {
+//             const promo = promos.find((p) => p.promotionType === type);
+//             if (!promo) continue;
+
+//             if (type === "newUser" && isNewUser) {
+//                 const dp = Number(promo.promotionConfig?.discountPercent || 0);
+//                 const cap = Number(promo.promotionConfig?.maxDiscount || 0);
+//                 if (dp > 0) {
+//                     const discount = Math.floor((summary.payable * dp) / 100);
+//                     const applied = Math.min(discount, cap || discount);
+//                     summary.savings += applied;
+//                     summary.payable = Math.max(0, summary.payable - applied);
+//                     appliedPromotions.push({
+//                         _id: promo._id,
+//                         name: promo.campaignName,
+//                         type,
+//                     });
+//                 }
+//             }
+
+//             if (type === "paymentOffer") {
+//                 const methods = promo.promotionConfig?.methods || [];
+//                 const minOrderValue = Number(promo.promotionConfig?.minOrderValue || 0);
+
+//                 if (methods.includes(paymentMethod) && summary.payable >= minOrderValue) {
+//                     const dp = Number(promo.promotionConfig?.discountPercent || 0);
+//                     const cap = Number(promo.promotionConfig?.maxDiscount || 0);
+//                     if (dp > 0) {
+//                         const discount = Math.floor((summary.payable * dp) / 100);
+//                         const applied = Math.min(discount, cap || discount);
+//                         summary.savings += applied;
+//                         summary.payable = Math.max(0, summary.payable - applied);
+//                         appliedPromotions.push({
+//                             _id: promo._id,
+//                             name: promo.campaignName,
+//                             type,
+//                         });
+//                     }
+//                 }
+//             }
+//         }
+
+//         return { items: cart, summary, appliedPromotions };
+//     } catch (err) {
+//         console.error("applyPromotions helper error:", err);
+//         throw err;
+//     }
+// };
 export const applyPromotions = async (itemsInput, ctx = {}) => {
     try {
         if (!Array.isArray(itemsInput)) {
@@ -2014,17 +2247,21 @@ export const applyPromotions = async (itemsInput, ctx = {}) => {
             endDate: { $gte: now },
         })
             .select(
-                "+promotionType +promotionConfig +scope +categories +products +discountUnit +discountValue"
+                "+promotionType +promotionConfig +scope +categories +products +discountUnit +discountValue +campaignName"
             )
             .lean();
 
         /* ---------------- Load products in cart ---------------- */
         const ids = itemsInput.map((i) => i.productId).filter(isObjectId);
         const dbProducts = await Product.find({ _id: { $in: ids } })
-            .select("_id name images brand price mrp category categoryHierarchy discountPercent")
+            .select(
+                "_id name images brand price mrp category categoryHierarchy variants sku quantity sales thresholdValue"
+            )
             .lean();
 
-        const productMap = new Map(dbProducts.map((p) => [p._id.toString(), p]));
+        /* ✅ Enrich all products to get correct displayPrice & promo state */
+        const enrichedProducts = await enrichProductsUnified(dbProducts, promos);
+        const productMap = new Map(enrichedProducts.map((p) => [p._id.toString(), p]));
 
         /* ---------------- Build cart lines ---------------- */
         const cart = itemsInput
@@ -2032,24 +2269,59 @@ export const applyPromotions = async (itemsInput, ctx = {}) => {
                 const p = productMap.get(i.productId);
                 if (!p) return null;
 
-                const mrp = Number(p.mrp ?? p.price);
+                // ✅ FIXED: match correct variant using SKU from cart
+                const selectedSku = i.selectedVariant?.sku || i.sku;
+                // ✅ Always use the fresh promo-enriched variant
+                let variant =
+                    p.variants?.find((v) => v.sku === selectedSku) ||
+                    p.selectedVariant ||
+                    p.variants?.[0];
 
-                const basePrice =
-                    typeof i.basePrice === "number"
-                        ? i.basePrice
-                        : p.discountPercent
-                            ? Math.round(mrp - (mrp * p.discountPercent) / 100)
-                            : Number(p.price);
+                if (!variant) {
+                    // Fallback to enriched default variant
+                    variant = {
+                        originalPrice: p.mrp ?? p.price ?? 0,
+                        displayPrice: p.price ?? 0,
+                    };
+                }
+
+                // ✅ Force recalculation in case promotions changed
+                const variantMrp = Number(variant.originalPrice ?? p.mrp ?? 0);
+                const variantBasePrice = Number(variant.displayPrice ?? variantMrp);
+
+                // 🔹 Check if product matches any current active promotion
+                let promoPrice = variantMrp;
+                for (const promo of promos) {
+                    if (!productMatchesPromo(p, promo)) continue;
+                    if (promo.promotionType !== "discount") continue;
+
+                    const val = Number(promo.discountValue || 0);
+                    if (promo.discountUnit === "percent" && val > 0) {
+                        promoPrice = Math.round(variantMrp * (1 - val / 100));
+                    } else if (promo.discountUnit === "amount" && val > 0) {
+                        promoPrice = Math.max(0, variantMrp - val);
+                    }
+                }
+
+                // ✅ Always take lower of base vs promo
+                const finalDisplay = Math.min(variantBasePrice, promoPrice);
+
+                const mrp = variantMrp;
+                const basePrice = finalDisplay;
+
 
                 return {
                     productId: p._id.toString(),
                     name: p.name,
-                    image: Array.isArray(p.images) && p.images[0] ? p.images[0] : "",
+                    image:
+                        Array.isArray(p.images) && p.images[0]
+                            ? p.images[0]
+                            : variant.images?.[0] || "",
                     brand: p.brand || "",
                     qty: Math.max(1, Number(i.qty || 1)),
                     mrp,
                     basePrice,
-                    discounts: [], // will only keep best one
+                    discounts: [],
                     freebies: [],
                     product: p,
                 };
@@ -2060,7 +2332,6 @@ export const applyPromotions = async (itemsInput, ctx = {}) => {
 
         /* ---------------- STEP 1: Product-level promos ---------------- */
         for (const promo of promos) {
-            // temporary collection of candidate discounts for each line
             for (const line of cart) {
                 if (!productMatchesPromo(line.product, promo)) continue;
 
@@ -2103,7 +2374,6 @@ export const applyPromotions = async (itemsInput, ctx = {}) => {
                             }
                         }
                     }
-                    // ⚠️ perOrder tier handled separately below
                 }
 
                 // Bundle discount
@@ -2138,7 +2408,7 @@ export const applyPromotions = async (itemsInput, ctx = {}) => {
                     }
                 }
 
-                // ✅ keep only the BEST discount (highest amount)
+                // ✅ Keep only best discount
                 if (candidateDiscount) {
                     const currentBest = line.discounts[0];
                     if (!currentBest || candidateDiscount.amount > currentBest.amount) {
@@ -2174,7 +2444,6 @@ export const applyPromotions = async (itemsInput, ctx = {}) => {
                 acc.mrpTotal += l.mrp * l.qty;
                 acc.savings += lineDiscounts;
                 acc.payable += Math.max(0, lineBase - lineDiscounts);
-
                 return acc;
             },
             { mrpTotal: 0, savings: 0, payable: 0 }
@@ -2233,3 +2502,4 @@ export const applyPromotions = async (itemsInput, ctx = {}) => {
         throw err;
     }
 };
+
