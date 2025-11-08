@@ -4,7 +4,7 @@ import PaymentMethod from '../../../models/settings/payments/PaymentMethod.js';
 import Order from '../../../models/Order.js';
 import { encrypt, decrypt } from '../../../middlewares/utils/encryption.js';
 import { createShiprocketOrder, cancelShiprocketShipment } from "../../../middlewares/services/shiprocket.js";
-import { refundQueue } from "../../../middlewares/services/refundQueue.js";
+// import { refundQueue } from "../../../middlewares/services/refundQueue.js";
 import { sendEmail } from "../../../middlewares/utils/emailService.js"; // ✅ assume you already have an email service
 import Product from '../../../models/Product.js';
 import Affiliate from '../../../models/Affiliate.js';
@@ -22,7 +22,7 @@ import { determineOccasions, craftMessage } from "../../../middlewares/services/
 import { buildEcardPdf } from "../../../middlewares/services/ecardPdf.js";
 import { generateInvoice } from "../../../middlewares/services/invoiceService.js";
 import { splitOrderForPersistence } from '../../../middlewares/services/orderSplit.js'; // or correct path
-import { shiprocketQueue } from "../../../middlewares/services/shiprocketQueue.js";
+// import { shiprocketQueue } from "../../../middlewares/services/shiprocketQueue.js";
 
 dotenv.config();
 
@@ -40,11 +40,11 @@ const razorpayAxios = axios.create({
     },
 });
 
-export const enqueueShipmentJob = async ({ orderId }) => {
-    if (!orderId) throw new Error("orderId missing for queue enqueue");
-    await shiprocketQueue.add({ orderId });
-    console.log(`📦 Enqueued Shiprocket job for order: ${orderId}`);
-};
+// export const enqueueShipmentJob = async ({ orderId }) => {
+//     if (!orderId) throw new Error("orderId missing for queue enqueue");
+//     await shiprocketQueue.add({ orderId });
+//     console.log(`📦 Enqueued Shiprocket job for order: ${orderId}`);
+// };
 
 // Simple helper - adapt rules to your business
 const isCodAllowed = ({ pincode, amount, user }) => {
@@ -3776,7 +3776,7 @@ export const cancelOrder = async (req, res) => {
 
 //         const refundAmount = order.amount;
 
-//         // ✅ Begin Mongo transaction
+//         // ✅ Begin transaction
 //         await session.withTransaction(async () => {
 //             order.refund = {
 //                 ...order.refund,
@@ -3792,13 +3792,15 @@ export const cancelOrder = async (req, res) => {
 //             await order.save({ session });
 //         });
 
-//         // ✅ RAZORPAY REFUND FLOW
+//         // ----------------------------------
+//         // ✅ 1. RAZORPAY REFUND
+//         // ----------------------------------
 //         if (method === "razorpay" && order.transactionId) {
 //             try {
 //                 const refundResp = await razorpayAxios.post(
 //                     `/payments/${order.transactionId}/refund`,
 //                     {
-//                         amount: refundAmount * 100, // paise
+//                         amount: refundAmount * 100,
 //                         speed: "optimum",
 //                         notes: { orderId: order._id.toString(), reason },
 //                     }
@@ -3810,7 +3812,7 @@ export const cancelOrder = async (req, res) => {
 //                 order.refund.refundedAt = new Date();
 //                 await order.save();
 
-//                 // ✅ NEW — SEND EMAIL AFTER SUCCESSFUL REFUND
+//                 // ✅ EMAIL (RAZORPAY)
 //                 await sendEmail(
 //                     order.user.email,
 //                     "✅ Refund Processed Successfully",
@@ -3818,30 +3820,21 @@ export const cancelOrder = async (req, res) => {
 //                     <p>Hi ${order.user.name},</p>
 //                     <p>Your refund for Order <strong>#${order._id}</strong> has been successfully processed.</p>
 //                     <p><strong>Refund Amount:</strong> ₹${refundAmount}</p>
-//                     <p><strong>Refund Method:</strong> Razorpay (Original Payment Method)</p>
-//                     <p>It may take 3–5 business days to reflect in your bank account.</p>
+//                     <p><strong>Method:</strong> Original Payment Method (Razorpay)</p>
+//                     <p>Your bank may take 3–5 working days to reflect the amount.</p>
 //                     <p>Regards,<br/>Team Joyory Beauty</p>
-//                 `
+//                     `
 //                 );
+
 //                 return res.status(200).json({
 //                     success: true,
 //                     message: "✅ Refund processed successfully via Razorpay",
-//                     refund: {
-//                         refundId: order.refund.gatewayRefundId,
-//                         amount: order.refund.amount,
-//                         method: order.refund.method,
-//                         status: order.refund.status,
-//                         reason: order.refund.reason,
-//                         refundedAt: order.refund.refundedAt,
-//                         initiatedBy: order.refund.initiatedBy,
-//                         transactionId: order.transactionId,
-//                         orderId: order._id,
-//                     },
+//                     refund: order.refund,
 //                 });
+
 //             } catch (err) {
 //                 console.error("⚠️ Razorpay refund failed:", err.response?.data || err.message);
 
-//                 // Retry refund later
 //                 await refundQueue.add("retryRefund", { orderId: order._id.toString() });
 
 //                 order.refund.status = "failed";
@@ -3856,20 +3849,19 @@ export const cancelOrder = async (req, res) => {
 //             }
 //         }
 
-//         // ✅ WALLET REFUND FLOW
+//         // ----------------------------------
+//         // ✅ 2. WALLET REFUND
+//         // ----------------------------------
 //         if (method === "wallet") {
 //             const user = await User.findById(order.user._id);
 //             if (!user) throw new Error("User not found for wallet refund");
 
-//             // 🔹 Update user joyoryCash
 //             user.joyoryCash += refundAmount;
 //             await user.save();
 
-//             // 🔹 Find or create wallet record
 //             let wallet = await Wallet.findOne({ user: user._id });
 //             if (!wallet) wallet = await Wallet.create({ user: user._id });
 
-//             // 🔹 Update wallet balance + transaction
 //             wallet.joyoryCash += refundAmount;
 //             wallet.transactions.push({
 //                 type: "REFUND",
@@ -3879,31 +3871,60 @@ export const cancelOrder = async (req, res) => {
 //             });
 //             await wallet.save();
 
-//             // 🔹 Update order refund status
 //             order.refund.status = "completed";
 //             order.paymentStatus = "refunded";
 //             order.refund.refundedAt = new Date();
 //             await order.save();
 
+//             // ✅ EMAIL (WALLET REFUND)
+//             await sendEmail(
+//                 order.user.email,
+//                 "💰 Refund Added to Your Joyory Wallet",
+//                 `
+//                 <p>Hi ${order.user.name},</p>
+//                 <p>Your refund for Order <strong>#${order._id}</strong> has been added to your Joyory Wallet.</p>
+//                 <p><strong>Refund Amount:</strong> ₹${refundAmount}</p>
+//                 <p>You can now use this balance for future purchases on Joyory Beauty.</p>
+//                 <p>Regards,<br/>Team Joyory Beauty</p>
+//                 `
+//             );
+
 //             return res.status(200).json({
 //                 success: true,
-//                 message: "💰 Refund credited to wallet successfully",
+//                 message: "💰 Wallet refund successful",
 //                 refund: order.refund,
 //             });
 //         }
 
-//         // ✅ MANUAL UPI REFUND
+//         // ----------------------------------
+//         // ✅ 3. MANUAL UPI REFUND
+//         // ----------------------------------
 //         if (method === "manual_upi") {
 //             order.refund.status = "processing";
 //             order.paymentStatus = "refund_initiated";
 //             await order.save();
 
+//             // ✅ EMAIL (MANUAL UPI)
+//             await sendEmail(
+//                 order.user.email,
+//                 "⌛ Refund Initiated (Manual UPI Processing)",
+//                 `
+//                 <p>Hi ${order.user.name},</p>
+//                 <p>Your refund for Order <strong>#${order._id}</strong> has been initiated.</p>
+//                 <p><strong>Refund Amount:</strong> ₹${refundAmount}</p>
+//                 <p>Our team will manually process the refund to your UPI within 24–48 hours.</p>
+//                 <p>You will get an update once it is completed.</p>
+//                 <p>Regards,<br/>Team Joyory Beauty</p>
+//                 `
+//             );
+
 //             return res.status(200).json({
 //                 success: true,
-//                 message: "Manual refund marked as processing",
+//                 message: "Manual refund initiated",
 //                 refund: order.refund,
 //             });
-//         }
+//         }   
+
 //     } catch (err) {
 //         console.error("🔥 initiateRefund error:", err);
 //         res.status(500).json({ success: false, message: err.message });
@@ -3911,186 +3932,6 @@ export const cancelOrder = async (req, res) => {
 //         await session.endSession();
 //     }
 // };
-export const initiateRefund = async (req, res) => {
-    const session = await mongoose.startSession();
-    try {
-        const { orderId, reason, method = "razorpay" } = req.body;
-        const userId = req.user?._id;
-
-        if (!orderId)
-            return res.status(400).json({ success: false, message: "orderId required" });
-
-        const order = await Order.findById(orderId)
-            .populate("user")
-            .populate("refund");
-
-        if (!order)
-            return res.status(404).json({ success: false, message: "Order not found" });
-
-        if (order.paymentStatus === "refunded")
-            return res.status(200).json({ success: true, message: "Refund already completed" });
-
-        if (!order.paid)
-            return res.status(400).json({ success: false, message: "Order not paid" });
-
-        const refundAmount = order.amount;
-
-        // ✅ Begin transaction
-        await session.withTransaction(async () => {
-            order.refund = {
-                ...order.refund,
-                amount: refundAmount,
-                method,
-                reason,
-                initiatedBy: userId,
-                status: "initiated",
-                attempts: (order.refund?.attempts || 0) + 1,
-            };
-
-            order.paymentStatus = "refund_initiated";
-            await order.save({ session });
-        });
-
-        // ----------------------------------
-        // ✅ 1. RAZORPAY REFUND
-        // ----------------------------------
-        if (method === "razorpay" && order.transactionId) {
-            try {
-                const refundResp = await razorpayAxios.post(
-                    `/payments/${order.transactionId}/refund`,
-                    {
-                        amount: refundAmount * 100,
-                        speed: "optimum",
-                        notes: { orderId: order._id.toString(), reason },
-                    }
-                );
-
-                order.refund.gatewayRefundId = refundResp.data.id;
-                order.refund.status = "completed";
-                order.paymentStatus = "refunded";
-                order.refund.refundedAt = new Date();
-                await order.save();
-
-                // ✅ EMAIL (RAZORPAY)
-                await sendEmail(
-                    order.user.email,
-                    "✅ Refund Processed Successfully",
-                    `
-                    <p>Hi ${order.user.name},</p>
-                    <p>Your refund for Order <strong>#${order._id}</strong> has been successfully processed.</p>
-                    <p><strong>Refund Amount:</strong> ₹${refundAmount}</p>
-                    <p><strong>Method:</strong> Original Payment Method (Razorpay)</p>
-                    <p>Your bank may take 3–5 working days to reflect the amount.</p>
-                    <p>Regards,<br/>Team Joyory Beauty</p>
-                    `
-                );
-
-                return res.status(200).json({
-                    success: true,
-                    message: "✅ Refund processed successfully via Razorpay",
-                    refund: order.refund,
-                });
-
-            } catch (err) {
-                console.error("⚠️ Razorpay refund failed:", err.response?.data || err.message);
-
-                await refundQueue.add("retryRefund", { orderId: order._id.toString() });
-
-                order.refund.status = "failed";
-                order.paymentStatus = "refund_failed";
-                await order.save();
-
-                return res.status(500).json({
-                    success: false,
-                    message: "Razorpay refund failed — queued for retry",
-                    error: err.response?.data || err.message,
-                });
-            }
-        }
-
-        // ----------------------------------
-        // ✅ 2. WALLET REFUND
-        // ----------------------------------
-        if (method === "wallet") {
-            const user = await User.findById(order.user._id);
-            if (!user) throw new Error("User not found for wallet refund");
-
-            user.joyoryCash += refundAmount;
-            await user.save();
-
-            let wallet = await Wallet.findOne({ user: user._id });
-            if (!wallet) wallet = await Wallet.create({ user: user._id });
-
-            wallet.joyoryCash += refundAmount;
-            wallet.transactions.push({
-                type: "REFUND",
-                amount: refundAmount,
-                mode: "ONLINE",
-                description: `Refund for Order #${order._id}`,
-            });
-            await wallet.save();
-
-            order.refund.status = "completed";
-            order.paymentStatus = "refunded";
-            order.refund.refundedAt = new Date();
-            await order.save();
-
-            // ✅ EMAIL (WALLET REFUND)
-            await sendEmail(
-                order.user.email,
-                "💰 Refund Added to Your Joyory Wallet",
-                `
-                <p>Hi ${order.user.name},</p>
-                <p>Your refund for Order <strong>#${order._id}</strong> has been added to your Joyory Wallet.</p>
-                <p><strong>Refund Amount:</strong> ₹${refundAmount}</p>
-                <p>You can now use this balance for future purchases on Joyory Beauty.</p>
-                <p>Regards,<br/>Team Joyory Beauty</p>
-                `
-            );
-
-            return res.status(200).json({
-                success: true,
-                message: "💰 Wallet refund successful",
-                refund: order.refund,
-            });
-        }
-
-        // ----------------------------------
-        // ✅ 3. MANUAL UPI REFUND
-        // ----------------------------------
-        if (method === "manual_upi") {
-            order.refund.status = "processing";
-            order.paymentStatus = "refund_initiated";
-            await order.save();
-
-            // ✅ EMAIL (MANUAL UPI)
-            await sendEmail(
-                order.user.email,
-                "⌛ Refund Initiated (Manual UPI Processing)",
-                `
-                <p>Hi ${order.user.name},</p>
-                <p>Your refund for Order <strong>#${order._id}</strong> has been initiated.</p>
-                <p><strong>Refund Amount:</strong> ₹${refundAmount}</p>
-                <p>Our team will manually process the refund to your UPI within 24–48 hours.</p>
-                <p>You will get an update once it is completed.</p>
-                <p>Regards,<br/>Team Joyory Beauty</p>
-                `
-            );
-
-            return res.status(200).json({
-                success: true,
-                message: "Manual refund initiated",
-                refund: order.refund,
-            });
-        }   
-
-    } catch (err) {
-        console.error("🔥 initiateRefund error:", err);
-        res.status(500).json({ success: false, message: err.message });
-    } finally {
-        await session.endSession();
-    }
-};
 
 export const payForOrder = async (req, res) => {
     try {
