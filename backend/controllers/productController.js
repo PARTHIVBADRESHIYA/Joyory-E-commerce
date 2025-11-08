@@ -66,14 +66,19 @@ const addProductController = async (req, res) => {
         let isPublished = true;
         let scheduleDate = null;
         if (scheduledAt) {
+            // User enters IST time (local)
             const parsedDateIST = moment.tz(scheduledAt, "YYYY-MM-DD HH:mm", "Asia/Kolkata");
+
             if (!parsedDateIST.isValid()) {
                 return res.status(400).json({ message: "❌ Invalid scheduledAt date format. Use YYYY-MM-DD HH:mm (IST)" });
             }
-            const parsedDateUTC = parsedDateIST.toDate();
+
+            // Convert IST to UTC before saving
+            const parsedDateUTC = parsedDateIST.clone().tz("UTC").toDate();
+
             if (parsedDateUTC > new Date()) {
                 isPublished = false;
-                scheduleDate = parsedDateUTC;
+                scheduleDate = parsedDateUTC; // ✅ saved in UTC
             }
         }
 
