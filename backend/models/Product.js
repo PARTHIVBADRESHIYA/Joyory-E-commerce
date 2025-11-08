@@ -398,7 +398,18 @@ const productSchema = new mongoose.Schema({
             return !this.variants || this.variants.length === 0;
         }
     },
-
+    summary: { type: String },
+    description: { type: String },
+    features: { type: [String] },
+    howToUse: { type: String },
+    expiryDate: { type: Date },
+    scheduledAt: { type: Date },
+    status: {
+        type: String,
+        enum: ["In-stock", "Low stock", "Out of stock"],
+        default: "In-stock"
+    },
+    productTags: [{ type: String, index: true }],
     brand: { type: mongoose.Schema.Types.ObjectId, ref: "Brand" },
     category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
     categoryHierarchy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Category' }],
