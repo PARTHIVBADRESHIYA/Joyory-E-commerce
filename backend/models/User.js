@@ -26,7 +26,7 @@ const userSchema = new mongoose.Schema({
 
     role: {
         type: String,
-        enum: ['user', 'admin','seller'],
+        enum: ['user', 'admin', 'seller'],
         default: 'user'
     },
     profileImage: { type: String, default: null },
@@ -94,9 +94,10 @@ const userSchema = new mongoose.Schema({
 
     referralCode: { type: String, unique: true },
     referredBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    referredByCampaign: { type: mongoose.Schema.Types.ObjectId, ref: "ReferralCampaign" },
 
-rewardPoints: { type: Number, default: 0 }, // points user has
-joyoryCash: { type: Number, default: 0 }, // cash added to wallet
+    rewardPoints: { type: Number, default: 0 }, // points user has
+    joyoryCash: { type: Number, default: 0 }, // cash added to wallet
 
     createdBy: {
         type: String,

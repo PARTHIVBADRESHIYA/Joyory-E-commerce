@@ -4,6 +4,7 @@ import Payment from "../models/settings/payments/Payment.js";
 import { io } from "../server.js"; // ✅ import socket.io instance
 import { splitOrderForPersistence } from "../middlewares/services/orderSplit.js"; // ✅ your split service
 import { refundWorker } from "../middlewares/services/refundWorker.js"; // import worker
+import { sendEmail } from "../middlewares/utils/emailService.js"; // ✅ assume you already have an email service
 
 
 // export const razorpayWebhook = async (req, res) => {
@@ -291,6 +292,38 @@ export const razorpayWebhook = async (req, res) => {
         //         refundWorker(order._id.toString()); // retry asynchronously
         //     }
         // }
+        // if (event.startsWith("refund.")) {
+        //     const refund = eventPayload.payload.refund.entity;
+
+        //     const order = await Order.findOne({
+        //         $or: [
+        //             { "refund.gatewayRefundId": refund.id },
+        //             { transactionId: refund.payment_id }
+        //         ]
+        //     });
+
+        //     if (!order) return res.status(200).json({ status: "ignored" });
+
+        //     if (event === "refund.created") {
+        //         order.refund.status = "initiated";
+        //         await order.save();
+        //     }
+
+        //     if (event === "refund.processed") {
+        //         order.refund.status = "completed";
+        //         order.paymentStatus = "refunded";
+        //         order.refund.refundedAt = new Date();
+        //         await order.save();
+        //     }
+
+        //     if (event === "refund.failed") {
+        //         order.refund.status = "failed";
+        //         order.paymentStatus = "refund_failed";
+        //         await order.save();
+
+        //         refundQueue.add("refund", { orderId: order._id });
+        //     }
+        // }
         if (event.startsWith("refund.")) {
             const refund = eventPayload.payload.refund.entity;
 
@@ -299,22 +332,51 @@ export const razorpayWebhook = async (req, res) => {
                     { "refund.gatewayRefundId": refund.id },
                     { transactionId: refund.payment_id }
                 ]
-            });
+            }).populate("user");
 
             if (!order) return res.status(200).json({ status: "ignored" });
 
+            // ✅ REFUND INITIATED
             if (event === "refund.created") {
                 order.refund.status = "initiated";
                 await order.save();
             }
 
+            // ✅ REFUND COMPLETED (send email here)
             if (event === "refund.processed") {
                 order.refund.status = "completed";
                 order.paymentStatus = "refunded";
                 order.refund.refundedAt = new Date();
                 await order.save();
+
+                // ✅ EMAIL TO USER
+                const methodLabel =
+                    order.refund.method === "razorpay"
+                        ? "Original Payment Method (Razorpay)"
+                        : order.refund.method === "wallet"
+                            ? "Joyory Wallet"
+                            : "Manual UPI";
+
+                await sendEmail(
+                    order.user.email,
+                    "✅ Your Refund Has Been Successfully Processed",
+                    `
+            <p>Hi ${order.user.name},</p>
+            <p>Your refund for Order <strong>#${order._id}</strong> has been successfully completed.</p>
+
+            <p><strong>Refund Amount:</strong> ₹${order.refund.amount}</p>
+            <p><strong>Refund Method:</strong> ${methodLabel}</p>
+
+            <p>The refunded amount should reflect shortly based on your payment provider.</p>
+            
+            <p>If you have any questions, feel free to contact our support team.</p>
+
+            <p>Regards,<br/>Team Joyory Beauty</p>
+            `
+                );
             }
 
+            // ❌ REFUND FAILED
             if (event === "refund.failed") {
                 order.refund.status = "failed";
                 order.paymentStatus = "refund_failed";

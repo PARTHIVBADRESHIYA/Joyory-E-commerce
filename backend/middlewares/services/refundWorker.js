@@ -39,7 +39,7 @@ export const refundWorker = new Worker(
         order.refund.gatewayRefundId = response.data.id;
         await order.save();
 
-        return "Refund initiated";
+        return "Refund initiated";  
     },
     { connection }
 );

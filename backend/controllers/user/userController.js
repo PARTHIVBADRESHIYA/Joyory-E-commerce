@@ -2,12 +2,13 @@ import User from '../../models/User.js';
 import Order from '../../models/Order.js';
 import { generateUniqueReferralCode } from '../../middlewares/utils/referral.js';
 import Referral from '../../models/Referral.js';
+import ReferralCampaign from '../../models/ReferralCampaign.js';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { generateOTP } from '../../middlewares/utils/generateOTP.js';
 import { sendEmail } from '../../middlewares/utils/emailService.js';
 import { sendSms } from '../../middlewares/utils/sendSms.js';
-import {mergeGuestCart } from '../../controllers/user/userCartController.js';
+import { mergeGuestCart } from '../../controllers/user/userCartController.js';
 // import { notifyMainAdmins } from '../middlewares/utils/notifyMainAdmins.js'; // ✅ Make sure this path is correct
 
 // JWT Token Generator
@@ -19,7 +20,509 @@ const generateToken = (user) => {
     );
 };
 
-// ====================== USER SECTION ===================== //
+// =================== USER SIGNUP ===================
+const userSignup = async (req, res) => {
+    try {
+        const { name, email, password, phone, preferredOtpMethod, referralCode } = req.body;
+
+        if (!name || !email || !password) {
+            return res.status(400).json({ message: "name, email and password are required" });
+        }
+
+        const existing = await User.findOne({ email });
+        if (existing) return res.status(400).json({ message: "Email already registered" });
+
+        const method = (preferredOtpMethod && ["email", "sms"].includes(preferredOtpMethod.toLowerCase()))
+            ? preferredOtpMethod.toLowerCase()
+            : "email";
+        const actualMethod = method === "sms" && phone ? "sms" : "email";
+
+        // Generate OTP & hash password
+        const plainOtp = generateOTP();
+        const hashedOtp = await bcrypt.hash(plainOtp, 10);
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        const myReferralCode = await generateUniqueReferralCode();
+
+        // Create user object
+        const user = new User({
+            name,
+            email,
+            phone,
+            password: hashedPassword,
+            role: "user",
+            isManual: true,
+            isVerified: false,
+            preferredOtpMethod: actualMethod,
+            otp: { code: hashedOtp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) },
+            referralCode: myReferralCode,
+        });
+
+        // Handle referral
+        let referrer = null;
+        if (referralCode) {
+            referrer = await User.findOne({ referralCode: referralCode.toUpperCase() });
+            if (!referrer) return res.status(400).json({ message: "Invalid referral code" });
+            if (referrer.email === email) return res.status(400).json({ message: "Cannot use own referral code" });
+            user.referredBy = referrer._id;
+        }
+
+        await user.save();
+
+        if (referrer) {
+            await Referral.create({
+                referrer: referrer._id,
+                referee: user._id,
+                status: "pending",
+                rewardForReferrer: 200,
+                rewardForReferee: 200,
+                minOrderAmount: 100,
+            });
+        }
+
+        // 🔥 Merge guest cart from session
+        const guestCart = req.session?.guestCart || [];
+        if (guestCart.length) {
+            await mergeGuestCart(user._id, guestCart);
+            req.session.guestCart = []; // clear after merging
+        }
+
+        // Send OTP
+        try {
+            if (actualMethod === "sms") {
+                await sendSms(phone, `Your verification OTP is: ${plainOtp}`);
+            } else {
+                await sendEmail(
+                    email,
+                    "Verify your account",
+                    `<p>Your verification OTP is: <b>${plainOtp}</b></p>`
+                );
+            }
+        } catch (err) {
+            console.error("❌ OTP sending failed:", err);
+            return res.status(500).json({
+                message: "Signup succeeded but sending OTP failed. Please request OTP again.",
+                error: err.message,
+            });
+        }
+
+        return res.status(201).json({
+            message: "Signup successful. OTP sent.",
+            otpSent: true,
+            method: actualMethod,
+            email: user.email,
+            referralCode: user.referralCode,
+            referralLink: `${process.env.APP_URL || "https://yourdomain.com"}/signup?ref=${user.referralCode}`,
+            mergedCart: guestCart.length > 0
+        });
+
+    } catch (err) {
+        console.error("🔥 Signup error:", err);
+        res.status(500).json({ message: "Signup failed", error: err.message });
+    }
+};
+
+
+// const userSignup = async (req, res) => {
+//     try {
+//         const {
+//             name,
+//             email,
+//             password,
+//             phone,
+//             preferredOtpMethod,
+//             referralCode,
+//             promo          // ✅ NEW (campaign code from URL)
+//         } = req.body;
+
+//         if (!name || !email || !password) {
+//             return res.status(400).json({ message: "name, email and password are required" });
+//         }
+
+//         const existing = await User.findOne({ email });
+//         if (existing) return res.status(400).json({ message: "Email already registered" });
+
+//         const method = (preferredOtpMethod && ["email", "sms"].includes(preferredOtpMethod.toLowerCase()))
+//             ? preferredOtpMethod.toLowerCase()
+//             : "email";
+//         const actualMethod = method === "sms" && phone ? "sms" : "email";
+
+//         // Generate OTP & hash password
+//         const plainOtp = generateOTP();
+//         const hashedOtp = await bcrypt.hash(plainOtp, 10);
+//         const hashedPassword = await bcrypt.hash(password, 10);
+
+//         const myReferralCode = await generateUniqueReferralCode();
+
+//         // ✅ NEW: detect referral campaign from promo code
+//         let campaign = null;
+//         if (promo) {
+//             campaign = await ReferralCampaign.findOne({
+//                 promoCode: promo.toUpperCase(),
+//                 isActive: true,
+//                 $or: [
+//                     { expiresAt: null },
+//                     { expiresAt: { $gt: new Date() } }
+//                 ]
+//             });
+
+//             if (!campaign) {
+//                 return res.status(400).json({ message: "Invalid or expired referral link" });
+//             }
+//         }
+
+//         // Create user object
+//         const user = new User({
+//             name,
+//             email,
+//             phone,
+//             password: hashedPassword,
+//             role: "user",
+//             isManual: true,
+//             isVerified: false,
+//             preferredOtpMethod: actualMethod,
+//             otp: { code: hashedOtp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) },
+//             referralCode: myReferralCode,
+//         });
+
+//         // ✅ NEW: attach campaign if exists
+//         if (campaign) {
+//             user.referredByCampaign = campaign._id;
+//         }
+
+//         // Handle referral (user referral code)
+//         let referrer = null;
+//         if (referralCode) {
+//             referrer = await User.findOne({ referralCode: referralCode.toUpperCase() });
+//             if (!referrer) return res.status(400).json({ message: "Invalid referral code" });
+//             if (referrer.email === email) return res.status(400).json({ message: "Cannot use own referral code" });
+//             user.referredBy = referrer._id;
+//         }
+
+//         await user.save();
+
+//         // ✅ NEW: create referral entry for campaign
+//         if (campaign) {
+//             await Referral.create({
+//                 referrer: campaign.createdBy,      // admin or influencer who made it
+//                 referee: user._id,
+//                 status: "pending",
+//                 rewardForReferrer: campaign.referrerReward,
+//                 rewardForReferee: campaign.refereeReward,
+//                 minOrderAmount: campaign.minOrderAmount,
+//             });
+//         }
+
+//         // Existing referral code logic remains untouched
+//         if (referrer) {
+//             await Referral.create({
+//                 referrer: referrer._id,
+//                 referee: user._id,
+//                 status: "pending",
+//                 rewardForReferrer: 200,
+//                 rewardForReferee: 200,
+//                 minOrderAmount: 100,
+//             });
+//         }
+
+//         // 🔥 Merge guest cart from session
+//         const guestCart = req.session?.guestCart || [];
+//         if (guestCart.length) {
+//             await mergeGuestCart(user._id, guestCart);
+//             req.session.guestCart = [];
+//         }
+
+//         // Send OTP
+//         try {
+//             if (actualMethod === "sms") {
+//                 await sendSms(phone, `Your verification OTP is: ${plainOtp}`);
+//             } else {
+//                 await sendEmail(
+//                     email,
+//                     "Verify your account",
+//                     `<p>Your verification OTP is: <b>${plainOtp}</b></p>`
+//                 );
+//             }
+//         } catch (err) {
+//             console.error("❌ OTP sending failed:", err);
+//             return res.status(500).json({
+//                 message: "Signup succeeded but sending OTP failed. Please request OTP again.",
+//                 error: err.message,
+//             });
+//         }
+
+//         return res.status(201).json({
+//             message: "Signup successful. OTP sent.",
+//             otpSent: true,
+//             method: actualMethod,
+//             email: user.email,
+//             referralCode: user.referralCode,
+//             referralLink: `${process.env.APP_URL || "https://yourdomain.com"}/signup?ref=${user.referralCode}`,
+//             mergedCart: guestCart.length > 0,
+
+//             // ✅ NEW: include campaign data if applied
+//             campaignApplied: campaign
+//                 ? {
+//                     name: campaign.name,
+//                     rewardForUser: campaign.refereeReward,
+//                     minOrderAmount: campaign.minOrderAmount
+//                 }
+//                 : null
+//         });
+
+//     } catch (err) {
+//         console.error("🔥 Signup error:", err);
+//         res.status(500).json({ message: "Signup failed", error: err.message });
+//     }
+// };
+
+// =================== USER LOGIN ===================
+const userLogin = async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        if (!email || !password) {
+            return res.status(400).json({
+                message: "Please enter both your email and password to log in."
+            });
+        }
+
+        const user = await User.findOne({ email });
+        if (!user || user.role !== "user") {
+            return res.status(401).json({ message: "No account found with this email. Please check your email or sign up." });
+        }
+
+        if (!user.isVerified) {
+            return res.status(403).json({ message: "Your email is not verified yet. Please verify your email before logging in." });
+        }
+
+        if (user.lockUntil && user.lockUntil > new Date()) {
+            const remaining = user.lockUntil - new Date();
+            const m = Math.floor((remaining % 3600000) / 60000);
+            const s = Math.floor((remaining % 60000) / 1000);
+            return res.status(403).json({
+                message: `Your account is temporarily locked due to multiple failed login attempts. Try again in ${m}m ${s}s.`
+            });
+        }
+
+        const isMatch = await user.matchPassword(password);
+        if (!isMatch) {
+            user.loginAttempts = (user.loginAttempts || 0) + 1;
+            if (user.loginAttempts >= 5) {
+                user.lockUntil = new Date(Date.now() + 5 * 60 * 1000);
+                user.loginAttempts = 0;
+                await user.save();
+                return res.status(403).json({ message: "Too many failed attempts. Account locked for 5 minutes." });
+            }
+            await user.save();
+            return res.status(401).json({
+                message: `Incorrect password. You have ${5 - user.loginAttempts} attempts left.`
+            });
+        }
+
+        // Success
+        user.loginAttempts = 0;
+        user.lockUntil = undefined;
+        await user.save();
+
+        // 🔥 Merge guest cart from session
+        const guestCart = req.session?.guestCart || [];
+        if (guestCart.length) {
+            await mergeGuestCart(user._id, guestCart);
+            req.session.guestCart = []; // clear after merging
+        }
+
+        const token = generateToken(user);
+        res.cookie("token", token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+            maxAge: 7 * 24 * 60 * 60 * 1000
+        });
+
+        return res.status(200).json({
+            message: `Welcome back, ${user.name}!`,
+            user: { id: user._id, name: user.name, role: user.role },
+            mergedCart: guestCart.length > 0
+        });
+
+    } catch (err) {
+        console.error("❌ Login error:", err);
+        return res.status(500).json({
+            message: "Something went wrong while logging in. Please try again later."
+        });
+    }
+};
+
+export default userLogin;
+
+// @desc    User Login (5 attempts → 5min lock)
+// const userLogin = async (req, res) => {
+//     try {
+//         const { email, password } = req.body;
+
+
+//         const user = await User.findOne({ email });
+//         if (!user || user.role !== 'user') return res.status(401).json({ message: 'Invalid credentials' });
+
+//         if (!user.isVerified) {
+//             return res.status(403).json({ message: 'Please verify your email before logging in.' });
+//         }
+
+
+//         // Check lock
+//         if (user.lockUntil && user.lockUntil > new Date()) {
+//             const remaining = user.lockUntil - new Date();
+//             const m = Math.floor((remaining % 3600000) / 60000);
+//             const s = Math.floor((remaining % 60000) / 1000);
+//             return res.status(403).json({ message: `Account locked. Try again in ${m}m ${s}s.` });
+//         }
+
+//         const isMatch = await user.matchPassword(password);
+//         if (!isMatch) {
+//             user.loginAttempts = (user.loginAttempts || 0) + 1;
+
+//             if (user.loginAttempts >= 5) {
+//                 user.lockUntil = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+//                 user.loginAttempts = 0;
+//             }
+
+//             await user.save();
+//             return res.status(401).json({ message: 'Invalid credentials' });
+//         }
+
+//         // Success
+//         user.loginAttempts = 0;
+//         user.lockUntil = undefined;
+//         await user.save();
+
+//         const token = generateToken(user);
+//         res.status(200).json({ token, user: { id: user._id, name: user.name, role: user.role } });
+//     } catch (err) {
+//         res.status(500).json({ message: 'Login failed', error: err.message });
+//     }
+// };
+
+// Track Product View (with authenticated user)
+const trackProductView = async (req, res) => {
+    try {
+        const { productId, category } = req.body;
+        const userId = req.user._id;
+
+        if (!productId || !category) {
+            return res.status(400).json({ message: "Product ID and category are required" });
+        }
+
+        // Push to beginning, remove duplicates, trim to last 20 items
+        await User.findByIdAndUpdate(
+            userId,
+            {
+                $pull: { recentProducts: productId, recentCategories: category }
+            }
+        );
+
+        await User.findByIdAndUpdate(
+            userId,
+            {
+                $push: {
+                    recentProducts: { $each: [productId], $position: 0, $slice: 20 },
+                    recentCategories: { $each: [category], $position: 0, $slice: 20 }
+                }
+            },
+            { new: true }
+        );
+
+        res.json({ message: "User activity updated successfully" });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Error updating user activity" });
+    }
+};
+
+// controllers/authController.js
+// const logoutUser = (req, res) => {
+//     res.clearCookie('token'); // removes the JWT cookie
+//     return res.status(200).json({ message: 'Logged out successfully' });
+// };
+const logoutUser = (req, res) => {
+    try {
+        // 1️⃣ Clear the token cookie
+        res.cookie("token", "", {
+            httpOnly: true, // prevent JS access
+            secure: process.env.NODE_ENV === "production", // HTTPS only in production
+            sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+            path: "/", // match login path
+            expires: new Date(0) // immediately expire
+        });
+
+        // 2️⃣ Prevent caching of sensitive pages
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate"); // HTTP 1.1
+        res.setHeader("Pragma", "no-cache"); // HTTP 1.0
+        res.setHeader("Expires", "0"); // Proxies
+
+        // 3️⃣ Return success message
+        return res.status(200).json({
+            message: "You have been logged out successfully."
+        });
+    } catch (err) {
+        console.error("❌ Logout error:", err);
+        return res.status(500).json({
+            message: "Something went wrong during logout. Please try again later."
+        });
+    }
+};
+
+// @desc Delete account permanently
+const deleteAccount = async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        // 1) Find user
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        // 2) Delete related records
+        await Order.deleteMany({ user: userId });       // delete all user orders
+        await Referral.deleteMany({ $or: [{ referrer: userId }, { referee: userId }] }); // remove referrals
+
+        // 3) Delete user
+        await User.findByIdAndDelete(userId);
+
+        // 4) Clear token cookie
+        res.clearCookie("token");
+
+        return res.status(200).json({ message: "✅ Your account and all related data have been deleted permanently." });
+    } catch (error) {
+        console.error("❌ Account deletion error:", error);
+        return res.status(500).json({ message: "Failed to delete account", error: error.message });
+    }
+};
+
+
+
+export {
+    userSignup,
+    userLogin,
+    trackProductView,
+    logoutUser,
+    deleteAccount
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // 📌 User Signup
 // const userSignup = async (req, res) => {
 //     try {
@@ -623,341 +1126,32 @@ const generateToken = (user) => {
 // };
 
 
-// =================== USER SIGNUP ===================
-const userSignup = async (req, res) => {
-    try {
-        const { name, email, password, phone, preferredOtpMethod, referralCode } = req.body;
-
-        if (!name || !email || !password) {
-            return res.status(400).json({ message: "name, email and password are required" });
-        }
-
-        const existing = await User.findOne({ email });
-        if (existing) return res.status(400).json({ message: "Email already registered" });
-
-        const method = (preferredOtpMethod && ["email", "sms"].includes(preferredOtpMethod.toLowerCase()))
-            ? preferredOtpMethod.toLowerCase()
-            : "email";
-        const actualMethod = method === "sms" && phone ? "sms" : "email";
-
-        // Generate OTP & hash password
-        const plainOtp = generateOTP();
-        const hashedOtp = await bcrypt.hash(plainOtp, 10);
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-        const myReferralCode = await generateUniqueReferralCode();
-
-        // Create user object
-        const user = new User({
-            name,
-            email,
-            phone,
-            password: hashedPassword,
-            role: "user",
-            isManual: true,
-            isVerified: false,
-            preferredOtpMethod: actualMethod,
-            otp: { code: hashedOtp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) },
-            referralCode: myReferralCode,
-        });
-
-        // Handle referral
-        let referrer = null;
-        if (referralCode) {
-            referrer = await User.findOne({ referralCode: referralCode.toUpperCase() });
-            if (!referrer) return res.status(400).json({ message: "Invalid referral code" });
-            if (referrer.email === email) return res.status(400).json({ message: "Cannot use own referral code" });
-            user.referredBy = referrer._id;
-        }
-
-        await user.save();
-
-        if (referrer) {
-            await Referral.create({
-                referrer: referrer._id,
-                referee: user._id,
-                status: "pending",
-                rewardForReferrer: 200,
-                rewardForReferee: 200,
-                minOrderAmount: 100,
-            });
-        }
-
-        // 🔥 Merge guest cart from session
-        const guestCart = req.session?.guestCart || [];
-        if (guestCart.length) {
-            await mergeGuestCart(user._id, guestCart);
-            req.session.guestCart = []; // clear after merging
-        }
-
-        // Send OTP
-        try {
-            if (actualMethod === "sms") {
-                await sendSms(phone, `Your verification OTP is: ${plainOtp}`);
-            } else {
-                await sendEmail(
-                    email,
-                    "Verify your account",
-                    `<p>Your verification OTP is: <b>${plainOtp}</b></p>`
-                );
-            }
-        } catch (err) {
-            console.error("❌ OTP sending failed:", err);
-            return res.status(500).json({
-                message: "Signup succeeded but sending OTP failed. Please request OTP again.",
-                error: err.message,
-            });
-        }
-
-        return res.status(201).json({
-            message: "Signup successful. OTP sent.",
-            otpSent: true,
-            method: actualMethod,
-            email: user.email,
-            referralCode: user.referralCode,
-            referralLink: `${process.env.APP_URL || "https://yourdomain.com"}/signup?ref=${user.referralCode}`,
-            mergedCart: guestCart.length > 0
-        });
-
-    } catch (err) {
-        console.error("🔥 Signup error:", err);
-        res.status(500).json({ message: "Signup failed", error: err.message });
-    }
-};
-
-// =================== USER LOGIN ===================
-const userLogin = async (req, res) => {
-    try {
-        const { email, password } = req.body;
-
-        if (!email || !password) {
-            return res.status(400).json({
-                message: "Please enter both your email and password to log in."
-            });
-        }
-
-        const user = await User.findOne({ email });
-        if (!user || user.role !== "user") {
-            return res.status(401).json({ message: "No account found with this email. Please check your email or sign up." });
-        }
-
-        if (!user.isVerified) {
-            return res.status(403).json({ message: "Your email is not verified yet. Please verify your email before logging in." });
-        }
-
-        if (user.lockUntil && user.lockUntil > new Date()) {
-            const remaining = user.lockUntil - new Date();
-            const m = Math.floor((remaining % 3600000) / 60000);
-            const s = Math.floor((remaining % 60000) / 1000);
-            return res.status(403).json({
-                message: `Your account is temporarily locked due to multiple failed login attempts. Try again in ${m}m ${s}s.`
-            });
-        }
-
-        const isMatch = await user.matchPassword(password);
-        if (!isMatch) {
-            user.loginAttempts = (user.loginAttempts || 0) + 1;
-            if (user.loginAttempts >= 5) {
-                user.lockUntil = new Date(Date.now() + 5 * 60 * 1000);
-                user.loginAttempts = 0;
-                await user.save();
-                return res.status(403).json({ message: "Too many failed attempts. Account locked for 5 minutes." });
-            }
-            await user.save();
-            return res.status(401).json({
-                message: `Incorrect password. You have ${5 - user.loginAttempts} attempts left.`
-            });
-        }
-
-        // Success
-        user.loginAttempts = 0;
-        user.lockUntil = undefined;
-        await user.save();
-
-        // 🔥 Merge guest cart from session
-        const guestCart = req.session?.guestCart || [];
-        if (guestCart.length) {
-            await mergeGuestCart(user._id, guestCart);
-            req.session.guestCart = []; // clear after merging
-        }
-
-        const token = generateToken(user);
-        res.cookie("token", token, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
-            maxAge: 7 * 24 * 60 * 60 * 1000
-        });
-
-        return res.status(200).json({
-            message: `Welcome back, ${user.name}!`,
-            user: { id: user._id, name: user.name, role: user.role },
-            mergedCart: guestCart.length > 0
-        });
-
-    } catch (err) {
-        console.error("❌ Login error:", err);
-        return res.status(500).json({
-            message: "Something went wrong while logging in. Please try again later."
-        });
-    }
-};
-
-export default userLogin;
-
-// @desc    User Login (5 attempts → 5min lock)
-// const userLogin = async (req, res) => {
-//     try {
-//         const { email, password } = req.body;
-
-
-//         const user = await User.findOne({ email });
-//         if (!user || user.role !== 'user') return res.status(401).json({ message: 'Invalid credentials' });
-
-//         if (!user.isVerified) {
-//             return res.status(403).json({ message: 'Please verify your email before logging in.' });
-//         }
-
-
-//         // Check lock
-//         if (user.lockUntil && user.lockUntil > new Date()) {
-//             const remaining = user.lockUntil - new Date();
-//             const m = Math.floor((remaining % 3600000) / 60000);
-//             const s = Math.floor((remaining % 60000) / 1000);
-//             return res.status(403).json({ message: `Account locked. Try again in ${m}m ${s}s.` });
-//         }
-
-//         const isMatch = await user.matchPassword(password);
-//         if (!isMatch) {
-//             user.loginAttempts = (user.loginAttempts || 0) + 1;
-
-//             if (user.loginAttempts >= 5) {
-//                 user.lockUntil = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
-//                 user.loginAttempts = 0;
-//             }
-
-//             await user.save();
-//             return res.status(401).json({ message: 'Invalid credentials' });
-//         }
-
-//         // Success
-//         user.loginAttempts = 0;
-//         user.lockUntil = undefined;
-//         await user.save();
-
-//         const token = generateToken(user);
-//         res.status(200).json({ token, user: { id: user._id, name: user.name, role: user.role } });
-//     } catch (err) {
-//         res.status(500).json({ message: 'Login failed', error: err.message });
-//     }
-// };
-
-// Track Product View (with authenticated user)
-const trackProductView = async (req, res) => {
-    try {
-        const { productId, category } = req.body;
-        const userId = req.user._id;
-
-        if (!productId || !category) {
-            return res.status(400).json({ message: "Product ID and category are required" });
-        }
-
-        // Push to beginning, remove duplicates, trim to last 20 items
-        await User.findByIdAndUpdate(
-            userId,
-            {
-                $pull: { recentProducts: productId, recentCategories: category }
-            }
-        );
-
-        await User.findByIdAndUpdate(
-            userId,
-            {
-                $push: {
-                    recentProducts: { $each: [productId], $position: 0, $slice: 20 },
-                    recentCategories: { $each: [category], $position: 0, $slice: 20 }
-                }
-            },
-            { new: true }
-        );
-
-        res.json({ message: "User activity updated successfully" });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "Error updating user activity" });
-    }
-};
-
-// controllers/authController.js
-// const logoutUser = (req, res) => {
-//     res.clearCookie('token'); // removes the JWT cookie
-//     return res.status(200).json({ message: 'Logged out successfully' });
-// };
-const logoutUser = (req, res) => {
-    try {
-        // 1️⃣ Clear the token cookie
-        res.cookie("token", "", {
-            httpOnly: true, // prevent JS access
-            secure: process.env.NODE_ENV === "production", // HTTPS only in production
-            sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
-            path: "/", // match login path
-            expires: new Date(0) // immediately expire
-        });
-
-        // 2️⃣ Prevent caching of sensitive pages
-        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate"); // HTTP 1.1
-        res.setHeader("Pragma", "no-cache"); // HTTP 1.0
-        res.setHeader("Expires", "0"); // Proxies
-
-        // 3️⃣ Return success message
-        return res.status(200).json({
-            message: "You have been logged out successfully."
-        });
-    } catch (err) {
-        console.error("❌ Logout error:", err);
-        return res.status(500).json({
-            message: "Something went wrong during logout. Please try again later."
-        });
-    }
-};
-
-// @desc Delete account permanently
-const deleteAccount = async (req, res) => {
-    try {
-        const userId = req.user._id;
-
-        // 1) Find user
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({ message: "User not found" });
-        }
-
-        // 2) Delete related records
-        await Order.deleteMany({ user: userId });       // delete all user orders
-        await Referral.deleteMany({ $or: [{ referrer: userId }, { referee: userId }] }); // remove referrals
-
-        // 3) Delete user
-        await User.findByIdAndDelete(userId);
-
-        // 4) Clear token cookie
-        res.clearCookie("token");
-
-        return res.status(200).json({ message: "✅ Your account and all related data have been deleted permanently." });
-    } catch (error) {
-        console.error("❌ Account deletion error:", error);
-        return res.status(500).json({ message: "Failed to delete account", error: error.message });
-    }
-};
 
 
 
-export {
-    userSignup,
-    userLogin,
-    trackProductView,
-    logoutUser,
-    deleteAccount
-};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
