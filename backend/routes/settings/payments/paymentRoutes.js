@@ -1,6 +1,6 @@
 import express from 'express';
 import { verifyAdminOrTeamMember, authenticateUser, verifyOrderOwnership } from '../../../middlewares/authMiddleware.js';
-import {  filterPaymentsByDate, getDashboardSummary, getPaymentsFiltered, payForOrder,cancelOrder,setPaymentMethod,getActivePaymentMethods,createCodOrder,confirmCodOrder,createRazorpayOrder,verifyRazorpayPayment } from '../../../controllers/settings/payments/paymentController.js';
+import { filterPaymentsByDate, getDashboardSummary, getPaymentsFiltered, payForOrder, cancelOrder, setRefundMethod,initiateRefund,setPaymentMethod, getActivePaymentMethods, createCodOrder, confirmCodOrder, createRazorpayOrder, verifyRazorpayPayment } from '../../../controllers/settings/payments/paymentController.js';
 // import { userPaymentValidation } from "../../../middlewares/paymentValidation.js";
 
 const router = express.Router();
@@ -27,7 +27,9 @@ router.post('/cod/confirm', authenticateUser, confirmCodOrder);
 
 router.post('/cancel', authenticateUser, cancelOrder);
 
-// router.post('/refund', authenticateUser, initiateRefund);
+router.post('/refund-method', authenticateUser, setRefundMethod);
+
+router.post('/refund', authenticateUser, initiateRefund);
 
 router.get('/methods', authenticateUser, getActivePaymentMethods);
 

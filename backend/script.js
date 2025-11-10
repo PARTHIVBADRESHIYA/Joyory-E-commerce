@@ -1,44 +1,44 @@
-// import { Queue } from "bullmq";
-// import IORedis from "ioredis";
-// import dotenv from "dotenv";
-// dotenv.config();
+import Queue from "bull";
+import Redis from "ioredis";
+import dotenv from "dotenv";
+dotenv.config();
 
-// // 🔹 Use TLS-enabled Upstash Redis
-// const connection = new IORedis(process.env.REDIS_URL, {
-//   tls: {},                     // Required for Upstash
-//   maxRetriesPerRequest: null,  // Prevents retry issues
-//   enableReadyCheck: false,
-// });
+// ✅ Create Redis connection (NO TLS)
+const redisConnection = new Redis(process.env.REDIS_URL, {
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+});
 
-// const queues = ["refundQueue", "shiprocketShipmentQueue"];
+// ✅ Create the Shiprocket queue
+export const shiprocketQueue = new Queue("shiprocketShipmentQueue", {
+    createClient: function (type) {
+        switch (type) {
+            case "client":
+                return redisConnection;
+            case "subscriber":
+                return redisConnection.duplicate();
+            default:
+                return redisConnection.duplicate();
+        }
+    },
+    defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 60000 },
+        removeOnComplete: true,
+        removeOnFail: false,
+    },
+});
 
-// const cleanQueue = async (queueName) => {
-//   const queue = new Queue(queueName, { connection });
-//   try {
-//     console.log(`🔹 Cleaning queue: ${queueName}`);
+// 🧭 Logs
+shiprocketQueue
+    .on("waiting", (jobId) => console.log(`⏳ Waiting job ${jobId}`))
+    .on("active", (job) => console.log(`🚀 Processing job ${job.id}`))
+    .on("completed", (job) =>
+        console.log(`✅ Job ${job.id} done [${job.data.orderId}]`)
+    )
+    .on("failed", (job, err) =>
+        console.error(`🔥 Job ${job.id} failed [${job?.data?.orderId}]:`, err.message)
+    )
+    .on("error", (err) => console.error("❌ Shiprocket Queue Error:", err));
 
-//     const completed = await queue.clean(0, "completed");
-//     console.log(`✅ Removed ${completed.length} completed jobs from ${queueName}`);
-
-//     const failed = await queue.clean(0, "failed");
-//     console.log(`✅ Removed ${failed.length} failed jobs from ${queueName}`);
-
-//     const counts = await queue.getJobCounts();
-//     console.log(`📊 Current job counts for ${queueName}:`, counts);
-
-//   } catch (err) {
-//     console.error(`❌ Error cleaning ${queueName}:`, err);
-//   } finally {
-//     await queue.close();
-//   }
-// };
-
-// const run = async () => {
-//   for (const q of queues) {
-//     await cleanQueue(q);
-//   }
-//   console.log("♻️ All queues cleaned successfully!");
-//   process.exit(0);
-// };
-
-// run();
+console.log("📦 Shiprocket Queue initialized successfully");

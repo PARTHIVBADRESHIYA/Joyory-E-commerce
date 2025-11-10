@@ -4,7 +4,7 @@ import PaymentMethod from '../../../models/settings/payments/PaymentMethod.js';
 import Order from '../../../models/Order.js';
 import { encrypt, decrypt } from '../../../middlewares/utils/encryption.js';
 import { createShiprocketOrder, cancelShiprocketShipment } from "../../../middlewares/services/shiprocket.js";
-// import { refundQueue } from "../../../middlewares/services/refundQueue.js";
+import { refundQueue } from "../../../middlewares/services/refundQueue.js";
 import { sendEmail } from "../../../middlewares/utils/emailService.js"; // ✅ assume you already have an email service
 import Product from '../../../models/Product.js';
 import Affiliate from '../../../models/Affiliate.js';
@@ -22,7 +22,7 @@ import { determineOccasions, craftMessage } from "../../../middlewares/services/
 import { buildEcardPdf } from "../../../middlewares/services/ecardPdf.js";
 import { generateInvoice } from "../../../middlewares/services/invoiceService.js";
 import { splitOrderForPersistence } from '../../../middlewares/services/orderSplit.js'; // or correct path
-// import { shiprocketQueue } from "../../../middlewares/services/shiprocketQueue.js";
+import { shiprocketQueue } from "../../../middlewares/services/shiprocketQueue.js";
 
 dotenv.config();
 
@@ -3611,146 +3611,454 @@ export const cancelOrder = async (req, res) => {
 
         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
 
-        if (userId && String(order.user._id) !== String(userId) && !req.user?.isAdmin)
+        if (String(order.user._id) !== String(userId) && !req.user?.isAdmin)
             return res.status(403).json({ success: false, message: "Unauthorized" });
 
         const nonCancelableStatuses = ["Shipped", "Out for Delivery", "Delivered"];
         if (nonCancelableStatuses.includes(order.orderStatus))
             return res.status(400).json({ success: false, message: `Order cannot be cancelled once ${order.orderStatus}` });
 
-        if (order.orderStatus === "Cancelled")
-            return res.status(200).json({ success: true, message: "Order already cancelled", order });
-
-        const productIdsToRecalc = new Set();
-
         await session.withTransaction(async () => {
-            for (const item of order.products) {
-                const product = await Product.findById(item.productId._id).session(session);
-                if (!product) continue;
-
-                const qty = Number(item.quantity);
-                if (qty <= 0) continue;
-                productIdsToRecalc.add(String(product._id));
-
-                if (item.variant?.sku) {
-                    const idx = product.variants?.findIndex(v => v.sku === item.variant.sku);
-                    if (idx !== undefined && idx >= 0 && product.variants[idx]) {
-                        product.variants[idx].stock = (product.variants[idx].stock || 0) + qty;
-                        product.variants[idx].sales = Math.max(0, (product.variants[idx].sales || 0) - qty);
-                    }
-                } else {
-                    product.quantity = (product.quantity || 0) + qty;
-                    product.sales = Math.max(0, (product.sales || 0) - qty);
-                }
-
-                let totalQty = 0;
-                if (Array.isArray(product.variants) && product.variants.length > 0)
-                    totalQty = product.variants.reduce((s, v) => s + (v.stock || 0), 0);
-                else totalQty = product.quantity;
-
-                product.quantity = totalQty;
-                product.status = totalQty <= 0 ? "Out of stock" : totalQty < (product.thresholdValue || 0) ? "Low stock" : "In-stock";
-
-                await product.save({ session });
-            }
-
             order.orderStatus = "Cancelled";
-            order.paymentStatus = order.paid ? "refund_initiated" : "cancelled";
+            order.paymentStatus = order.paid ? "refund_requested" : "cancelled";
+
             order.cancellation = {
                 cancelledBy: userId,
                 reason,
                 requestedAt: new Date(),
-                allowed: true,
+                allowed: true
             };
-            order.trackingHistory.push({
-                status: "Order Cancelled",
-                timestamp: new Date(),
-                location: "Customer",
-                notes: reason,
-            });
+
+            if (order.paid) {
+                order.refund = {
+                    amount: order.amount,
+                    method: null,
+                    status: "requested",
+                    reason,
+                    requestedBy: userId
+                };
+            }
 
             await order.save({ session });
         });
 
-        // ✅ NEW — SEND EMAIL TO CUSTOMER
-        await sendEmail(
-            order.user.email,
-            "❌ Your Order Has Been Cancelled",
-            `
-            <p>Hi ${order.user.name},</p>
-            <p>Your order <strong>#${order._id}</strong> has been cancelled successfully.</p>
-            <p><strong>Reason:</strong> ${reason || "Not specified"}</p>
-            ${order.paid
-                ? "<p>✅ Since you had already paid, your refund has been initiated. You will receive updates shortly.</p>"
-                : "<p>You had not made any payment, so no refund is required.</p>"
-            }
-            <p>We hope to serve you again soon ❤️</p>
-            <p>Regards,<br/>Team Joyory Beauty</p>
-        `
-        );
-        if (productIdsToRecalc.size > 0) {
-            const ids = Array.from(productIdsToRecalc).map(id => new mongoose.Types.ObjectId(id));
-            const prods = await Product.find({ _id: { $in: ids } });
-            const bulkOps = prods.map(p => {
-                let totalQty = 0;
-                if (Array.isArray(p.variants) && p.variants.length > 0)
-                    totalQty = p.variants.reduce((s, v) => s + (v.stock || 0), 0);
-                else totalQty = p.quantity;
-
-                let newStatus = totalQty <= 0 ? "Out of stock" : totalQty < (p.thresholdValue || 0) ? "Low stock" : "In-stock";
-
-                return {
-                    updateOne: {
-                        filter: { _id: p._id },
-                        update: { $set: { quantity: totalQty, status: newStatus, variants: p.variants } },
-                    },
-                };
-            });
-            if (bulkOps.length) await Product.bulkWrite(bulkOps);
-        }
-
-        if (order.shipment?.shipment_id) {
-            try {
-                await cancelShiprocketShipment(order.shipment.shipment_id);
-            } catch (err) {
-                console.error("⚠️ Shiprocket cancel failed:", err.message);
-            }
-        }
-
-        // if (order.paid) {
-        //     try {
-        //         await initiateRefund({ body: { orderId, reason, method: "razorpay" }, user: req.user }, {
-        //             status: () => ({ json: () => null })
-        //         });
-        //     } catch (refundErr) {
-        //         console.error("⚠️ Refund trigger failed:", refundErr.message);
-        //     }
-        // }
-
-        // 🌟 Dynamic refund methods based on current status
         const refundMethodsAvailable = order.paid
             ? [
                 { method: "razorpay", label: "Original Payment Method" },
-                { method: "wallet", label: "Add to Joyory Wallet" },
+                { method: "wallet", label: "Add to Wallet" }
             ]
-            : []; // No refund options if unpaid
+            : [];
 
         res.status(200).json({
             success: true,
-            message: "✅ Order cancelled successfully. Refund initiated if applicable.",
-            orderId: order._id,
-            paid: order.paid,
-            paymentStatus: order.paymentStatus,
-            refundMethodsAvailable,
+            message: "Order cancelled. Choose refund method.",
+            refundMethodsAvailable
         });
 
     } catch (err) {
-        console.error("🔥 cancelOrder Error:", err);
-        res.status(500).json({ success: false, message: "Cancel order failed", error: err.message });
+        console.error("Cancel order error:", err);
+        res.status(500).json({ success: false, message: "Cancel order failed" });
     } finally {
         await session.endSession();
     }
 };
+
+export const initiateRefund = async (req, res) => {
+    const session = await mongoose.startSession();
+    try {
+        const { orderId, reason, method = "razorpay" } = req.body;
+        const userId = req.user?._id;
+
+        if (!orderId)
+            return res.status(400).json({ success: false, message: "orderId required" });
+
+        const order = await Order.findById(orderId)
+            .populate("user")
+            .populate("refund");
+
+        if (!order)
+            return res.status(404).json({ success: false, message: "Order not found" });
+
+        if (order.paymentStatus === "refunded")
+            return res.status(200).json({ success: true, message: "Refund already completed" });
+
+        if (!order.paid)
+            return res.status(400).json({ success: false, message: "Order not paid" });
+
+        const refundAmount = order.amount;
+
+        // ✅ Begin transaction
+        await session.withTransaction(async () => {
+            order.refund = {
+                ...order.refund,
+                amount: refundAmount,
+                method,
+                reason,
+                initiatedBy: userId,
+                status: "initiated",
+                attempts: (order.refund?.attempts || 0) + 1,
+            };
+
+            order.paymentStatus = "refund_initiated";
+            await order.save({ session });
+        });
+
+        // ----------------------------------
+        // ✅ 1. RAZORPAY REFUND
+        // ----------------------------------
+        if (method === "razorpay" && order.transactionId) {
+            try {
+                const refundResp = await razorpayAxios.post(
+                    `/payments/${order.transactionId}/refund`,
+                    {
+                        amount: refundAmount * 100,
+                        speed: "optimum",
+                        notes: { orderId: order._id.toString(), reason },
+                    }
+                );
+
+                order.refund.gatewayRefundId = refundResp.data.id;
+                order.refund.status = "completed";
+                order.paymentStatus = "refunded";
+                order.refund.refundedAt = new Date();
+                await order.save();
+
+                // ✅ EMAIL (RAZORPAY)
+                await sendEmail(
+                    order.user.email,
+                    "✅ Refund Processed Successfully",
+                    `
+                    <p>Hi ${order.user.name},</p>
+                    <p>Your refund for Order <strong>#${order._id}</strong> has been successfully processed.</p>
+                    <p><strong>Refund Amount:</strong> ₹${refundAmount}</p>
+                    <p><strong>Method:</strong> Original Payment Method (Razorpay)</p>
+                    <p>Your bank may take 3–5 working days to reflect the amount.</p>
+                    <p>Regards,<br/>Team Joyory Beauty</p>
+                    `
+                );
+
+                return res.status(200).json({
+                    success: true,
+                    message: "✅ Refund processed successfully via Razorpay",
+                    refund: order.refund,
+                });
+
+            } catch (err) {
+                console.error("⚠️ Razorpay refund failed:", err.response?.data || err.message);
+
+                await refundQueue.add("retryRefund", { orderId: order._id.toString() });
+
+                order.refund.status = "failed";
+                order.paymentStatus = "refund_failed";
+                await order.save();
+
+                return res.status(500).json({
+                    success: false,
+                    message: "Razorpay refund failed — queued for retry",
+                    error: err.response?.data || err.message,
+                });
+            }
+        }
+
+        // ----------------------------------
+        // ✅ 2. WALLET REFUND
+        // ----------------------------------
+        if (method === "wallet") {
+            const user = await User.findById(order.user._id);
+            if (!user) throw new Error("User not found for wallet refund");
+
+            user.joyoryCash += refundAmount;
+            await user.save();
+
+            let wallet = await Wallet.findOne({ user: user._id });
+            if (!wallet) wallet = await Wallet.create({ user: user._id });
+
+            wallet.joyoryCash += refundAmount;
+            wallet.transactions.push({
+                type: "REFUND",
+                amount: refundAmount,
+                mode: "ONLINE",
+                description: `Refund for Order #${order._id}`,
+            });
+            await wallet.save();
+
+            order.refund.status = "completed";
+            order.paymentStatus = "refunded";
+            order.refund.refundedAt = new Date();
+            await order.save();
+
+            // ✅ EMAIL (WALLET REFUND)
+            await sendEmail(
+                order.user.email,
+                "💰 Refund Added to Your Joyory Wallet",
+                `
+                <p>Hi ${order.user.name},</p>
+                <p>Your refund for Order <strong>#${order._id}</strong> has been added to your Joyory Wallet.</p>
+                <p><strong>Refund Amount:</strong> ₹${refundAmount}</p>
+                <p>You can now use this balance for future purchases on Joyory Beauty.</p>
+                <p>Regards,<br/>Team Joyory Beauty</p>
+                `
+            );
+
+            return res.status(200).json({
+                success: true,
+                message: "💰 Wallet refund successful",
+                refund: order.refund,
+            });
+        }
+
+        // ----------------------------------
+        // ✅ 3. MANUAL UPI REFUND
+        // ----------------------------------
+        if (method === "manual_upi") {
+            order.refund.status = "processing";
+            order.paymentStatus = "refund_initiated";
+            await order.save();
+
+            // ✅ EMAIL (MANUAL UPI)
+            await sendEmail(
+                order.user.email,
+                "⌛ Refund Initiated (Manual UPI Processing)",
+                `
+                <p>Hi ${order.user.name},</p>
+                <p>Your refund for Order <strong>#${order._id}</strong> has been initiated.</p>
+                <p><strong>Refund Amount:</strong> ₹${refundAmount}</p>
+                <p>Our team will manually process the refund to your UPI within 24–48 hours.</p>
+                <p>You will get an update once it is completed.</p>
+                <p>Regards,<br/>Team Joyory Beauty</p>
+                `
+            );
+
+            return res.status(200).json({
+                success: true,
+                message: "Manual refund initiated",
+                refund: order.refund,
+            });
+        }
+
+    } catch (err) {
+        console.error("🔥 initiateRefund error:", err);
+        res.status(500).json({ success: false, message: err.message });
+    } finally {
+        await session.endSession();
+    }
+};
+
+// export const setRefundMethod = async (req, res) => {
+//     const { orderId, method } = req.body;
+//     const userId = req.user?._id;
+
+//     const order = await Order.findById(orderId);
+//     if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+//     order.refund.method = method;
+//     order.refund.status = "requested";
+//     order.refund.requestedBy = userId;
+
+//     await order.save();
+
+//     res.status(200).json({
+//         success: true,
+//         message: "Refund method submitted. Waiting for admin approval."
+//     });
+// };
+
+
+export const setRefundMethod = async (req, res) => {
+    const { orderId, method } = req.body;
+    const userId = req.user?._id;
+
+    const order = await Order.findById(orderId).populate("user");
+    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+    order.refund.method = method;
+    order.refund.status = "requested";
+    order.refund.requestedBy = userId;
+
+    await order.save();
+
+    // ✅ Send email to user
+    await sendEmail(
+        order.user.email,
+        "📩 Refund Request Received",
+        `
+        <p>Hi ${order.user.name},</p>
+        <p>We have received your refund request for Order <strong>#${order._id}</strong>.</p>
+        
+        <p><strong>Selected Refund Method:</strong> ${method === "razorpay"
+            ? "Original Payment Method (Razorpay)"
+            : method === "wallet"
+                ? "Joyory Wallet"
+                : "Manual UPI"
+        }</p>
+
+        <p>Our team will review your request soon. You will receive another update once an admin approves it.</p>
+
+        <p>Regards,<br/>Team Joyory Beauty</p>
+        `
+    );
+
+    res.status(200).json({
+        success: true,
+        message: "Refund method submitted. Waiting for admin approval."
+    });
+};
+
+
+// export const cancelOrder = async (req, res) => {
+//     const session = await mongoose.startSession();
+//     try {
+//         const { orderId, reason } = req.body;
+//         const userId = req.user?._id;
+
+//         if (!orderId) return res.status(400).json({ success: false, message: "orderId is required" });
+
+//         const order = await Order.findById(orderId)
+//             .populate("products.productId")
+//             .populate("user");
+
+//         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+//         if (userId && String(order.user._id) !== String(userId) && !req.user?.isAdmin)
+//             return res.status(403).json({ success: false, message: "Unauthorized" });
+
+//         const nonCancelableStatuses = ["Shipped", "Out for Delivery", "Delivered"];
+//         if (nonCancelableStatuses.includes(order.orderStatus))
+//             return res.status(400).json({ success: false, message: `Order cannot be cancelled once ${order.orderStatus}` });
+
+//         if (order.orderStatus === "Cancelled")
+//             return res.status(200).json({ success: true, message: "Order already cancelled", order });
+
+//         const productIdsToRecalc = new Set();
+
+//         await session.withTransaction(async () => {
+//             for (const item of order.products) {
+//                 const product = await Product.findById(item.productId._id).session(session);
+//                 if (!product) continue;
+
+//                 const qty = Number(item.quantity);
+//                 if (qty <= 0) continue;
+//                 productIdsToRecalc.add(String(product._id));
+
+//                 if (item.variant?.sku) {
+//                     const idx = product.variants?.findIndex(v => v.sku === item.variant.sku);
+//                     if (idx !== undefined && idx >= 0 && product.variants[idx]) {
+//                         product.variants[idx].stock = (product.variants[idx].stock || 0) + qty;
+//                         product.variants[idx].sales = Math.max(0, (product.variants[idx].sales || 0) - qty);
+//                     }
+//                 } else {
+//                     product.quantity = (product.quantity || 0) + qty;
+//                     product.sales = Math.max(0, (product.sales || 0) - qty);
+//                 }
+
+//                 let totalQty = 0;
+//                 if (Array.isArray(product.variants) && product.variants.length > 0)
+//                     totalQty = product.variants.reduce((s, v) => s + (v.stock || 0), 0);
+//                 else totalQty = product.quantity;
+
+//                 product.quantity = totalQty;
+//                 product.status = totalQty <= 0 ? "Out of stock" : totalQty < (product.thresholdValue || 0) ? "Low stock" : "In-stock";
+
+//                 await product.save({ session });
+//             }
+
+//             order.orderStatus = "Cancelled";
+//             order.paymentStatus = order.paid ? "refund_initiated" : "cancelled";
+//             order.cancellation = {
+//                 cancelledBy: userId,
+//                 reason,
+//                 requestedAt: new Date(),
+//                 allowed: true,
+//             };
+//             order.trackingHistory.push({
+//                 status: "Order Cancelled",
+//                 timestamp: new Date(),
+//                 location: "Customer",
+//                 notes: reason,
+//             });
+
+//             await order.save({ session });
+//         });
+
+//         // ✅ NEW — SEND EMAIL TO CUSTOMER
+//         await sendEmail(
+//             order.user.email,
+//             "❌ Your Order Has Been Cancelled",
+//             `
+//             <p>Hi ${order.user.name},</p>
+//             <p>Your order <strong>#${order._id}</strong> has been cancelled successfully.</p>
+//             <p><strong>Reason:</strong> ${reason || "Not specified"}</p>
+//             ${order.paid
+//                 ? "<p>✅ Since you had already paid, your refund has been initiated. You will receive updates shortly.</p>"
+//                 : "<p>You had not made any payment, so no refund is required.</p>"
+//             }
+//             <p>We hope to serve you again soon ❤️</p>
+//             <p>Regards,<br/>Team Joyory Beauty</p>
+//         `
+//         );
+//         if (productIdsToRecalc.size > 0) {
+//             const ids = Array.from(productIdsToRecalc).map(id => new mongoose.Types.ObjectId(id));
+//             const prods = await Product.find({ _id: { $in: ids } });
+//             const bulkOps = prods.map(p => {
+//                 let totalQty = 0;
+//                 if (Array.isArray(p.variants) && p.variants.length > 0)
+//                     totalQty = p.variants.reduce((s, v) => s + (v.stock || 0), 0);
+//                 else totalQty = p.quantity;
+
+//                 let newStatus = totalQty <= 0 ? "Out of stock" : totalQty < (p.thresholdValue || 0) ? "Low stock" : "In-stock";
+
+//                 return {
+//                     updateOne: {
+//                         filter: { _id: p._id },
+//                         update: { $set: { quantity: totalQty, status: newStatus, variants: p.variants } },
+//                     },
+//                 };
+//             });
+//             if (bulkOps.length) await Product.bulkWrite(bulkOps);
+//         }
+
+//         if (order.shipment?.shipment_id) {
+//             try {
+//                 await cancelShiprocketShipment(order.shipment.shipment_id);
+//             } catch (err) {
+//                 console.error("⚠️ Shiprocket cancel failed:", err.message);
+//             }
+//         }
+
+//         // if (order.paid) {
+//         //     try {
+//         //         await initiateRefund({ body: { orderId, reason, method: "razorpay" }, user: req.user }, {
+//         //             status: () => ({ json: () => null })
+//         //         });
+//         //     } catch (refundErr) {
+//         //         console.error("⚠️ Refund trigger failed:", refundErr.message);
+//         //     }
+//         // }
+
+//         // 🌟 Dynamic refund methods based on current status
+//         const refundMethodsAvailable = order.paid
+//             ? [
+//                 { method: "razorpay", label: "Original Payment Method" },
+//                 { method: "wallet", label: "Add to Joyory Wallet" },
+//             ]
+//             : []; // No refund options if unpaid
+
+//         res.status(200).json({
+//             success: true,
+//             message: "✅ Order cancelled successfully. Refund initiated if applicable.",
+//             orderId: order._id,
+//             paid: order.paid,
+//             paymentStatus: order.paymentStatus,
+//             refundMethodsAvailable,
+//         });
+
+//     } catch (err) {
+//         console.error("🔥 cancelOrder Error:", err);
+//         res.status(500).json({ success: false, message: "Cancel order failed", error: err.message });
+//     } finally {
+//         await session.endSession();
+//     }
+// };
 
 // export const initiateRefund = async (req, res) => {
 //     const session = await mongoose.startSession();

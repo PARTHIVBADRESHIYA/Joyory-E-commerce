@@ -1,44 +1,33 @@
-// middlewares/services/redisConnection.js
 import IORedis from "ioredis";
 
-let redisAvailable = true;
-let connection = null;
-
-export const createRedisConnection = () => {
-    if (!redisAvailable) {
-        console.warn("🚫 Redis permanently disabled (limit exceeded)");
-        return { connection: null, redisAvailableRef: () => false };
+export const createRedisConnection = (forQueue = false) => {
+    const url = process.env.REDIS_URL;
+    if (!url) {
+        console.error("❌ Missing REDIS_URL in .env file");
+        return null;
     }
 
-    connection = new IORedis(process.env.REDIS_URL, {
-        tls: {},
-        maxRetriesPerRequest: 0, // ❌ no retries
-        enableReadyCheck: false,
-        reconnectOnError: false,
-    });
+    // ✅ No TLS, just plain connection
+    const options = {};
 
-    connection.on("error", (err) => {
-        if (err.message.includes("max requests limit exceeded")) {
-            console.error("❌ Upstash Redis limit exceeded. Disabling Redis globally.");
+    if (forQueue) {
+        options.maxRetriesPerRequest = null;
+        options.enableReadyCheck = false;
+    } else {
+        options.maxRetriesPerRequest = 1;
+        options.enableReadyCheck = false;
+        options.reconnectOnError = false;
+    }
 
-            redisAvailable = false;
-            process.env.DISABLE_BULL = "true";
+    const connection = new IORedis(url, options);
 
-            try {
-                connection.removeAllListeners();
-                connection.disconnect();
-            } catch (e) {
-                console.error("Error while closing Redis:", e.message);
-            }
-        }
-    });
+    connection.on("connect", () =>
+        console.log("✅ Connected to Redis Cloud (No TLS)")
+    );
 
-    connection.on("close", () => {
-        if (redisAvailable) {
-            console.warn("⚠️ Redis connection closed.");
-            redisAvailable = false;
-        }
-    });
+    connection.on("error", (err) =>
+        console.error("❌ Redis Error:", err.message)
+    );
 
-    return { connection, redisAvailableRef: () => redisAvailable };
+    return connection;
 };

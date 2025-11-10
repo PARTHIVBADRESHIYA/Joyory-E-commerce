@@ -1,5 +1,5 @@
 import express from 'express';
-import { addOrder, getAllOrders, getOrderSummary ,getOrderById,updateOrderStatus,retryFailedShipments} from '../controllers/orderController.js';
+import { addOrder, getAllOrders, getOrderSummary ,getOrderById,updateOrderStatus,retryFailedShipments,adminApproveRefund} from '../controllers/orderController.js';
 import { isAdmin } from '../middlewares/authMiddleware.js';
 import { validateDiscount } from '../middlewares/validateDiscount.js';
 import { validatePromotion } from '../middlewares/utils/validatePromotion.js';
@@ -8,6 +8,7 @@ import { trackPromotionView } from '../middlewares/utils/trackPromotionView.js';
 
 const router = express.Router();
 
+router.post('/approve-refund',isAdmin,adminApproveRefund);
 router.post('/add', isAdmin,trackPromotionView,validatePromotion, validateDiscount, addOrder);
 router.get('/', isAdmin,getAllOrders);
 router.get('/summary',isAdmin, getOrderSummary);

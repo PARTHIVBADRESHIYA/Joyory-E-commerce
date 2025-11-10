@@ -3,6 +3,8 @@ import Order from '../models/Order.js';
 import Product from '../models/Product.js';
 import Affiliate from '../models/Affiliate.js';
 import User from '../models/User.js';
+import {refundQueue} from "../middlewares/services/refundQueue.js";
+import { sendEmail } from "../middlewares/utils/emailService.js"; // ✅ assume you already have an email service
 
 export const addOrder = async (req, res) => {
     try {
@@ -1003,3 +1005,68 @@ export const retryFailedShipments = async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 }
+
+// export const adminApproveRefund = async (req, res) => {
+//     const { orderId } = req.body;
+//     const adminId = req.user?._id;
+
+//     const order = await Order.findById(orderId);
+
+//     if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+//     order.refund.status = "approved";
+//     order.refund.approvedBy = adminId;
+
+//     order.paymentStatus = "refund_initiated";
+
+//     await order.save();
+
+//     await refundQueue.add("refund", { orderId });
+
+//     res.status(200).json({
+//         success: true,
+//         message: "Refund approved and added to queue."
+//     });
+// };
+export const adminApproveRefund = async (req, res) => {
+    const { orderId } = req.body;
+    const adminId = req.user?._id;
+
+    const order = await Order.findById(orderId).populate("user");
+    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+    order.refund.status = "approved";
+    order.refund.approvedBy = adminId;
+    order.paymentStatus = "refund_initiated";
+
+    await order.save();
+
+    await refundQueue.add("refund", { orderId });
+
+    // ✅ Send approval email
+    await sendEmail(
+        order.user.email,
+        "✅ Your Refund Has Been Approved",
+        `
+        <p>Hi ${order.user.name},</p>
+        <p>Your refund request for Order <strong>#${order._id}</strong> has been approved by our team.</p>
+
+        <p><strong>Refund Method:</strong> ${
+            order.refund.method === "razorpay"
+                ? "Original Payment Method (Razorpay)"
+                : order.refund.method === "wallet"
+                ? "Joyory Wallet"
+                : "Manual UPI"
+        }</p>
+
+        <p>Refund processing has begun. You will receive another update once the refund is completed.</p>
+
+        <p>Regards,<br/>Team Joyory Beauty</p>
+        `
+    );
+
+    res.status(200).json({
+        success: true,
+        message: "Refund approved and added to queue."
+    });
+};

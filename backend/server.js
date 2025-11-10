@@ -419,6 +419,7 @@ import "./middlewares/utils/cron/promotionScheduler.js";
 // import "./middlewares/utils/cron/shiprocketRetry.js";
 import { startTrackingJob } from "./middlewares/utils/cron/shiprocketTrackingJob.js";
 import "./middlewares/utils/cron/autoPayout.js";
+import { createRedisConnection } from "./middlewares/services/redisConnection.js";
 
 // ================= START CRON JOBS =================
 startTrackingJob();
@@ -490,6 +491,8 @@ import userWalletRoutes from "./routes/user/userWalletRoutes.js";
 connectDB();
 
 const app = express();
+const { connection } = createRedisConnection();
+
 app.set("trust proxy", 1);
 
 // 🔹 Webhook: Razorpay requires RAW body
@@ -625,6 +628,18 @@ app.use("/api/user/shadefinder", userShadeFinderRoutes);
 app.use("/api/user/giftcards", userGiftCardRoutes);
 app.use("/api/referral", referralRoutes);
 app.use("/api/user/wallet", userWalletRoutes);
+
+
+app.get("/redis-test", async (req, res) => {
+    try {
+        await connection.set("test-key", "Redis Works ✅");
+        const value = await connection.get("test-key");
+        res.json({ success: true, value });
+    } catch (err) {
+        console.error("❌ Redis test failed:", err.message);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
 
 // ================= HEALTH & TEST =================
 app.get("/health", (req, res) => {

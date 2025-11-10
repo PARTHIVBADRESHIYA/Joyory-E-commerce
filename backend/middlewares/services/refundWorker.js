@@ -1,120 +1,54 @@
-// import { Worker } from "bullmq";
-// import axios from "axios";
-// import Order from "../../models/Order.js";
-// import IORedis from "ioredis";
-// import { createRedisConnection } from "../../middlewares/services/redisConnection.js";
+import { Worker } from "bullmq";
+import axios from "axios";
+import Order from "../../models/Order.js";
+import { createRedisConnection } from "../../middlewares/services/redisConnection.js";
 
-// // const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
-// // const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
+const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
 
-// // // ✅ Razorpay Axios instance
-// // const razorpayAxios = axios.create({
-// //     baseURL: "https://api.razorpay.com/v1",
-// //     auth: {
-// //         username: RAZORPAY_KEY_ID,
-// //         password: RAZORPAY_KEY_SECRET,
-// //     },
-// // });
+// ✅ Razorpay Axios instance
+const razorpayAxios = axios.create({
+    baseURL: "https://api.razorpay.com/v1",
+    auth: {
+        username: RAZORPAY_KEY_ID,
+        password: RAZORPAY_KEY_SECRET,
+    },
+});
 
-// // // ✅ TLS-enabled Redis connection
-// // const connection = new IORedis(process.env.REDIS_URL, {
-// //     tls: {},                     // 👈 Enable SSL/TLS
-// //     maxRetriesPerRequest: null,
-// //     enableReadyCheck: false,
-// // });
+// ✅ Use the existing createRedisConnection function
+const connection = createRedisConnection(true); // forQueue = true
 
-// // export const refundWorker = new Worker(
-// //     "refundQueue",
-// //     async (job) => {
-// //         const { orderId } = job.data;
-// //         const order = await Order.findById(orderId);
+export const refundWorker = new Worker(
+    "refundQueue",
+    async (job) => {
+        const { orderId } = job.data;
+        const order = await Order.findById(orderId);
 
-// //         if (!order) throw new Error("Order not found");
-// //         if (order.refund.status === "completed") return "Refund already done ✅";
+        if (!order) throw new Error("Order not found");
+        if (order.refund.status === "completed") return "Refund already done ✅";
 
-// //         const refundAmount = order.refund.amount * 100;
+        const refundAmount = order.refund.amount * 100;
 
-// //         // 🔁 Razorpay refund API
-// //         const response = await razorpayAxios.post(
-// //             `/payments/${order.transactionId}/refund`,
-// //             { amount: refundAmount }
-// //         );
+        // 🔁 Razorpay refund API
+        const response = await razorpayAxios.post(
+            `/payments/${order.transactionId}/refund`,
+            { amount: refundAmount }
+        );
 
-// //         order.refund.status = "completed";
-// //         order.refund.gatewayRefundId = response.data.id;
-// //         order.paymentStatus = "refunded";
-// //         order.refund.refundedAt = new Date();
-// //         await order.save();
+        order.refund.status = "initiated";
+        order.refund.gatewayRefundId = response.data.id;
+        await order.save();
 
-// //         return "Refund completed ✅";
-// //     },
-// //     { connection }
-// // );
+        return "Refund initiated";
+    },
+    { connection }
+);
 
-// // // 🧩 Worker event listeners
-// // refundWorker.on("failed", (job, err) => {
-// //     console.error(`❌ Retry failed for job ${job.id}:`, err.message);
-// // });
+// 🧩 Worker event listeners
+refundWorker.on("failed", (job, err) => {
+    console.error(`❌ Retry failed for job ${job.id}:`, err.message);
+});
 
-// // refundWorker.on("completed", (job) => {
-// //     console.log(`✅ Refund job completed for order ${job.data.orderId}`);
-// // });
-
-
-// export const startRefundWorker = () => {
-//     const { connection, redisAvailableRef } = createRedisConnection();
-
-//     const razorpayAxios = axios.create({
-//         baseURL: "https://api.razorpay.com/v1",
-//         auth: {
-//             username: process.env.RAZORPAY_KEY_ID,
-//             password: process.env.RAZORPAY_KEY_SECRET,
-//         },
-//     });
-
-//     const refundWorker = new Worker(
-//         "refundQueue",
-//         async (job) => {
-//             if (!redisAvailableRef()) {
-//                 console.warn(`⚠️ Skipping refund worker job ${job.id} due to Redis limit`);
-//                 return;
-//             }
-
-//             const { orderId } = job.data;
-//             const order = await Order.findById(orderId);
-//             if (!order) throw new Error("Order not found");
-//             if (order.refund.status === "completed") return "Refund already done ✅";
-
-//             const refundAmount = order.refund.amount * 100;
-
-//             const response = await razorpayAxios.post(
-//                 `/payments/${order.transactionId}/refund`,
-//                 { amount: refundAmount }
-//             );
-
-//             order.refund.status = "completed";
-//             order.refund.gatewayRefundId = response.data.id;
-//             order.paymentStatus = "refunded";
-//             order.refund.refundedAt = new Date();
-//             await order.save();
-
-//             return "Refund completed ✅";
-//         },
-//         { connection }
-//     );
-
-//     refundWorker.on("failed", (job, err) => {
-//         console.error(`❌ Retry failed for job ${job.id}:`, err.message);
-//     });
-
-//     refundWorker.on("completed", (job) => {
-//         console.log(`✅ Refund job completed for order ${job.data.orderId}`);
-//     });
-// };
-
-// // ✅ Only start worker if not disabled
-// if (process.env.DISABLE_BULL === "true") {
-//     console.warn("🚫 Refund Worker disabled due to Redis limit.");
-// } else {
-//     startRefundWorker();
-// }
+refundWorker.on("completed", (job) => {
+    console.log(`✅ Refund job completed for order ${job.data.orderId}`);
+});
