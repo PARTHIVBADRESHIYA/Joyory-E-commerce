@@ -279,7 +279,6 @@ const userSignup = async (req, res) => {
     }
 };
 
-
 // =================== USER LOGIN ===================
 const userLogin = async (req, res) => {
     try {

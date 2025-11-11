@@ -252,30 +252,69 @@ export const calculateCartSummary = async (user, query = {}) => {
     } catch { appliedCoupon = null; discountFromCoupon = 0; }
   }
 
+  // ✅ Reward Points Logic (Same as getCartSummary)
   const wallet = await getOrCreateWallet(user._id);
   let pointsUsed = 0, pointsDiscount = 0, pointsMessage = "";
-  if (query.pointsToUse) {
-    pointsUsed = Math.min(Number(query.pointsToUse), wallet.rewardPoints);
-    pointsDiscount = pointsUsed * 0.1;
-    pointsMessage = pointsUsed ? `🎉 You used ${pointsUsed} points from your wallet! Discount applied: ₹${pointsDiscount}` : "";
-  }
 
-  let giftCardApplied = null, giftCardDiscount = 0;
-  if (query.giftCardCode && query.giftCardPin) {
-    const giftCard = await GiftCard.findOne({ code: query.giftCardCode.trim(), pin: query.giftCardPin.trim() });
-    if (giftCard && giftCard.expiryDate >= new Date() && giftCard.balance > 0) {
-      const requested = Number(query.giftCardAmount || 0);
-      const maxRedeemable = Math.min(requested, giftCard.balance, summary.payable - discountFromCoupon - pointsDiscount);
-      giftCardDiscount = maxRedeemable;
-      giftCardApplied = {
-        status: "Applied",
-        code: giftCard.code,
-        appliedAmount: giftCardDiscount,
-        remainingBalance: giftCard.balance - giftCardDiscount,
-        message: `🎉 Successfully applied ₹${giftCardDiscount} from your gift card!`,
-      };
+  if (query.pointsToUse) {
+    const requestedPoints = Number(query.pointsToUse);
+
+    // Rule: Points allowed only if cart >= 599 BEFORE points
+    const payableBeforePoints = summary.payable - discountFromCoupon;
+
+    if (payableBeforePoints < 599) {
+      pointsMessage = "⚠️ Reward points can be used only on orders above ₹599.";
+      pointsUsed = 0;
+      pointsDiscount = 0;
     } else {
+      pointsUsed = Math.min(requestedPoints, wallet.rewardPoints);
+      pointsDiscount = pointsUsed * 0.1;
+      pointsMessage = pointsUsed
+        ? `🎉 You used ${pointsUsed} points! Discount ₹${pointsDiscount}`
+        : "";
+    }
+  }
+  // ✅ Gift Card Logic (Same as getCartSummary)
+  let giftCardApplied = null, giftCardDiscount = 0;
+
+  if (query.giftCardCode && query.giftCardPin) {
+    const giftCard = await GiftCard.findOne({
+      code: query.giftCardCode.trim(),
+      pin: query.giftCardPin.trim()
+    });
+
+    if (!giftCard || giftCard.expiryDate < new Date() || giftCard.balance <= 0) {
       giftCardApplied = { status: "Invalid", message: "❌ Gift card not valid" };
+
+    } else {
+      // Rule: Gift card allowed only if cart >= 599 BEFORE GC usage
+      const payableBeforeGC = summary.payable - discountFromCoupon - pointsDiscount;
+
+      if (payableBeforeGC < 599) {
+        giftCardApplied = {
+          status: "Blocked",
+          message: "⚠️ Gift cards can be used only on orders above ₹599."
+        };
+        giftCardDiscount = 0;
+
+      } else {
+        const requested = Number(query.giftCardAmount || 0);
+
+        const maxRedeemable = Math.min(
+          requested,
+          giftCard.balance,
+          payableBeforeGC
+        );
+
+        giftCardDiscount = maxRedeemable;
+        giftCardApplied = {
+          status: "Applied",
+          code: giftCard.code,
+          appliedAmount: giftCardDiscount,
+          remainingBalance: giftCard.balance - giftCardDiscount,
+          message: `🎉 Applied ₹${giftCardDiscount} from gift card`
+        };
+      }
     }
   }
 
@@ -296,7 +335,7 @@ export const calculateCartSummary = async (user, query = {}) => {
 
     const displayPrice = item.isFreeItem ? 0 : enrichedVariant.displayPrice;
 
-   
+
     return {
       _id: item._id,
       product: productFromDB._id,

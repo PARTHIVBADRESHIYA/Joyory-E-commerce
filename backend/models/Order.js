@@ -209,7 +209,7 @@
 
 
 import mongoose from 'mongoose';
-    
+
 const RefundSchema = new mongoose.Schema({
     amount: Number,
     method: { type: String, enum: ["razorpay", "wallet", "manual_upi"] },
@@ -300,7 +300,10 @@ const orderSchema = new mongoose.Schema({
         default: 'pending'
     },
 
-    paymentMethod: String,
+    paymentMethod: {
+        type: String,
+        enum: ["COD", "Online", "Wallet", "GiftCard"]
+    },
     transactionId: String,
 
     refund: { type: RefundSchema, default: () => ({}) },

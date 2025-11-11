@@ -1,6 +1,8 @@
 import validator from "validator";
 import Payment from '../../../models/settings/payments/Payment.js';
 import PaymentMethod from '../../../models/settings/payments/PaymentMethod.js';
+import GiftCard from "../../../models/GiftCard.js";
+import WalletConfig from "../../../models/WalletConfig.js";
 import Order from '../../../models/Order.js';
 import { encrypt, decrypt } from '../../../middlewares/utils/encryption.js';
 import { createShiprocketOrder, cancelShiprocketShipment } from "../../../middlewares/services/shiprocket.js";
@@ -10,7 +12,6 @@ import Product from '../../../models/Product.js';
 import Affiliate from '../../../models/Affiliate.js';
 import mongoose from 'mongoose';
 import User from '../../../models/User.js';
-import Wallet from '../../../models/Wallet.js';
 import Referral from '../../../models/Referral.js'; // ✅ You need to import this
 import Razorpay from "razorpay";
 import crypto from "crypto";
@@ -103,6 +104,9 @@ export const isFraudulentCodOrder = async (order, user, shippingAddress) => {
 
     return { isFraud: false };
 };
+
+
+
 
 // export const createRazorpayOrder = async (req, res) => {
 //     try {
@@ -3005,6 +3009,67 @@ export const isFraudulentCodOrder = async (order, user, shippingAddress) => {
 //     }
 // };
 
+export const processOrderStockAndFinalize = async (orderId, session, shippingAddress) => {
+    const productIdsToRecalc = new Set();
+
+    const txOrder = await Order.findById(orderId)
+        .populate("products.productId")
+        .populate("user")
+        .session(session);
+
+    if (!txOrder) throw new Error("Order vanished during transaction");
+
+    for (const item of txOrder.products) {
+        const product = await Product.findById(item.productId).session(session);
+        if (!product) throw new Error(`Product not found: ${item.productId}`);
+
+        const qty = Number(item.quantity || 0);
+        if (qty <= 0) continue;
+
+        if (item.variant?.sku) {
+            const variant = product.variants.find(v => v.sku === item.variant.sku);
+            if (!variant) throw new Error(`Variant not found: ${item.variant.sku}`);
+            if (variant.stock < qty) throw new Error(`Not enough stock for ${variant.sku}`);
+
+            variant.stock -= qty;
+            variant.sales = (variant.sales || 0) + qty;
+
+        } else {
+            if (product.quantity < qty) throw new Error(`Not enough stock for ${product.name}`);
+            product.quantity -= qty;
+            product.sales = (product.sales || 0) + qty;
+        }
+
+        productIdsToRecalc.add(String(product._id));
+        await product.save({ session });
+    }
+
+    // Don't change order status here. Payment flow controls it.
+    if (shippingAddress) txOrder.shippingAddress = shippingAddress;
+
+    await txOrder.save({ session });
+
+    // recalc product stock levels
+    const products = await Product.find({ _id: { $in: [...productIdsToRecalc] } }).session(session);
+
+    for (const prod of products) {
+        const totalQty = prod.variants?.length
+            ? prod.variants.reduce((a, b) => a + (b.stock || 0), 0)
+            : (prod.quantity || 0);
+
+        prod.quantity = totalQty;
+
+        if (totalQty <= 0) prod.status = "Out of stock";
+        else if (prod.thresholdValue && totalQty < prod.thresholdValue) prod.status = "Low stock";
+        else prod.status = "In-stock";
+
+        await prod.save({ session });
+    }
+
+    return txOrder;
+};
+
+
 export const setPaymentMethod = async (req, res) => {
     try {
         const { orderId, paymentMethod } = req.body;
@@ -3015,7 +3080,7 @@ export const setPaymentMethod = async (req, res) => {
         // ✅ Normalize input
         const normalized = paymentMethod.toUpperCase();
 
-        const valid = ["COD", "ONLINE"];
+        const valid = ["COD", "ONLINE", "WALLET", "GIFTCARD"];
         if (!valid.includes(normalized))
             return res.status(400).json({ success: false, message: "Invalid payment method" });
 
@@ -3035,6 +3100,15 @@ export const setPaymentMethod = async (req, res) => {
             order.orderType = "COD";
             order.paymentMethod = "COD";
         }
+        if (normalized === "WALLET") {
+            order.orderType = "Online";
+            order.paymentMethod = "Wallet";
+        }
+        if (normalized === "GIFTCARD") {
+            order.orderType = "Online";
+            order.paymentMethod = "GiftCard";
+        }
+
 
         await order.save();  // ✅ now we save actual updated value
 
@@ -3053,10 +3127,6 @@ export const setPaymentMethod = async (req, res) => {
     }
 };
 
-
-/**
- * 🧾 Create Razorpay Order
- */
 export const createRazorpayOrder = async (req, res) => {
     try {
         const { orderId } = req.body;
@@ -3596,6 +3666,461 @@ export const confirmCodOrder = async (req, res) => {
         await session.endSession();
     }
 };
+// --- createWalletPayment (updated) ---
+export const createWalletPayment = async (req, res) => {
+    const session = await mongoose.startSession();
+    try {
+        const { orderId, shippingAddress } = req.body;
+
+        if (!orderId || !shippingAddress) {
+            return res.status(400).json({ success: false, message: "orderId and shippingAddress are required" });
+        }
+
+        const required = ["name", "phone", "addressLine1", "city", "state", "pincode"];
+        for (const field of required) {
+            if (!shippingAddress[field]) {
+                return res.status(400).json({ success: false, message: `Shipping address missing: ${field}` });
+            }
+        }
+
+        await session.withTransaction(async () => {
+
+            const order = await Order.findById(orderId)
+                .session(session)
+                .populate("user")
+                .populate("products.productId");
+
+            if (!order) throw new Error("Order not found");
+            if (order.paid) throw new Error("Already paid");
+
+            // Save shipping address
+            order.shippingAddress = {
+                name: shippingAddress.name,
+                email: shippingAddress.email || order.user.email,
+                phone: shippingAddress.phone,
+                addressLine1: shippingAddress.addressLine1,
+                addressLine2: shippingAddress.addressLine2 || "",
+                city: shippingAddress.city,
+                state: shippingAddress.state,
+                pincode: shippingAddress.pincode,
+                country: shippingAddress.country || "India",
+            };
+            await order.save({ session });
+
+            // Payment fields
+            order.orderType = "Online";
+            order.paymentMethod = "Wallet";
+
+            const Wallet = mongoose.model("Wallet");
+            let wallet = await Wallet.findOne({ user: order.user._id }).session(session);
+
+            if (!wallet) {
+                wallet = await Wallet.create([{
+                    user: order.user._id,
+                    joyoryCash: 0,
+                    rewardPoints: 0,
+                    transactions: []
+                }], { session }).then(docs => docs[0]);
+            }
+
+            // Load config for points conversion
+            const config = await WalletConfig.findOne().session(session);
+            const pointsRate = config?.pointsToCurrencyRate ?? 0.1;
+
+            // Calculate real wallet balance
+            const joyoryCash = Number(wallet.joyoryCash) || 0;
+            const rewardPoints = Number(wallet.rewardPoints) || 0;
+            const pointsValue = rewardPoints * pointsRate;
+
+            const walletBalance = joyoryCash + pointsValue;
+            const orderAmount = Number(order.amount);
+
+            if (walletBalance < orderAmount) {
+                throw new Error(`Not enough wallet balance. Available: ${walletBalance}, Required: ${orderAmount}`);
+            }
+
+            // Deduction logic
+            let remaining = orderAmount;
+
+            // 1. Deduct from joyoryCash
+            if (joyoryCash >= remaining) {
+                wallet.joyoryCash = joyoryCash - remaining;
+                remaining = 0;
+            } else {
+                remaining -= joyoryCash;
+                wallet.joyoryCash = 0;
+            }
+
+            // 2. Deduct from rewardPoints (convert amount to points)
+            if (remaining > 0) {
+                const pointsNeeded = remaining / pointsRate;
+                wallet.rewardPoints = rewardPoints - pointsNeeded;
+                remaining = 0;
+            }
+
+            // Add transaction
+            wallet.transactions.push({
+                type: "PURCHASE",
+                amount: orderAmount,
+                mode: "ONLINE",
+                description: `Wallet payment for order ${order._id}`,
+                timestamp: new Date(),
+            });
+
+            await wallet.save({ session });
+
+            // Finalize order + stock
+            const txOrder = await processOrderStockAndFinalize(orderId, session, order.shippingAddress);
+
+            txOrder.paid = true;
+            txOrder.paymentStatus = "success";
+            txOrder.paymentMethod = "Wallet";
+            txOrder.transactionId = `WALLET-${Date.now()}`;
+            txOrder.orderType = "Online";
+            txOrder.orderStatus = "Processing";
+
+            txOrder.trackingHistory.push(
+                { status: "Payment Successful", timestamp: new Date(), location: "Wallet" },
+                { status: "Processing", timestamp: new Date(), location: "Store" }
+            );
+
+            // Payment document
+            const [paymentDoc] = await Payment.create([{
+                order: txOrder._id,
+                method: "Wallet",
+                status: "Completed",
+                transactionId: txOrder.transactionId,
+                amount: txOrder.amount,
+                isActive: true,
+            }], { session });
+
+            if (paymentDoc) txOrder.paymentId = paymentDoc._id;
+
+            // Clear cart
+            await User.updateOne(
+                { _id: txOrder.user._id },
+                { $set: { cart: [] } },
+                { session }
+            );
+
+            await txOrder.save({ session });
+        });
+
+        // SHIPROCKET (after commit)
+        const finalOrder = await Order.findById(orderId).populate("user").populate("products.productId");
+
+        try {
+            const shiprocketRes = await createShiprocketOrder(finalOrder);
+
+            if (shiprocketRes?.shipmentDetails) {
+                finalOrder.shipment = shiprocketRes.shipmentDetails;
+                finalOrder.trackingHistory.push({
+                    status: "Shipment Created",
+                    timestamp: new Date(),
+                    location: "Shiprocket"
+                });
+                await finalOrder.save();
+            } else {
+                await Order.updateOne(
+                    { _id: finalOrder._id },
+                    {
+                        $push: {
+                            trackingHistory: {
+                                status: "Shipment Creation Failed",
+                                timestamp: new Date(),
+                                location: "Shiprocket"
+                            }
+                        }
+                    }
+                );
+            }
+        } catch (err) {
+            await Order.updateOne(
+                { _id: orderId },
+                {
+                    $push: {
+                        trackingHistory: {
+                            status: "Shipment Creation Failed",
+                            timestamp: new Date(),
+                            location: "Shiprocket"
+                        }
+                    }
+                }
+            );
+        }
+
+        const updated = await Order.findById(orderId).populate("user").populate("products.productId");
+
+        return res.json({ success: true, message: "Wallet payment successful", order: updated });
+
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message || "Internal error" });
+    } finally {
+        try { await session.endSession(); } catch {}
+    }
+};
+
+
+// --- createGiftCardPayment (updated) ---
+export const createGiftCardPayment = async (req, res) => {
+    const session = await mongoose.startSession();
+    try {
+        const { orderId, giftCardCode, giftCardPin, shippingAddress } = req.body;
+        if (!orderId || !giftCardCode || !giftCardPin || !shippingAddress) {
+            return res.status(400).json({ success: false, message: "orderId, giftCardCode, giftCardPin and shippingAddress required" });
+        }
+
+        // Validate minimum fields Shiprocket needs
+        const required = ["name", "phone", "addressLine1", "city", "state", "pincode"];
+        for (const field of required) {
+            if (!shippingAddress[field]) {
+                return res.status(400).json({ success: false, message: `Shipping address missing: ${field}` });
+            }
+        }
+
+        await session.withTransaction(async () => {
+            const order = await Order.findById(orderId).session(session)
+                .populate("user")
+                .populate("products.productId");
+
+            if (!order) throw new Error("Order not found");
+            if (order.paid) throw new Error("Already paid");
+
+            // Normalize order payment fields
+            order.orderType = "Online";
+            order.paymentMethod = "GiftCard";
+
+            // Save corrected shipping address into order (in-session)
+            order.shippingAddress = {
+                name: shippingAddress.name,
+                email: shippingAddress.email || order.user.email,
+                phone: shippingAddress.phone,
+                addressLine1: shippingAddress.addressLine1,
+                addressLine2: shippingAddress.addressLine2 || "",
+                city: shippingAddress.city,
+                state: shippingAddress.state,
+                pincode: shippingAddress.pincode,
+                country: shippingAddress.country || "India"
+            };
+            await order.save({ session });
+
+            // Fetch gift card in-session
+            const giftCard = await GiftCard.findOne({ code: giftCardCode, pin: giftCardPin }).session(session);
+            if (!giftCard) throw new Error("Invalid gift card");
+            if (Number(giftCard.balance) < Number(order.amount)) throw new Error("Insufficient gift card balance");
+
+            // Deduct balance
+            giftCard.balance = Number(giftCard.balance) - Number(order.amount);
+            giftCard.transactions = giftCard.transactions || [];
+            giftCard.transactions.push({
+                type: "debit",
+                amount: order.amount,
+                description: `Payment for order ${order._id}`,
+                timestamp: new Date(),
+            });
+            await giftCard.save({ session });
+
+            // Stock + finalize order (this updates order inside session)
+            const txOrder = await processOrderStockAndFinalize(orderId, session, order.shippingAddress);
+
+            // Mark order paid & set fields (in-session)
+            txOrder.paid = true;
+            txOrder.paymentStatus = "success";
+            txOrder.paymentMethod = "GiftCard";
+            txOrder.transactionId = `GIFTCARD-${Date.now()}`;
+            txOrder.orderType = "Online";
+            txOrder.orderStatus = "Processing";
+
+            txOrder.trackingHistory = txOrder.trackingHistory || [];
+            txOrder.trackingHistory.push(
+                { status: "Payment Successful", timestamp: new Date(), location: "GiftCard" },
+                { status: "Processing", timestamp: new Date(), location: "Store" }
+            );
+
+            // Create Payment doc inside transaction
+            const [paymentDoc] = await Payment.create([{
+                order: txOrder._id,
+                method: "GiftCard",
+                status: "Completed",
+                transactionId: txOrder.transactionId,
+                amount: txOrder.amount,
+                isActive: true,
+            }], { session });
+
+            if (paymentDoc) txOrder.paymentId = paymentDoc._id;
+
+            // Clear cart
+            if (txOrder.user && txOrder.user._id) {
+                await User.updateOne({ _id: txOrder.user._id }, { $set: { cart: [] } }, { session });
+            }
+
+            await txOrder.save({ session });
+        }); // end transaction
+
+        // POST-COMMIT: Shiprocket
+        const finalOrder = await Order.findById(orderId).populate("user").populate("products.productId");
+        try {
+            const shiprocketRes = await createShiprocketOrder(finalOrder);
+
+            if (shiprocketRes?.shipmentDetails) {
+                finalOrder.shipment = shiprocketRes.shipmentDetails;
+                finalOrder.trackingHistory = finalOrder.trackingHistory || [];
+                finalOrder.trackingHistory.push({
+                    status: "Shipment Created",
+                    timestamp: new Date(),
+                    location: "Shiprocket"
+                });
+                await finalOrder.save();
+            } else {
+                await Order.updateOne(
+                    { _id: finalOrder._id },
+                    { $push: { trackingHistory: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } } }
+                );
+            }
+        } catch (shipErr) {
+            console.error("⚠️ Shiprocket Error (GiftCard):", shipErr?.message || shipErr);
+            await Order.updateOne(
+                { _id: finalOrder._id },
+                { $push: { trackingHistory: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } } }
+            );
+        }
+
+        const updated = await Order.findById(orderId).populate("user").populate("products.productId");
+        return res.json({ success: true, message: "Gift card payment successful", order: updated });
+
+    } catch (err) {
+        console.error("createGiftCardPayment Error:", err);
+        return res.status(500).json({ success: false, message: err.message || "Internal error" });
+    } finally {
+        await session.endSession().catch(() => { });
+    }
+};
+
+// export const createWalletPayment = async (req, res) => {
+//     const session = await mongoose.startSession();
+//     try {
+//         const { orderId } = req.body;
+
+//         await session.withTransaction(async () => {
+//             const order = await Order.findById(orderId).session(session).populate("user");
+//             if (!order) throw new Error("Order not found");
+//             if (order.paid) throw new Error("Already paid");
+//             if (order.paymentMethod !== "Wallet") throw new Error("Invalid payment method");
+
+//             const wallet = await getOrCreateWallet(order.user._id);
+//             if (wallet.balance < order.amount) throw new Error("Not enough wallet balance");
+
+//             // deduct wallet
+//             wallet.balance -= order.amount;
+//             wallet.transactions.push({
+//                 type: "debit",
+//                 amount: order.amount,
+//                 description: `Payment for order ${order._id}`
+//             });
+//             await wallet.save({ session });
+
+//             // process stock + finalize order
+//             await processOrderStockAndFinalize(orderId, session, order.shippingAddress);
+
+//             // mark order paid
+//             order.paid = true;
+//             order.paymentStatus = "success";
+//             order.transactionId = `WALLET-${Date.now()}`;
+//             await order.save({ session });
+
+//             // clear cart
+//             await User.updateOne({ _id: order.user._id }, { $set: { cart: [] } }, { session });
+//         });
+
+//         // create shiprocket order OUTSIDE transaction
+//         const finalOrder = await Order.findById(orderId)
+//             .populate("user")
+//             .populate("products.productId");
+
+//         await createShiprocketOrder(finalOrder);
+
+//         res.json({ success: true, message: "Wallet payment successful", order: finalOrder });
+
+//     } catch (err) {
+//         res.status(500).json({ message: err.message });
+//     } finally {
+//         await session.endSession();
+//     }
+// };
+
+// export const createGiftCardPayment = async (req, res) => {
+//     const session = await mongoose.startSession();
+//     try {
+//         const { orderId, giftCardCode, giftCardPin } = req.body;
+
+//         await session.withTransaction(async () => {
+//             const order = await Order.findById(orderId).session(session).populate("user");
+//             if (!order) throw new Error("Order not found");
+//             if (order.paid) throw new Error("Already paid");
+//             if (order.paymentMethod !== "GiftCard") throw new Error("Invalid payment method");
+
+//             const giftCard = await GiftCard.findOne({ code: giftCardCode, pin: giftCardPin }).session(session);
+//             if (!giftCard) throw new Error("Invalid gift card");
+//             if (giftCard.balance < order.amount) throw new Error("Insufficient balance");
+
+//             // deduct
+//             giftCard.balance -= order.amount;
+//             await giftCard.save({ session });
+
+//             // stock + order finalization
+//             await processOrderStockAndFinalize(orderId, session, order.shippingAddress);
+
+//             // mark order paid
+//             order.paid = true;
+//             order.paymentStatus = "success";
+//             order.transactionId = `GIFTCARD-${Date.now()}`;
+//             await order.save({ session });
+
+//             // clear cart
+//             await User.updateOne({ _id: order.user._id }, { $set: { cart: [] } }, { session });
+//         });
+
+//         // shiprocket OUTSIDE
+//         const finalOrder = await Order.findById(orderId)
+//             .populate("user")
+//             .populate("products.productId");
+
+//         const shiprocketRes = await createShiprocketOrder(finalOrder);
+
+//         if (shiprocketRes?.shipmentDetails) {
+//             finalOrder.shipment = shiprocketRes.shipmentDetails;
+//             finalOrder.trackingHistory.push({
+//                 status: "Shipment Created",
+//                 timestamp: new Date(),
+//                 location: "Shiprocket"
+//             });
+
+//             await finalOrder.save();
+//         } else {
+//             console.warn("Shiprocket did not return shipment details", shiprocketRes);
+//             await Order.updateOne(
+//                 { _id: finalOrder._id },
+//                 {
+//                     $push: {
+//                         trackingHistory: {
+//                             status: "Shipment Creation Failed",
+//                             timestamp: new Date(),
+//                             location: "Shiprocket",
+//                         }
+//                     }
+//                 }
+//             );
+//         }
+
+//         res.json({ success: true, message: "Gift card payment successful", order: finalOrder });
+
+//     } catch (err) {
+//         res.status(500).json({ message: err.message });
+//     } finally {
+//         await session.endSession();
+//     }
+// };
+
 
 export const cancelOrder = async (req, res) => {
     const session = await mongoose.startSession();

@@ -1351,6 +1351,7 @@ export const getCartSummary = async (req, res) => {
 
     // -------------------- Gift Card --------------------
     let giftCardApplied = null, giftCardDiscount = 0;
+
     if (req.query.giftCardCode && req.query.giftCardPin) {
       const giftCard = await GiftCard.findOne({
         code: req.query.giftCardCode.trim(),
@@ -1360,21 +1361,33 @@ export const getCartSummary = async (req, res) => {
       if (!giftCard || giftCard.expiryDate < new Date() || giftCard.balance <= 0) {
         giftCardApplied = { status: "Invalid", message: "❌ Gift card not valid" };
       } else {
-        const requested = Number(req.query.giftCardAmount || 0);
-        const maxRedeemable = Math.min(
-          requested,
-          giftCard.balance,
-          summary.payable - discountFromCoupon - pointsDiscount
-        );
 
-        giftCardDiscount = maxRedeemable;
-        giftCardApplied = {
-          status: "Applied",
-          code: giftCard.code,
-          appliedAmount: giftCardDiscount,
-          remainingBalance: giftCard.balance - giftCardDiscount,
-          message: `🎉 Applied ₹${giftCardDiscount} from gift card`
-        };
+        // Rule: Gift card allowed only if cart value >= 599 (before GC usage)
+        const payableBeforeGC = summary.payable - discountFromCoupon - pointsDiscount;
+
+        if (payableBeforeGC < 599) {
+          giftCardApplied = {
+            status: "Blocked",
+            message: "⚠️ Gift cards can be used only on orders above ₹599."
+          };
+          giftCardDiscount = 0; // just making it explicit
+        } else {
+          const requested = Number(req.query.giftCardAmount || 0);
+          const maxRedeemable = Math.min(
+            requested,
+            giftCard.balance,
+            payableBeforeGC
+          );
+
+          giftCardDiscount = maxRedeemable;
+          giftCardApplied = {
+            status: "Applied",
+            code: giftCard.code,
+            appliedAmount: giftCardDiscount,
+            remainingBalance: giftCard.balance - giftCardDiscount,
+            message: `🎉 Applied ₹${giftCardDiscount} from gift card`
+          };
+        }
       }
     }
 
