@@ -209,7 +209,7 @@
 
 
 import mongoose from 'mongoose';
-    
+
 const RefundSchema = new mongoose.Schema({
     amount: Number,
     method: { type: String, enum: ["razorpay", "wallet", "manual_upi"] },
@@ -273,6 +273,7 @@ const orderSchema = new mongoose.Schema({
     status: { type: String, enum: ['Pending', 'Delivered', 'Cancelled', 'Completed'], default: 'Pending' },
 
     orderType: { type: String, enum: ['COD', 'Online', 'Credit card'], default: null },
+    isDraft: { type: Boolean, default: true },
 
     discount: String,
     discountCode: String,

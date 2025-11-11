@@ -360,7 +360,10 @@ function mapShipmentStatus(status) {
 export const getUserOrders = async (req, res) => {
   try {
     // ✅ Fetch all user orders sorted by latest first
-    const orders = await Order.find({ user: req.user._id })
+    const orders = await Order.find({
+      user: req.user._id,
+      isDraft: false    // ✅ hide draft orders
+    })
       .populate({
         path: "products.productId",
         select: "name images brand category variants",
@@ -625,6 +628,8 @@ export const initiateOrderFromCart = async (req, res) => {
       discountCode: appliedCoupon?.code || null,
       paid: false,
       paymentStatus: "pending",
+      isDraft: true        // ✅ this is new
+
     });
 
     await newOrder.save();

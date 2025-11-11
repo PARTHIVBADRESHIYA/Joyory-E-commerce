@@ -3337,6 +3337,9 @@ export const verifyRazorpayPayment = async (req, res) => {
             sessionOrder.orderStatus = "Processing";
             if (shippingAddress) sessionOrder.shippingAddress = shippingAddress;
 
+            sessionOrder.isDraft = false;
+
+
             // create Payment record in same transaction
             await Payment.create([{
                 order: sessionOrder._id,
@@ -3589,6 +3592,8 @@ export const confirmCodOrder = async (req, res) => {
             txOrder.paymentStatus = "pending";
             txOrder.orderStatus = "Processing";
             if (shippingAddress) txOrder.shippingAddress = shippingAddress;
+            txOrder.isDraft = false;
+
 
             const [paymentDoc] = await Payment.create(
                 [
@@ -3666,7 +3671,6 @@ export const confirmCodOrder = async (req, res) => {
         await session.endSession();
     }
 };
-// --- createWalletPayment (updated) ---
 export const createWalletPayment = async (req, res) => {
     const session = await mongoose.startSession();
     try {
@@ -3778,6 +3782,7 @@ export const createWalletPayment = async (req, res) => {
             txOrder.transactionId = `WALLET-${Date.now()}`;
             txOrder.orderType = "Online";
             txOrder.orderStatus = "Processing";
+            txOrder.isDraft = false;
 
             txOrder.trackingHistory.push(
                 { status: "Payment Successful", timestamp: new Date(), location: "Wallet" },
@@ -3856,12 +3861,10 @@ export const createWalletPayment = async (req, res) => {
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message || "Internal error" });
     } finally {
-        try { await session.endSession(); } catch {}
+        try { await session.endSession(); } catch { }
     }
 };
 
-
-// --- createGiftCardPayment (updated) ---
 export const createGiftCardPayment = async (req, res) => {
     const session = await mongoose.startSession();
     try {
@@ -3930,6 +3933,8 @@ export const createGiftCardPayment = async (req, res) => {
             txOrder.transactionId = `GIFTCARD-${Date.now()}`;
             txOrder.orderType = "Online";
             txOrder.orderStatus = "Processing";
+            txOrder.isDraft = false;
+
 
             txOrder.trackingHistory = txOrder.trackingHistory || [];
             txOrder.trackingHistory.push(
