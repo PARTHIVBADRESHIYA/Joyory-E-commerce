@@ -166,34 +166,6 @@ export const redeemGiftCard = async (req, res) => {
 };
 
 // ------------------- Check Gift Card Balance -------------------
-// export const checkGiftCardBalance = async (req, res) => {
-//     try {
-//         const { code, pin } = req.params;
-//         const giftCard = await GiftCard.findOne({ code, pin });
-//         if (!giftCard) return res.status(404).json({ message: "Invalid gift card" });
-
-//         res.json({
-//             success: true,
-//             balance: giftCard.balance,
-//             expiryDate: giftCard.expiryDate,
-//             status: giftCard.status,
-//         });
-//     } catch (err) {
-//         res.status(500).json({ message: "Failed to check balance", error: err.message });
-//     }
-// };
-
-// // ------------------- Get My Gift Cards (sent by logged-in user) -------------------
-// export const getMyGiftCards = async (req, res) => {
-//     try {
-//         const giftCards = await GiftCard.find({ "sender.name": req.user.name }).populate("templateId");
-//         res.json({ success: true, giftCards });
-//     } catch (err) {
-//         res.status(500).json({ message: "Failed to fetch gift cards", error: err.message });
-//     }
-// };
-
-// ------------------- Check Gift Card Balance -------------------
 export const checkGiftCardBalance = async (req, res) => {
     try {
         const { code, pin } = req.params;
@@ -248,73 +220,6 @@ export const checkGiftCardBalance = async (req, res) => {
     }
 };
 
-
-// ------------------- Get My Gift Cards (sent by logged-in user) -------------------
-
-// export const getMyGiftCards = async (req, res) => {
-//     try {
-//         const giftCards = await GiftCard.find({ "sender.name": req.user.name })
-//             .populate("templateId");
-
-//         if (!giftCards.length) {
-//             return res.status(404).json({
-//                 success: false,
-//                 message: "You have not sent any gift cards yet",
-//                 giftCards: [],
-//             });
-//         }
-
-//         const detailedCards = giftCards.map((gc) => {
-//             let statusMessage = "Active and usable";
-//             if (gc.expiryDate < new Date()) {
-//                 statusMessage = "Expired";
-//             } else if (gc.balance <= 0) {
-//                 statusMessage = "No balance left";
-//             }
-
-//             // 👇 calculate used amount
-//             const usedAmount = gc.initialAmount
-//                 ? gc.initialAmount - gc.balance
-//                 : null;
-
-//             return {
-//                 code: gc.code,
-//                 pin: gc.pin,
-//                 initialAmount: gc.initialAmount || gc.balance, // fallback if not stored
-//                 usedAmount: usedAmount !== null ? usedAmount : "Not tracked",
-//                 balance: gc.balance,
-//                 expiryDate: gc.expiryDate,
-//                 status: gc.status,
-//                 statusMessage,
-//                 template: gc.templateId
-//                     ? {
-//                         title: gc.templateId.title,
-//                         description: gc.templateId.description,
-//                         image: gc.templateId.image,
-//                     }
-//                     : null,
-//                 sender: gc.sender,
-//                 receiver: gc.receiver,
-//             };
-//         });
-
-//         res.json({
-//             success: true,
-//             message: "Fetched your sent gift cards successfully",
-//             total: detailedCards.length,
-//             giftCards: detailedCards,
-//         });
-//     } catch (err) {
-//         console.error("getMyGiftCards error:", err);
-//         res.status(500).json({
-//             success: false,
-//             message: "Failed to fetch gift cards",
-//             error: err.message,
-//         });
-//     }
-// };
-
-
 export const getMyGiftCardsList = async (req, res) => {
     try {
         const giftCards = await GiftCard.find({ "sender.name": req.user.name })
@@ -365,7 +270,7 @@ export const getGiftCardDetails = async (req, res) => {
         }
 
         // calculate used amount
-        const usedAmount = gc.initialAmount ? gc.initialAmount - gc.balance : null;
+        const usedAmount = gc.amount - gc.balance;
         const statusMessage = gc.expiryDate < new Date()
             ? "Expired"
             : gc.balance <= 0
@@ -376,8 +281,8 @@ export const getGiftCardDetails = async (req, res) => {
             _id: gc._id,
             code: gc.code,
             pin: gc.pin,
-            initialAmount: gc.initialAmount || gc.balance,
-            usedAmount: usedAmount !== null ? usedAmount : "Not tracked",
+            initialAmount: gc.amount,
+            usedAmount,
             balance: gc.balance,
             expiryDate: gc.expiryDate,
             status: gc.status,
