@@ -10,6 +10,7 @@ import { sendEmail } from '../../middlewares/utils/emailService.js';
 import { sendSms } from '../../middlewares/utils/sendSms.js';
 import { mergeGuestCart } from '../../controllers/user/userCartController.js';
 // import { notifyMainAdmins } from '../middlewares/utils/notifyMainAdmins.js'; // ✅ Make sure this path is correct
+import { getOrCreateWallet } from "../../middlewares/utils/walletHelpers.js";
 
 // JWT Token Generator
 const generateToken = (user) => {
@@ -21,119 +22,9 @@ const generateToken = (user) => {
 };
 
 // =================== USER SIGNUP ===================
-const userSignup = async (req, res) => {
-    try {
-        const { name, email, password, phone, preferredOtpMethod, referralCode } = req.body;
-
-        if (!name || !email || !password) {
-            return res.status(400).json({ message: "name, email and password are required" });
-        }
-
-        const existing = await User.findOne({ email });
-        if (existing) return res.status(400).json({ message: "Email already registered" });
-
-        const method = (preferredOtpMethod && ["email", "sms"].includes(preferredOtpMethod.toLowerCase()))
-            ? preferredOtpMethod.toLowerCase()
-            : "email";
-        const actualMethod = method === "sms" && phone ? "sms" : "email";
-
-        // Generate OTP & hash password
-        const plainOtp = generateOTP();
-        const hashedOtp = await bcrypt.hash(plainOtp, 10);
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-        const myReferralCode = await generateUniqueReferralCode();
-
-        // Create user object
-        const user = new User({
-            name,
-            email,
-            phone,
-            password: hashedPassword,
-            role: "user",
-            isManual: true,
-            isVerified: false,
-            preferredOtpMethod: actualMethod,
-            otp: { code: hashedOtp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) },
-            referralCode: myReferralCode,
-        });
-
-        // Handle referral
-        let referrer = null;
-        if (referralCode) {
-            referrer = await User.findOne({ referralCode: referralCode.toUpperCase() });
-            if (!referrer) return res.status(400).json({ message: "Invalid referral code" });
-            if (referrer.email === email) return res.status(400).json({ message: "Cannot use own referral code" });
-            user.referredBy = referrer._id;
-        }
-
-        await user.save();
-
-        if (referrer) {
-            await Referral.create({
-                referrer: referrer._id,
-                referee: user._id,
-                status: "pending",
-                rewardForReferrer: 200,
-                rewardForReferee: 200,
-                minOrderAmount: 100,
-            });
-        }
-
-        // 🔥 Merge guest cart from session
-        const guestCart = req.session?.guestCart || [];
-        if (guestCart.length) {
-            await mergeGuestCart(user._id, guestCart);
-            req.session.guestCart = []; // clear after merging
-        }
-
-        // Send OTP
-        try {
-            if (actualMethod === "sms") {
-                await sendSms(phone, `Your verification OTP is: ${plainOtp}`);
-            } else {
-                await sendEmail(
-                    email,
-                    "Verify your account",
-                    `<p>Your verification OTP is: <b>${plainOtp}</b></p>`
-                );
-            }
-        } catch (err) {
-            console.error("❌ OTP sending failed:", err);
-            return res.status(500).json({
-                message: "Signup succeeded but sending OTP failed. Please request OTP again.",
-                error: err.message,
-            });
-        }
-
-        return res.status(201).json({
-            message: "Signup successful. OTP sent.",
-            otpSent: true,
-            method: actualMethod,
-            email: user.email,
-            referralCode: user.referralCode,
-            referralLink: `${process.env.APP_URL || "https://yourdomain.com"}/signup?ref=${user.referralCode}`,
-            mergedCart: guestCart.length > 0
-        });
-
-    } catch (err) {
-        console.error("🔥 Signup error:", err);
-        res.status(500).json({ message: "Signup failed", error: err.message });
-    }
-};
-
-
 // const userSignup = async (req, res) => {
 //     try {
-//         const {
-//             name,
-//             email,
-//             password,
-//             phone,
-//             preferredOtpMethod,
-//             referralCode,
-//             promo          // ✅ NEW (campaign code from URL)
-//         } = req.body;
+//         const { name, email, password, phone, preferredOtpMethod, referralCode } = req.body;
 
 //         if (!name || !email || !password) {
 //             return res.status(400).json({ message: "name, email and password are required" });
@@ -154,23 +45,6 @@ const userSignup = async (req, res) => {
 
 //         const myReferralCode = await generateUniqueReferralCode();
 
-//         // ✅ NEW: detect referral campaign from promo code
-//         let campaign = null;
-//         if (promo) {
-//             campaign = await ReferralCampaign.findOne({
-//                 promoCode: promo.toUpperCase(),
-//                 isActive: true,
-//                 $or: [
-//                     { expiresAt: null },
-//                     { expiresAt: { $gt: new Date() } }
-//                 ]
-//             });
-
-//             if (!campaign) {
-//                 return res.status(400).json({ message: "Invalid or expired referral link" });
-//             }
-//         }
-
 //         // Create user object
 //         const user = new User({
 //             name,
@@ -185,12 +59,7 @@ const userSignup = async (req, res) => {
 //             referralCode: myReferralCode,
 //         });
 
-//         // ✅ NEW: attach campaign if exists
-//         if (campaign) {
-//             user.referredByCampaign = campaign._id;
-//         }
-
-//         // Handle referral (user referral code)
+//         // Handle referral
 //         let referrer = null;
 //         if (referralCode) {
 //             referrer = await User.findOne({ referralCode: referralCode.toUpperCase() });
@@ -201,19 +70,6 @@ const userSignup = async (req, res) => {
 
 //         await user.save();
 
-//         // ✅ NEW: create referral entry for campaign
-//         if (campaign) {
-//             await Referral.create({
-//                 referrer: campaign.createdBy,      // admin or influencer who made it
-//                 referee: user._id,
-//                 status: "pending",
-//                 rewardForReferrer: campaign.referrerReward,
-//                 rewardForReferee: campaign.refereeReward,
-//                 minOrderAmount: campaign.minOrderAmount,
-//             });
-//         }
-
-//         // Existing referral code logic remains untouched
 //         if (referrer) {
 //             await Referral.create({
 //                 referrer: referrer._id,
@@ -229,7 +85,7 @@ const userSignup = async (req, res) => {
 //         const guestCart = req.session?.guestCart || [];
 //         if (guestCart.length) {
 //             await mergeGuestCart(user._id, guestCart);
-//             req.session.guestCart = [];
+//             req.session.guestCart = []; // clear after merging
 //         }
 
 //         // Send OTP
@@ -258,16 +114,7 @@ const userSignup = async (req, res) => {
 //             email: user.email,
 //             referralCode: user.referralCode,
 //             referralLink: `${process.env.APP_URL || "https://yourdomain.com"}/signup?ref=${user.referralCode}`,
-//             mergedCart: guestCart.length > 0,
-
-//             // ✅ NEW: include campaign data if applied
-//             campaignApplied: campaign
-//                 ? {
-//                     name: campaign.name,
-//                     rewardForUser: campaign.refereeReward,
-//                     minOrderAmount: campaign.minOrderAmount
-//                 }
-//                 : null
+//             mergedCart: guestCart.length > 0
 //         });
 
 //     } catch (err) {
@@ -275,6 +122,163 @@ const userSignup = async (req, res) => {
 //         res.status(500).json({ message: "Signup failed", error: err.message });
 //     }
 // };
+
+
+const userSignup = async (req, res) => {
+    try {
+        const {
+            name,
+            email,
+            password,
+            phone,
+            preferredOtpMethod,
+            referralCode,
+            promo
+        } = req.body;
+
+        if (!name || !email || !password) {
+            return res.status(400).json({ message: "name, email and password are required" });
+        }
+
+        const existing = await User.findOne({ email });
+        if (existing) return res.status(400).json({ message: "Email already registered" });
+
+        const method = (preferredOtpMethod && ["email", "sms"].includes(preferredOtpMethod.toLowerCase()))
+            ? preferredOtpMethod.toLowerCase()
+            : "email";
+
+        const actualMethod = method === "sms" && phone ? "sms" : "email";
+
+        const plainOtp = generateOTP();
+        const hashedOtp = await bcrypt.hash(plainOtp, 10);
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        const myReferralCode = await generateUniqueReferralCode();
+
+        // ✅ Detect referral campaign
+        let campaign = null;
+        if (promo) {
+            campaign = await ReferralCampaign.findOne({
+                promoCode: promo.toUpperCase(),
+                isActive: true,
+                $or: [
+                    { expiresAt: null },
+                    { expiresAt: { $gt: new Date() } }
+                ]
+            });
+
+            if (!campaign) {
+                return res.status(400).json({ message: "Invalid or expired referral link" });
+            }
+        }
+
+        // ✅ Create user object
+        const user = new User({
+            name,
+            email,
+            phone,
+            password: hashedPassword,
+            role: "user",
+            isManual: true,
+            isVerified: false,
+            preferredOtpMethod: actualMethod,
+            otp: { code: hashedOtp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) },
+            referralCode: myReferralCode,
+        });
+
+        // ✅ Attach campaign ID
+        if (campaign) {
+            user.referredByCampaign = campaign._id;
+        }
+
+        // ✅ Normal referral code logic
+        let referrer = null;
+        if (referralCode) {
+            referrer = await User.findOne({ referralCode: referralCode.toUpperCase() });
+            if (!referrer) return res.status(400).json({ message: "Invalid referral code" });
+            if (referrer.email === email) return res.status(400).json({ message: "Cannot use own referral code" });
+
+            user.referredBy = referrer._id;
+        }
+
+        await user.save();
+
+        // ✅ Instant wallet reward for campaign (only user gets reward)
+        if (campaign) {
+            const wallet = await getOrCreateWallet(user._id);
+
+            wallet.rewardPoints += campaign.refereeReward;
+            wallet.transactions.push({
+                type: "REWARD",
+                amount: campaign.refereeReward,
+                mode: "POINTS",
+                description: `Signup reward from campaign ${campaign.name}`
+            });
+
+            await wallet.save();
+        }
+
+        // ✅ Existing referral code system (unchanged)
+        if (referrer) {
+            await Referral.create({
+                referrer: referrer._id,
+                referee: user._id,
+                status: "pending",
+                rewardForReferrer: 200,
+                rewardForReferee: 200,
+                minOrderAmount: 100,
+            });
+        }
+
+        // ✅ Merge guest cart
+        const guestCart = req.session?.guestCart || [];
+        if (guestCart.length) {
+            await mergeGuestCart(user._id, guestCart);
+            req.session.guestCart = [];
+        }
+
+        // ✅ Send OTP
+        try {
+            if (actualMethod === "sms") {
+                await sendSms(phone, `Your verification OTP is: ${plainOtp}`);
+            } else {
+                await sendEmail(
+                    email,
+                    "Verify your account",
+                    `<p>Your verification OTP is: <b>${plainOtp}</b></p>`
+                );
+            }
+        } catch (err) {
+            console.error("❌ OTP sending failed:", err);
+            return res.status(500).json({
+                message: "Signup succeeded but sending OTP failed. Please request OTP again.",
+                error: err.message,
+            });
+        }
+
+        return res.status(201).json({
+            message: "Signup successful. OTP sent.",
+            otpSent: true,
+            method: actualMethod,
+            email: user.email,
+            referralCode: user.referralCode,
+            referralLink: `${process.env.APP_URL || "https://yourdomain.com"}/signup?ref=${user.referralCode}`,
+            mergedCart: guestCart.length > 0,
+            campaignApplied: campaign
+                ? {
+                    name: campaign.name,
+                    rewardForUser: campaign.refereeReward,
+                    minOrderAmount: campaign.minOrderAmount
+                }
+                : null
+        });
+
+    } catch (err) {
+        console.error("🔥 Signup error:", err);
+        res.status(500).json({ message: "Signup failed", error: err.message });
+    }
+};
+
 
 // =================== USER LOGIN ===================
 const userLogin = async (req, res) => {

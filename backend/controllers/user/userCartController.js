@@ -1329,12 +1329,25 @@ export const getCartSummary = async (req, res) => {
 
     // -------------------- Referral Points --------------------
     let pointsUsed = 0, pointsDiscount = 0, pointsMessage = "";
+
     if (req.user && req.user._id && req.query.pointsToUse) {
       const wallet = await getOrCreateWallet(req.user._id);
-      pointsUsed = Math.min(Number(req.query.pointsToUse), wallet.rewardPoints);
-      pointsDiscount = pointsUsed * 0.1;
-      pointsMessage = pointsUsed ? `🎉 You used ${pointsUsed} points! Discount ₹${pointsDiscount}` : "";
+      const requestedPoints = Number(req.query.pointsToUse);
+
+      // Rule: Reward points allowed only if cart value >= 599 (before points)
+      const payableBeforePoints = summary.payable - discountFromCoupon;
+
+      if (payableBeforePoints < 599) {
+        pointsMessage = "⚠️ Reward points can be used only on orders above ₹599.";
+      } else {
+        pointsUsed = Math.min(requestedPoints, wallet.rewardPoints);
+        pointsDiscount = pointsUsed * 0.1;
+        pointsMessage = pointsUsed
+          ? `🎉 You used ${pointsUsed} points! Discount ₹${pointsDiscount}`
+          : "";
+      }
     }
+
 
     // -------------------- Gift Card --------------------
     let giftCardApplied = null, giftCardDiscount = 0;
