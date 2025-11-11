@@ -3,7 +3,7 @@ import Order from '../models/Order.js';
 import Product from '../models/Product.js';
 import Affiliate from '../models/Affiliate.js';
 import User from '../models/User.js';
-import {refundQueue} from "../middlewares/services/refundQueue.js";
+import { refundQueue } from "../middlewares/services/refundQueue.js";
 import { sendEmail } from "../middlewares/utils/emailService.js"; // ✅ assume you already have an email service
 
 export const addOrder = async (req, res) => {
@@ -178,7 +178,7 @@ export const addOrder = async (req, res) => {
 
 // export const getAllOrders = async (req, res) => {
 //     try {
-//         const { status, orderType, fromDate, toDate } = req.query;
+//         const { status, orderType, fromDate, toDate, paid } = req.query;
 //         const query = {};
 
 //         // ✅ Filter by status
@@ -189,6 +189,20 @@ export const addOrder = async (req, res) => {
 //         // ✅ Filter by orderType
 //         if (orderType && orderType !== "all") {
 //             query.orderType = orderType;
+//         }
+
+//         // ✅ Filter by PAID / UNPAID
+//         if (paid === "true") {
+//             query.$or = [
+//                 { paid: true },
+//                 { paymentStatus: /paid/i },
+//                 { paymentStatus: "success" }
+//             ];
+//         } else if (paid === "false") {
+//             query.$or = [
+//                 { paid: false },
+//                 { paymentStatus: /pending|failed|cancelled/i }
+//             ];
 //         }
 
 //         // ✅ Filter by date range
@@ -203,17 +217,23 @@ export const addOrder = async (req, res) => {
 //             query.date = { $lte: new Date(toDate) };
 //         }
 
+//         // ✅ Fetch orders
 //         const orders = await Order.find(query)
 //             .populate('products.productId', 'name')
 //             .sort({ createdAt: -1 });
 
+//         // ✅ Format response
 //         const formatted = orders.map(order => ({
-//             _id: order._id,                  // Mongo default
+//             _id: order._id,
 //             orderId: order.orderId,
 //             date: order.date?.toDateString() || "N/A",
 //             customerName: order.customerName || "Unknown",
 //             status: order.status,
 //             orderType: order.orderType,
+
+//             paid: order.paid,
+//             paymentStatus: order.paymentStatus,
+
 //             amount: `₹${order.amount}`,
 //             products: order.products.map(p => ({
 //                 name: p.productId?.name || 'Unknown',
@@ -228,208 +248,6 @@ export const addOrder = async (req, res) => {
 //         res.status(500).json({ message: 'Failed to fetch orders', error });
 //     }
 // };
-
-// Get summary metrics for dashboard
-
-// export const getOrderSummary = async (req, res) => {
-//     try {
-//         const { range = "7d" } = req.query; // options: 1d, 7d, 1m, 1y
-
-//         // ---- Helper: Date Range Builder ----
-//         const now = new Date();
-//         const getDateRange = (type) => {
-//             const end = new Date(now);
-//             const start = new Date(now);
-//             switch (type) {
-//                 case "1d":
-//                     start.setDate(now.getDate() - 1);
-//                     break;
-//                 case "7d":
-//                     start.setDate(now.getDate() - 7);
-//                     break;
-//                 case "1m":
-//                     start.setMonth(now.getMonth() - 1);
-//                     break;
-//                 case "1y":
-//                     start.setFullYear(now.getFullYear() - 1);
-//                     break;
-//                 default:
-//                     start.setDate(now.getDate() - 7);
-//             }
-//             return { start, end };
-//         };
-
-//         const { start: currentStart, end: currentEnd } = getDateRange(range);
-
-//         // ---- Helper: Previous Range ----
-//         const getPreviousRange = (type) => {
-//             const prevEnd = new Date(currentStart);
-//             const prevStart = new Date(currentStart);
-//             switch (type) {
-//                 case "1d":
-//                     prevStart.setDate(prevEnd.getDate() - 1);
-//                     break;
-//                 case "7d":
-//                     prevStart.setDate(prevEnd.getDate() - 7);
-//                     break;
-//                 case "1m":
-//                     prevStart.setMonth(prevEnd.getMonth() - 1);
-//                     break;
-//                 case "1y":
-//                     prevStart.setFullYear(prevEnd.getFullYear() - 1);
-//                     break;
-//                 default:
-//                     prevStart.setDate(prevEnd.getDate() - 7);
-//             }
-//             return { prevStart, prevEnd };
-//         };
-
-//         const { prevStart, prevEnd } = getPreviousRange(range);
-
-//         // ---- Helper: Percentage Change ----
-//         const pctChange = (curr, prev) => {
-//             if (prev === 0 && curr > 0) return { change: 100, trend: "up" };
-//             if (prev === 0 && curr === 0) return { change: 0, trend: "no-change" };
-
-//             const diff = ((curr - prev) / prev) * 100;
-//             return {
-//                 change: Math.abs(diff.toFixed(2)),
-//                 trend: diff > 0 ? "up" : diff < 0 ? "down" : "no-change",
-//             };
-//         };
-
-//         // ===== Current Range Data =====
-//         const [totalOrders, newOrders, completedOrders, cancelledOrders] = await Promise.all([
-//             Order.countDocuments({ createdAt: { $gte: currentStart, $lte: currentEnd } }), // ✅ range-based total
-//             Order.countDocuments({ createdAt: { $gte: currentStart, $lte: currentEnd } }), // ✅ same as total for now
-//             Order.countDocuments({
-//                 status: { $in: ["Delivered", "Completed"] },
-//                 createdAt: { $gte: currentStart, $lte: currentEnd },
-//             }),
-//             Order.countDocuments({
-//                 status: "Cancelled",
-//                 createdAt: { $gte: currentStart, $lte: currentEnd },
-//             }),
-//         ]);
-
-//         // ===== Previous Range Data =====
-//         const [prevTotalOrders, prevNewOrders, prevCompletedOrders, prevCancelledOrders] = await Promise.all([
-//             Order.countDocuments({ createdAt: { $gte: prevStart, $lt: prevEnd } }),
-//             Order.countDocuments({ createdAt: { $gte: prevStart, $lt: prevEnd } }),
-//             Order.countDocuments({
-//                 status: { $in: ["Delivered", "Completed"] },
-//                 createdAt: { $gte: prevStart, $lt: prevEnd },
-//             }),
-//             Order.countDocuments({
-//                 status: "Cancelled",
-//                 createdAt: { $gte: prevStart, $lt: prevEnd },
-//             }),
-//         ]);
-
-//         // ===== Response =====
-//         res.json({
-//             range,
-//             totalOrders: {
-//                 count: totalOrders,
-//                 change: pctChange(totalOrders, prevTotalOrders),
-//                 note: `Last ${range}`,
-//             },
-//             newOrders: {
-//                 count: newOrders,
-//                 change: pctChange(newOrders, prevNewOrders),
-//                 note: `Last ${range}`,
-//             },
-//             completedOrders: {
-//                 count: completedOrders,
-//                 change: pctChange(completedOrders, prevCompletedOrders),
-//                 note: `Last ${range}`,
-//             },
-//             cancelledOrders: {
-//                 count: cancelledOrders,
-//                 change: pctChange(cancelledOrders, prevCancelledOrders),
-//                 note: `Last ${range}`,
-//             },
-//         });
-//     } catch (error) {
-//         console.error(error);
-//         res.status(500).json({
-//             message: "Error generating order summary",
-//             error: error.message,
-//         });
-//     }
-// };
-export const getAllOrders = async (req, res) => {
-    try {
-        const { status, orderType, fromDate, toDate, paid } = req.query;
-        const query = {};
-
-        // ✅ Filter by status
-        if (status && status !== "all") {
-            query.status = status;
-        }
-
-        // ✅ Filter by orderType
-        if (orderType && orderType !== "all") {
-            query.orderType = orderType;
-        }
-
-        // ✅ Filter by PAID / UNPAID
-        if (paid === "true") {
-            query.$or = [
-                { paid: true },
-                { paymentStatus: /paid/i },
-                { paymentStatus: "success" }
-            ];
-        } else if (paid === "false") {
-            query.$or = [
-                { paid: false },
-                { paymentStatus: /pending|failed|cancelled/i }
-            ];
-        }
-
-        // ✅ Filter by date range
-        if (fromDate && toDate) {
-            query.date = {
-                $gte: new Date(fromDate),
-                $lte: new Date(toDate)
-            };
-        } else if (fromDate) {
-            query.date = { $gte: new Date(fromDate) };
-        } else if (toDate) {
-            query.date = { $lte: new Date(toDate) };
-        }
-
-        // ✅ Fetch orders
-        const orders = await Order.find(query)
-            .populate('products.productId', 'name')
-            .sort({ createdAt: -1 });
-
-        // ✅ Format response
-        const formatted = orders.map(order => ({
-            _id: order._id,
-            orderId: order.orderId,
-            date: order.date?.toDateString() || "N/A",
-            customerName: order.customerName || "Unknown",
-            status: order.status,
-            orderType: order.orderType,
-
-            paid: order.paid,
-            paymentStatus: order.paymentStatus,
-
-            amount: `₹${order.amount}`,
-            products: order.products.map(p => ({
-                name: p.productId?.name || 'Unknown',
-                quantity: p.quantity,
-                price: `₹${p.price}`
-            }))
-        }));
-
-        res.status(200).json(formatted);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Failed to fetch orders', error });
-    }
-};
 
 // export const getOrderSummary = async (req, res) => {
 //     try {
@@ -486,21 +304,23 @@ export const getAllOrders = async (req, res) => {
 //             Order.countDocuments({ createdAt: { $gte: prevStart, $lt: prevEnd } })
 //         ]);
 
-//         // ---------------- REFUNDED ORDERS ----------------
+//         // ---------------- REFUNDED ORDERS (FIXED) ----------------
 //         const refundedFilterCurrent = {
-//             "refund.isRefunded": true,
 //             $or: [
-//                 { "refund.refundAt": { $gte: currentStart, $lte: currentEnd } },
-//                 { updatedAt: { $gte: currentStart, $lte: currentEnd } }
-//             ]
+//                 { paymentStatus: "refunded" },
+//                 { "refund.isRefunded": true },
+//                 { "refund.status": "completed" }
+//             ],
+//             "refund.refundedAt": { $gte: currentStart, $lte: currentEnd }
 //         };
 
 //         const refundedFilterPrev = {
-//             "refund.isRefunded": true,
 //             $or: [
-//                 { "refund.refundAt": { $gte: prevStart, $lt: prevEnd } },
-//                 { updatedAt: { $gte: prevStart, $lt: prevEnd } }
-//             ]
+//                 { paymentStatus: "refunded" },
+//                 { "refund.isRefunded": true },
+//                 { "refund.status": "completed" }
+//             ],
+//             "refund.refundedAt": { $gte: prevStart, $lt: prevEnd }
 //         };
 
 //         const [refundOrders, prevRefundOrders] = await Promise.all([
@@ -607,16 +427,80 @@ export const getAllOrders = async (req, res) => {
 //         });
 //     }
 // };
+export const getAllOrders = async (req, res) => {
+    try {
+        const { status, orderType, fromDate, toDate, paid } = req.query;
+        const query = { isDraft: false };
+
+        if (status && status !== "all") {
+            query.status = status;
+        }
+
+        if (orderType && orderType !== "all") {
+            query.orderType = orderType;
+        }
+
+        if (paid === "true") {
+            query.$or = [
+                { paid: true },
+                { paymentStatus: /paid/i },
+                { paymentStatus: "success" }
+            ];
+        } else if (paid === "false") {
+            query.$or = [
+                { paid: false },
+                { paymentStatus: /pending|failed|cancelled/i }
+            ];
+        }
+
+        if (fromDate && toDate) {
+            query.date = {
+                $gte: new Date(fromDate),
+                $lte: new Date(toDate)
+            };
+        } else if (fromDate) {
+            query.date = { $gte: new Date(fromDate) };
+        } else if (toDate) {
+            query.date = { $lte: new Date(toDate) };
+        }
+
+        const orders = await Order.find(query)
+            .populate('products.productId', 'name')
+            .sort({ createdAt: -1 });
+
+        const formatted = orders.map(order => ({
+            _id: order._id,
+            orderId: order.orderId,
+            date: order.date?.toDateString() || "N/A",
+            customerName: order.customerName || "Unknown",
+            status: order.status,
+            orderType: order.orderType,
+            paid: order.paid,
+            paymentStatus: order.paymentStatus,
+            amount: `₹${order.amount}`,
+            products: order.products.map(p => ({
+                name: p.productId?.name || 'Unknown',
+                quantity: p.quantity,
+                price: `₹${p.price}`
+            }))
+        }));
+
+        res.status(200).json(formatted);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Failed to fetch orders', error });
+    }
+};
+
 export const getOrderSummary = async (req, res) => {
     try {
         const { range = "7d" } = req.query;
 
-        // ---------------- Range Helpers ----------------
         const now = new Date();
+
         const buildRange = (r) => {
             const end = new Date(now);
             const start = new Date(now);
-
             switch (r) {
                 case "1d": start.setDate(now.getDate() - 1); break;
                 case "7d": start.setDate(now.getDate() - 7); break;
@@ -632,7 +516,6 @@ export const getOrderSummary = async (req, res) => {
         const buildPrevRange = (r, currentStart) => {
             const prevEnd = new Date(currentStart);
             const prevStart = new Date(currentStart);
-
             switch (r) {
                 case "1d": prevStart.setDate(prevEnd.getDate() - 1); break;
                 case "7d": prevStart.setDate(prevEnd.getDate() - 7); break;
@@ -645,7 +528,6 @@ export const getOrderSummary = async (req, res) => {
 
         const { prevStart, prevEnd } = buildPrevRange(range, currentStart);
 
-        // ---------------- % Helper ----------------
         const pctChange = (curr, prev) => {
             if (prev === 0 && curr > 0) return { change: 100, trend: "up" };
             if (prev === 0 && curr === 0) return { change: 0, trend: "no-change" };
@@ -656,14 +538,21 @@ export const getOrderSummary = async (req, res) => {
             };
         };
 
-        // ---------------- TOTAL ORDERS ----------------
+        // ✅ TOTAL ORDERS
         const [totalOrders, prevTotalOrders] = await Promise.all([
-            Order.countDocuments({ createdAt: { $gte: currentStart, $lte: currentEnd } }),
-            Order.countDocuments({ createdAt: { $gte: prevStart, $lt: prevEnd } })
+            Order.countDocuments({
+                isDraft: false,
+                createdAt: { $gte: currentStart, $lte: currentEnd }
+            }),
+            Order.countDocuments({
+                isDraft: false,
+                createdAt: { $gte: prevStart, $lt: prevEnd }
+            })
         ]);
 
-        // ---------------- REFUNDED ORDERS (FIXED) ----------------
+        // ✅ REFUND ORDERS
         const refundedFilterCurrent = {
+            isDraft: false,
             $or: [
                 { paymentStatus: "refunded" },
                 { "refund.isRefunded": true },
@@ -673,6 +562,7 @@ export const getOrderSummary = async (req, res) => {
         };
 
         const refundedFilterPrev = {
+            isDraft: false,
             $or: [
                 { paymentStatus: "refunded" },
                 { "refund.isRefunded": true },
@@ -686,11 +576,12 @@ export const getOrderSummary = async (req, res) => {
             Order.countDocuments(refundedFilterPrev)
         ]);
 
-        // ---------------- COMPLETED VIA TIMELINE ----------------
+        // ✅ COMPLETED ORDERS (Delivered in tracking)
         const deliveredRegex = /delivered|completed/i;
 
         const [completedAgg, prevCompletedAgg] = await Promise.all([
             Order.aggregate([
+                { $match: { isDraft: false } },
                 { $unwind: "$trackingHistory" },
                 {
                     $match: {
@@ -702,6 +593,7 @@ export const getOrderSummary = async (req, res) => {
                 { $count: "count" }
             ]),
             Order.aggregate([
+                { $match: { isDraft: false } },
                 { $unwind: "$trackingHistory" },
                 {
                     $match: {
@@ -717,11 +609,12 @@ export const getOrderSummary = async (req, res) => {
         const completedOrders = completedAgg?.[0]?.count || 0;
         const prevCompletedOrders = prevCompletedAgg?.[0]?.count || 0;
 
-        // ---------------- CANCELLED ORDERS ----------------
+        // ✅ CANCELLED ORDERS
         const cancelRegex = /cancel/i;
 
         const [cancelledAgg, prevCancelledAgg] = await Promise.all([
             Order.aggregate([
+                { $match: { isDraft: false } },
                 { $unwind: "$trackingHistory" },
                 {
                     $match: {
@@ -733,6 +626,7 @@ export const getOrderSummary = async (req, res) => {
                 { $count: "count" }
             ]),
             Order.aggregate([
+                { $match: { isDraft: false } },
                 { $unwind: "$trackingHistory" },
                 {
                     $match: {
@@ -748,7 +642,9 @@ export const getOrderSummary = async (req, res) => {
         const cancelledOrders = cancelledAgg?.[0]?.count || 0;
         const prevCancelledOrders = prevCancelledAgg?.[0]?.count || 0;
 
-        // ---------------- RESPONSE ----------------
+        // ✅ DRAFT COUNT (optional but useful)
+        const draftOrders = await Order.countDocuments({ isDraft: true });
+
         res.json({
             range,
 
@@ -774,6 +670,11 @@ export const getOrderSummary = async (req, res) => {
                 count: cancelledOrders,
                 change: pctChange(cancelledOrders, prevCancelledOrders),
                 note: `Last ${range}`
+            },
+
+            draftOrders: {
+                count: draftOrders,
+                note: "Draft / abandoned checkouts"
             }
         });
 
@@ -785,6 +686,7 @@ export const getOrderSummary = async (req, res) => {
         });
     }
 };
+
 
 export const getOrderById = async (req, res) => {
     try {
@@ -1006,28 +908,6 @@ export const retryFailedShipments = async (req, res) => {
     }
 }
 
-// export const adminApproveRefund = async (req, res) => {
-//     const { orderId } = req.body;
-//     const adminId = req.user?._id;
-
-//     const order = await Order.findById(orderId);
-
-//     if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-
-//     order.refund.status = "approved";
-//     order.refund.approvedBy = adminId;
-
-//     order.paymentStatus = "refund_initiated";
-
-//     await order.save();
-
-//     await refundQueue.add("refund", { orderId });
-
-//     res.status(200).json({
-//         success: true,
-//         message: "Refund approved and added to queue."
-//     });
-// };
 export const adminApproveRefund = async (req, res) => {
     const { orderId } = req.body;
     const adminId = req.user?._id;
@@ -1051,10 +931,9 @@ export const adminApproveRefund = async (req, res) => {
         <p>Hi ${order.user.name},</p>
         <p>Your refund request for Order <strong>#${order._id}</strong> has been approved by our team.</p>
 
-        <p><strong>Refund Method:</strong> ${
-            order.refund.method === "razorpay"
-                ? "Original Payment Method (Razorpay)"
-                : order.refund.method === "wallet"
+        <p><strong>Refund Method:</strong> ${order.refund.method === "razorpay"
+            ? "Original Payment Method (Razorpay)"
+            : order.refund.method === "wallet"
                 ? "Joyory Wallet"
                 : "Manual UPI"
         }</p>
