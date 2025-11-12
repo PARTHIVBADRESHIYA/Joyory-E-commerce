@@ -463,6 +463,221 @@ export const getUserOrders = async (req, res) => {
   }
 };
 
+// export const initiateOrderFromCart = async (req, res) => {
+//   try {
+//     // ✅ Authentication check
+//     if (!req.user || !req.user._id) {
+//       return res.status(401).json({ message: "Unauthorized" });
+//     }
+
+//     // ✅ Fetch user + cart
+//     const user = await User.findById(req.user._id).populate("cart.product");
+//     if (!user) return res.status(404).json({ message: "User not found" });
+//     if (!user.cart?.length)
+//       return res.status(400).json({ message: "Cart is empty" });
+
+//     // ✅ Recalculate latest cart summary
+//     const summaryData = await calculateCartSummary(user, {
+//       discount: req.body?.discountCode || req.query?.discount,
+//       pointsToUse: req.body?.pointsToUse || req.query?.pointsToUse,
+//       giftCardCode: req.body?.giftCardCode || req.query?.giftCardCode,
+//       giftCardPin: req.body?.giftCardPin || req.query?.giftCardPin,
+//       giftCardAmount: req.body?.giftCardAmount || req.query?.giftCardAmount,
+//     });
+
+//     const {
+//       cart,
+//       priceDetails,
+//       appliedCoupon,
+//       pointsUsed,
+//       pointsDiscount,
+//       giftCardApplied,
+//       grandTotal,
+//     } = summaryData;
+
+//     if (!cart?.length) {
+//       return res.status(400).json({ message: "Cart is empty" });
+//     }
+
+//     // ✅ Fetch products referenced in cart
+//     const productIds = cart.map((i) => i.product);
+//     const products = await Product.find({ _id: { $in: productIds } }).lean();
+
+//     // ✅ Generate unique order IDs
+//     const latestOrder = await Order.findOne().sort({ createdAt: -1 });
+//     const nextOrderNumber = latestOrder ? latestOrder.orderNumber + 1 : 1001;
+//     const orderId = `ORDER-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+//     // // ✅ Safe enum-based order type validation with fallback
+//     // const validOrderTypes = ["Online", "COD", "Wallet"];
+//     // const orderType = validOrderTypes.includes(req.body.orderType)
+//     //   ? req.body.orderType
+//     //   : "Online";
+
+//     // ✅ Finalize cart item structure
+//     const finalCart = cart.map((item) => {
+//       const product = products.find(
+//         (p) => p._id.toString() === item.product.toString()
+//       );
+//       if (!product) throw new Error(`Product not found: ${item.product}`);
+
+//       let dbVariant =
+//         product.variants.find(
+//           (v) =>
+//             String(v.sku).trim().toLowerCase() ===
+//             String(item.variant?.sku).trim().toLowerCase()
+//         ) ||
+//         product.variants.find(
+//           (v) =>
+//             String(v.shadeName).trim().toLowerCase() ===
+//             String(item.variant?.shadeName).trim().toLowerCase()
+//         ) ||
+//         product.variants.find(
+//           (v) => v._id?.toString() === item.variant?._id?.toString()
+//         ) ||
+//         product.variants?.[0];
+
+//       if (!dbVariant) {
+//         throw new Error(`Variant not found for product: ${product.name}`);
+//       }
+
+//       // ✅ Stock validation (user-friendly messages)
+//       const requestedQty = item.quantity || 1;
+//       if (typeof dbVariant.stock !== "number" || dbVariant.stock <= 0) {
+//         return res.status(400).json({
+//           success: false,
+//           message: `⚠️ ${product.name} (${dbVariant.shadeName || dbVariant.sku}) is currently out of stock.`,
+//           action: "remove_or_replace_item",
+//           productId: product._id,
+//           variantSku: dbVariant.sku
+//         });
+//       }
+
+//       if (dbVariant.stock < requestedQty) {
+//         return res.status(400).json({
+//           success: false,
+//           message: `⚠️ Only ${dbVariant.stock} left for ${product.name} (${dbVariant.shadeName || dbVariant.sku}). Please reduce quantity to proceed.`,
+//           action: "adjust_quantity",
+//           productId: product._id,
+//           variantSku: dbVariant.sku,
+//           availableStock: dbVariant.stock
+//         });
+//       }
+
+//       const finalPrice =
+//         item.variant?.discountedPrice ??
+//         item.variant?.displayPrice ??
+//         dbVariant.discountedPrice ??
+//         dbVariant.displayPrice ??
+//         product.price ??
+//         0;
+
+//       const variantSnapshot = {
+//         sku: dbVariant.sku || item.variant?.sku || null,
+//         shadeName: dbVariant.shadeName || item.variant?.shadeName || null,
+//         hex: dbVariant.hex || item.variant?.hex || null,
+//         images:
+//           dbVariant.images?.length
+//             ? dbVariant.images
+//             : item.variant?.images?.length
+//               ? item.variant.images
+//               : product.images || [],
+//         image:
+//           dbVariant.images?.[0] ||
+//           item.variant?.image ||
+//           product.images?.[0] ||
+//           null,
+//         stock: typeof dbVariant.stock === "number" ? dbVariant.stock : 0,
+//         originalPrice:
+//           item.variant?.originalPrice ??
+//           dbVariant.originalPrice ??
+//           product.price ??
+//           0,
+//         discountedPrice: finalPrice,
+//         displayPrice: finalPrice,
+//         discountPercent:
+//           item.variant?.discountPercent ??
+//           (dbVariant.originalPrice && dbVariant.discountedPrice
+//             ? Math.round(
+//               ((dbVariant.originalPrice - dbVariant.discountedPrice) /
+//                 dbVariant.originalPrice) *
+//               100
+//             )
+//             : 0),
+//         discountAmount:
+//           item.variant?.discountAmount ??
+//           (dbVariant.originalPrice && dbVariant.discountedPrice
+//             ? dbVariant.originalPrice - dbVariant.discountedPrice
+//             : 0),
+//       };
+
+//       const productSnapshot = {
+//         id: product._id,
+//         name: product.name,
+//         brand: product.brand,
+//         category: product.category,
+//       };
+
+//       return {
+//         productId: String(product._id),
+//         productSnapshot,
+//         name: product.name,
+//         quantity: item.quantity || 1,
+//         price: finalPrice,
+//         variant: variantSnapshot,
+//       };
+//     });
+
+//     // ✅ Create and save new order
+//     const newOrder = new Order({
+//       products: finalCart,
+//       orderId,
+//       orderNumber: nextOrderNumber,
+//       user: user._id,
+//       customerName: user.name,
+//       date: new Date(),
+//       status: "Pending",
+//       orderType: null, // ✅ will be updated later
+//       amount: grandTotal,
+//       subtotal: priceDetails.bagMrp,
+//       totalSavings:
+//         priceDetails.bagDiscount +
+//         priceDetails.couponDiscount +
+//         priceDetails.referralPointsDiscount +
+//         priceDetails.giftCardDiscount,
+//       couponDiscount: priceDetails.couponDiscount,
+//       pointsDiscount: priceDetails.referralPointsDiscount,
+//       giftCardDiscount: priceDetails.giftCardDiscount,
+//       discountCode: appliedCoupon?.code || null,
+//       paid: false,
+//       paymentStatus: "pending",
+//       isDraft: true        // ✅ this is new
+
+//     });
+
+//     await newOrder.save();
+
+//     return res.status(200).json({
+//       message: "✅ Order initiated",
+//       orderId: newOrder._id,
+//       displayOrderId: newOrder.orderId,
+//       nextStep: "SELECT_PAYMENT_METHOD",   // ✅ add this
+//       finalAmount: grandTotal,
+//       priceBreakdown: priceDetails,
+//       cart: finalCart,
+//       appliedCoupon,
+//       pointsUsed,
+//       pointsDiscount,
+//       giftCardApplied,
+//     });
+//   } catch (err) {
+//     console.error("❌ initiateOrderFromCart error:", err);
+//     return res.status(500).json({
+//       message: "Failed to initiate order",
+//       error: err.message,
+//     });
+//   }
+// };
 export const initiateOrderFromCart = async (req, res) => {
   try {
     // ✅ Authentication check
@@ -508,18 +723,12 @@ export const initiateOrderFromCart = async (req, res) => {
     const nextOrderNumber = latestOrder ? latestOrder.orderNumber + 1 : 1001;
     const orderId = `ORDER-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-    // // ✅ Safe enum-based order type validation with fallback
-    // const validOrderTypes = ["Online", "COD", "Wallet"];
-    // const orderType = validOrderTypes.includes(req.body.orderType)
-    //   ? req.body.orderType
-    //   : "Online";
-
     // ✅ Finalize cart item structure
     const finalCart = cart.map((item) => {
       const product = products.find(
         (p) => p._id.toString() === item.product.toString()
       );
-      if (!product) throw new Error(`Product not found: ${item.product}`);
+      if (!product) throw { userFriendly: true, message: `Product not found: ${item.product}` };
 
       let dbVariant =
         product.variants.find(
@@ -538,22 +747,25 @@ export const initiateOrderFromCart = async (req, res) => {
         product.variants?.[0];
 
       if (!dbVariant) {
-        throw new Error(`Variant not found for product: ${product.name}`);
+        throw { userFriendly: true, message: `Variant not found for product: ${product.name}` };
       }
 
-      // ✅ Stock validation
+      // ✅ Stock validation (no stack trace)
       const requestedQty = item.quantity || 1;
       if (typeof dbVariant.stock !== "number" || dbVariant.stock <= 0) {
-        throw new Error(
-          `Product "${product.name}" (${dbVariant.shadeName || dbVariant.sku}) is out of stock.`
-        );
+        throw {
+          userFriendly: true,
+          message: `⚠️ ${product.name} (${dbVariant.shadeName || dbVariant.sku}) is currently out of stock.`,
+        };
       }
+
       if (dbVariant.stock < requestedQty) {
-        throw new Error(
-          `Only ${dbVariant.stock} left for "${product.name}" (${dbVariant.shadeName || dbVariant.sku}). Please reduce quantity.`
-        );
+        throw {
+          userFriendly: true,
+          message: `⚠️ Only ${dbVariant.stock} left for ${product.name} (${dbVariant.shadeName || dbVariant.sku}). Please reduce quantity to proceed.`,
+        };
       }
-      
+
       const finalPrice =
         item.variant?.discountedPrice ??
         item.variant?.displayPrice ??
@@ -641,8 +853,7 @@ export const initiateOrderFromCart = async (req, res) => {
       discountCode: appliedCoupon?.code || null,
       paid: false,
       paymentStatus: "pending",
-      isDraft: true        // ✅ this is new
-
+      isDraft: true, // ✅ this is new
     });
 
     await newOrder.save();
@@ -651,7 +862,7 @@ export const initiateOrderFromCart = async (req, res) => {
       message: "✅ Order initiated",
       orderId: newOrder._id,
       displayOrderId: newOrder.orderId,
-      nextStep: "SELECT_PAYMENT_METHOD",   // ✅ add this
+      nextStep: "SELECT_PAYMENT_METHOD",
       finalAmount: grandTotal,
       priceBreakdown: priceDetails,
       cart: finalCart,
@@ -661,10 +872,19 @@ export const initiateOrderFromCart = async (req, res) => {
       giftCardApplied,
     });
   } catch (err) {
+    // ✅ Friendly error logging
+    if (err.userFriendly) {
+      console.log("🟡 User message:", err.message);
+      return res.status(400).json({ success: false, message: err.message });
+    }
+
+    // ✅ Prevent double response
+    if (res.headersSent) return;
+
     console.error("❌ initiateOrderFromCart error:", err);
     return res.status(500).json({
-      message: "Failed to initiate order",
-      error: err.message,
+      success: false,
+      message: "Failed to initiate order. Please try again.",
     });
   }
 };
