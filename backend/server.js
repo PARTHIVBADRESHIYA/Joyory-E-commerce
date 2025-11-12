@@ -496,7 +496,12 @@ const { connection } = createRedisConnection();
 app.set("trust proxy", 1);
 
 // 🔹 Webhook: Razorpay requires RAW body
-app.use("/api/webhooks/razorpay", bodyParser.raw({ type: "application/json" }));
+// ✅ Razorpay webhook - must be before express.json()
+app.post(
+    "/api/webhooks/razorpay",
+    bodyParser.raw({ type: "application/json" }),
+    (req, res, next) => next() // pass control to route below
+);
 
 // ================= CORS =================
 const allowedOrigins = [
