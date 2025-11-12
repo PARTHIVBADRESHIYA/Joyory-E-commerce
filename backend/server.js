@@ -500,8 +500,10 @@ app.set("trust proxy", 1);
 app.post(
     "/api/webhooks/razorpay",
     bodyParser.raw({ type: "application/json" }),
-    (req, res, next) => next() // pass control to route below
-);
+    (req, res, next) => {
+        req.rawBody = req.body.toString("utf8"); // store for signature
+        next();
+    });
 
 // ================= CORS =================
 const allowedOrigins = [
