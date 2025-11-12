@@ -541,6 +541,19 @@ export const initiateOrderFromCart = async (req, res) => {
         throw new Error(`Variant not found for product: ${product.name}`);
       }
 
+      // ✅ Stock validation
+      const requestedQty = item.quantity || 1;
+      if (typeof dbVariant.stock !== "number" || dbVariant.stock <= 0) {
+        throw new Error(
+          `Product "${product.name}" (${dbVariant.shadeName || dbVariant.sku}) is out of stock.`
+        );
+      }
+      if (dbVariant.stock < requestedQty) {
+        throw new Error(
+          `Only ${dbVariant.stock} left for "${product.name}" (${dbVariant.shadeName || dbVariant.sku}). Please reduce quantity.`
+        );
+      }
+      
       const finalPrice =
         item.variant?.discountedPrice ??
         item.variant?.displayPrice ??

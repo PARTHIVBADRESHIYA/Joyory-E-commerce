@@ -28,39 +28,97 @@ export const upsertReferralConfig = async (req, res) => {
 };
 
 
+// export const createReferralCampaign = async (req, res) => {
+//     try {
+//         const {
+//             name,
+//             description,
+//             refereeReward,
+//             referrerReward,
+//             minOrderAmount,
+//             expiresAt
+//         } = req.body;
+
+//         const promoCode = crypto.randomBytes(4).toString("hex").toUpperCase();
+
+//         const campaign = await ReferralCampaign.create({
+//             name,
+//             description,
+//             promoCode,
+//             refereeReward,
+//             referrerReward,
+//             minOrderAmount,
+//             expiresAt,
+//             createdBy: req.user._id
+//         });
+
+//         return res.status(201).json({
+//             success: true,
+//             message: "Referral campaign created",
+//             campaign,
+//             referralLink: `${process.env.APP_URL}/signup?promo=${promoCode}`
+//         });
+
+//     } catch (err) {
+//         console.error("Campaign create error:", err);
+//         res.status(500).json({ success: false, message: "Failed to create campaign" });
+//     }
+// };
+
 export const createReferralCampaign = async (req, res) => {
     try {
         const {
             name,
             description,
+            promoCode,        // ✅ allow manual promoCode
             refereeReward,
             referrerReward,
             minOrderAmount,
             expiresAt
         } = req.body;
 
-        const promoCode = crypto.randomBytes(4).toString("hex").toUpperCase();
+        // ✅ Use provided promoCode OR auto-generate one
+        const finalPromoCode = promoCode
+            ? promoCode.toUpperCase().trim()
+            : crypto.randomBytes(4).toString("hex").toUpperCase();
 
+        // ✅ Check if promoCode already exists
+        const exists = await ReferralCampaign.findOne({ promoCode: finalPromoCode });
+        if (exists) {
+            return res.status(400).json({
+                success: false,
+                message: "Promo code already exists. Please choose a different one."
+            });
+        }
+
+        // ✅ Create campaign
         const campaign = await ReferralCampaign.create({
             name,
             description,
-            promoCode,
+            promoCode: finalPromoCode,
             refereeReward,
             referrerReward,
             minOrderAmount,
             expiresAt,
-            createdBy: req.user._id
+            createdBy: req.user?._id || null
         });
+
+        // ✅ Generate referral link
+        const referralLink = `${process.env.APP_URL || "https://joyory.com"}/signup?promo=${finalPromoCode}`;
 
         return res.status(201).json({
             success: true,
             message: "Referral campaign created",
             campaign,
-            referralLink: `${process.env.APP_URL}/signup?promo=${promoCode}`
+            referralLink
         });
 
     } catch (err) {
-        console.error("Campaign create error:", err);
-        res.status(500).json({ success: false, message: "Failed to create campaign" });
+        console.error("🔥 Campaign create error:", err);
+        res.status(500).json({
+            success: false,
+            message: "Failed to create campaign",
+            error: err.message
+        });
     }
 };

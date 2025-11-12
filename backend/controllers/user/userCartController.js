@@ -1413,7 +1413,18 @@ export const getCartSummary = async (req, res) => {
           ) || enriched.variants[0];
 
         const displayPrice = enrichedVariant.displayPrice;
+        const stock = enrichedVariant.stock ?? 0;
 
+        let stockStatus = "in_stock";
+        let stockMessage = "";
+
+        if (stock <= 0) {
+          stockStatus = "out_of_stock";
+          stockMessage = "⚠️ This item is currently out of stock.";
+        } else if (stock < item.quantity) {
+          stockStatus = "limited_stock";
+          stockMessage = `Only ${stock} left in stock.`;
+        }
         return {
           _id: item._id,
           product: productFromDB._id,
@@ -1421,12 +1432,15 @@ export const getCartSummary = async (req, res) => {
             ? `${productFromDB.name} - ${enrichedVariant.shadeName}`
             : productFromDB.name,
           quantity: item.quantity || 1,
+          stockStatus,
+          stockMessage,
+          canCheckout: stock > 0 && stock >= item.quantity,
           variant: {
             sku: enrichedVariant.sku,
             shadeName: enrichedVariant.shadeName,
             hex: enrichedVariant.hex,
             image: enrichedVariant.images?.[0] || null,
-            stock: enrichedVariant.stock ?? 0,
+            stock,
             originalPrice: enrichedVariant.originalPrice,
             discountedPrice: displayPrice,
             displayPrice,

@@ -4,7 +4,7 @@ const referralCampaignSchema = new mongoose.Schema({
     name: { type: String, required: true },
     description: String,
 
-    promoCode: { type: String, required: true, unique: true }, // short code for URL
+    promoCode: { type: String, unique: true, uppercase: true, trim: true },
 
     refereeReward: { type: Number, default: 0 },    // amount to give new user
     referrerReward: { type: Number, default: 0 },   // amount to give promoter
@@ -18,3 +18,4 @@ const referralCampaignSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 export default mongoose.model("ReferralCampaign", referralCampaignSchema);
+    
