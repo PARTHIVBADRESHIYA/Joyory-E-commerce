@@ -755,14 +755,14 @@ export const initiateOrderFromCart = async (req, res) => {
       if (typeof dbVariant.stock !== "number" || dbVariant.stock <= 0) {
         throw {
           userFriendly: true,
-          message: `⚠️ ${product.name} (${dbVariant.shadeName || dbVariant.sku}) is currently out of stock.`,
+          message: `🛒 We’re sorry, but ${product.name} (${dbVariant.shadeName || dbVariant.sku}) is currently unavailable. Please remove this item from your cart to proceed with your order.`,
         };
       }
 
       if (dbVariant.stock < requestedQty) {
         throw {
           userFriendly: true,
-          message: `⚠️ Only ${dbVariant.stock} left for ${product.name} (${dbVariant.shadeName || dbVariant.sku}). Please reduce quantity to proceed.`,
+          message: `🛒 Only ${dbVariant.stock} unit${dbVariant.stock > 1 ? "s" : ""} of ${product.name} (${dbVariant.shadeName || dbVariant.sku}) are available. Please adjust the quantity or remove this item from your cart to continue with your order.`,
         };
       }
 
