@@ -235,6 +235,15 @@ export const getUserOrders = async (req, res) => {
           status: order.paymentStatus || "pending",
           transactionId: order.transactionId || null,
         },
+        // ✅ add this section
+        shipment: order.shipment
+          ? {
+            courier: order.shipment.courier_name || null,
+            awb_code: order.shipment.awb_code || null,
+            tracking_url: order.shipment.tracking_url || null,
+            status: order.shipment.status || null,
+          }
+          : null,
 
         expectedDelivery: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString(
           "en-IN",

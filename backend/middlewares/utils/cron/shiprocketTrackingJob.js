@@ -202,6 +202,10 @@ async function trackShipments() {
                         { headers: { Authorization: `Bearer ${token}` } }
                     );
 
+                    if (res.data?.tracking_data?.track_url && !order.shipment.tracking_url) {
+                        order.shipment.tracking_url = res.data.tracking_data.track_url;
+                    }
+
                     const trackingData = res.data.tracking_data;
                     if (!trackingData) return;
 
@@ -260,7 +264,7 @@ async function trackShipments() {
 // 🔹 Start cron job without blocking server
 export function startTrackingJob() {
     cron.schedule(
-        "*/30 * * * *",
+        "* * * * *", // ✅ runs every 1 minute
         () => {
             trackShipments().catch((err) =>
                 console.error("❌ Tracking error:", err.message)

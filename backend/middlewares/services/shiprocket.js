@@ -60,114 +60,6 @@ async function shiprocketRequest(url, method, data, token) {
     }
 }
 
-// 🚀 Create order → assign AWB → schedule pickup
-// export async function createShiprocketOrder(order) {
-//     const token = await getShiprocketToken();
-
-//     if (
-//         !order.shippingAddress?.addressLine1 ||
-//         !order.shippingAddress?.city ||
-//         !order.shippingAddress?.pincode ||
-//         !order.shippingAddress?.state
-//     ) throw new Error("Invalid shipping address");
-
-//     if (!order.products?.length) throw new Error("No products found in order");
-
-//     const shipmentData = {
-//         order_id: order._id.toString(),
-//         order_date: new Date(order.createdAt).toISOString().slice(0, 19).replace("T", " "),
-//         pickup_location: process.env.SHIPROCKET_PICKUP || "Primary",
-//         billing_customer_name: order.customerName || order.user?.name || "Guest",
-//         billing_last_name: "",
-//         billing_address: order.shippingAddress.addressLine1,
-//         billing_city: order.shippingAddress.city,
-//         billing_pincode: order.shippingAddress.pincode,
-//         billing_state: order.shippingAddress.state,
-//         billing_country: "India",
-//         billing_email: order.user?.email || "guest@example.com",
-//         billing_phone: order.shippingAddress?.phone || order.user?.phone || "9876543210",
-//         shipping_is_billing: true,
-//         order_items: order.products.map((item) => ({
-//             name: item.productId?.name || item.name || "Product",
-//             sku: item.productId?._id?.toString() || "SKU001",
-//             units: item.quantity,
-//             selling_price: item.price || 0,
-//         })),
-//         payment_method: order.paymentMethod === "COD" ? "COD" : "Prepaid",
-//         sub_total: order.amount,
-//         length: 10,
-//         breadth: 10,
-//         height: 10,
-//         weight: 1,
-//     };
-
-//     // STEP 1: Create order
-//     let orderRes;
-//     try {
-//         orderRes = await shiprocketRequest(
-//             "https://apiv2.shiprocket.in/v1/external/orders/create/adhoc",
-//             "post",
-//             shipmentData,
-//             token
-//         );
-//     } catch (err) {
-//         await saveDebugLog(order, "Order Create Failed", shipmentData, err);
-//         throw new Error("Shiprocket order creation failed");
-//     }
-
-//     const shiprocketOrderId = orderRes.data?.order_id;
-//     const shipmentId = orderRes.data?.shipment_id;
-//     if (!shipmentId) {
-//         return partialReturn(order, shiprocketOrderId, "Created (No Shipment ID)");
-//     }
-
-//     // STEP 2: Assign AWB
-//     let awbRes;
-//     try {
-//         awbRes = await shiprocketRequest(
-//             "https://apiv2.shiprocket.in/v1/external/courier/assign/awb",
-//             "post",
-//             { shipment_id: shipmentId },
-//             token
-//         );
-//     } catch (err) {
-//         await saveDebugLog(order, "AWB Assign Failed", { shipment_id: shipmentId }, err);
-//         return partialReturn(order, shiprocketOrderId, "Created (AWB not assigned)", shipmentId);
-//     }
-
-//     const awbCode = awbRes.data?.response?.awb_code || null;
-
-//     // STEP 3: Schedule Pickup 🚚
-//     let pickupRes;
-//     try {
-//         pickupRes = await shiprocketRequest(
-//             "https://apiv2.shiprocket.in/v1/external/courier/generate/pickup",
-//             "post",
-//             { shipment_id: [shipmentId] },
-//             token
-//         );
-//     } catch (err) {
-//         await saveDebugLog(order, "Pickup Schedule Failed", { shipment_id: shipmentId }, err);
-//     }
-
-//     const shipmentDetails = {
-//         shiprocket_order_id: shiprocketOrderId,
-//         shipment_id: shipmentId,
-//         awb_code: awbCode,
-//         courier_company_id: awbRes.data?.response?.courier_company_id || null,
-//         courier_name: awbRes.data?.response?.courier_name || null,
-//         tracking_url: awbCode ? `https://shiprocket.co/tracking/${awbCode}` : null,
-//         status: pickupRes?.data?.pickup_scheduled ? "Pickup Scheduled" : "Awaiting Pickup",
-//         assignedAt: new Date(),
-//     };
-
-//     await Order.findByIdAndUpdate(order._id, {
-//         shipment: shipmentDetails,
-//         orderStatus: shipmentDetails.status,
-//     });
-
-//     return { shipmentDetails, rawResponses: { orderRes: orderRes.data, awbRes: awbRes.data, pickupRes: pickupRes?.data } };
-// }
 export async function createShiprocketOrder(order) {
     const token = await getShiprocketToken();
 
@@ -262,7 +154,13 @@ export async function createShiprocketOrder(order) {
         return partialReturn(order, shiprocketOrderId, "Created (AWB not assigned)", shipmentId);
     }
 
-    const awbCode = awbRes.data?.response?.awb_code || null;
+    const awbData = awbRes.data?.response?.data;
+    const awbCode = awbData?.awb_code || null;
+    const courierName = awbData?.courier_name || null;
+
+    const trackingUrl = awbCode
+        ? `https://shiprocket.co/tracking/${awbCode}`
+        : null;
 
     // STEP 3: Schedule Pickup 🚚
     let pickupRes;
@@ -281,17 +179,28 @@ export async function createShiprocketOrder(order) {
         shiprocket_order_id: shiprocketOrderId,
         shipment_id: shipmentId,
         awb_code: awbCode,
-        courier_company_id: awbRes.data?.response?.courier_company_id || null,
-        courier_name: awbRes.data?.response?.courier_name || null,
-        tracking_url: awbCode ? `https://shiprocket.co/tracking/${awbCode}` : null,
-        status: pickupRes?.data?.pickup_scheduled ? "Pickup Scheduled" : "Awaiting Pickup",
+        courier_company_id: awbData?.courier_company_id || null,
+        courier_name: courierName,
+        tracking_url: trackingUrl,
+        status: pickupRes?.data?.pickup_scheduled
+            ? "Pickup Scheduled"
+            : "Awaiting Pickup",
         assignedAt: new Date(),
     };
+
 
     await Order.findByIdAndUpdate(order._id, {
         shipment: shipmentDetails,
         orderStatus: shipmentDetails.status,
+        $push: {
+            trackingHistory: {
+                status: shipmentDetails.status,
+                timestamp: new Date(),
+                location: shipmentDetails.courier_name || "Shiprocket",
+            },
+        },
     });
+
 
     return {
         shipmentDetails,
@@ -303,7 +212,6 @@ export async function createShiprocketOrder(order) {
     };
 }
 
-// 🧾 Cancel shipment
 export async function cancelShiprocketShipment(shipmentId) {
     const token = await getShiprocketToken();
     const res = await shiprocketRequest(
