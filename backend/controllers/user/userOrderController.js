@@ -6,8 +6,6 @@ import User from '../../models/User.js';
 import { calculateCartSummary } from "../../middlewares/utils/cartPricingHelper.js";
 import axios from "axios";
 import { getShiprocketToken, createShiprocketOrder } from "../../middlewares/services/shiprocket.js"; // helper to fetch token
-import { getCartSummary } from "../../controllers/user/userCartController.js";
-import { enrichProductWithStockAndOptions } from "../../middlewares/services/productHelpers.js";
 
 // helper to normalize statuses
 function mapShipmentStatus(status) {
@@ -27,61 +25,11 @@ function mapShipmentStatus(status) {
 
 // export const getUserOrders = async (req, res) => {
 //   try {
-//     const orders = await Order.find({ user: req.user._id })
-//       .populate("products.productId")
-//       .sort({ createdAt: -1 });
-
-//     const cleanedOrders = orders.map(order => {
-//       // Combine shipment status with order status
-//       const shipmentStatus = order.shipment?.status || null;
-//       const combinedStatus = shipmentStatus || order.orderStatus || order.status;
-
-//       return {
-//         _id: order._id, // ✅ MongoDB ObjectId
-//         orderId: order.orderId,
-//         orderNumber: order.orderNumber,
-//         date: order.date,
-//         status: order.status,
-//         shipmentStatus,
-//         combinedStatus,
-//         amount: order.amount,
-//         discountAmount: order.discountAmount || 0,
-//         discountCode: order.discountCode || null,
-//         buyerDiscountAmount: order.buyerDiscountAmount || 0,
-//         shippingAddress: order.shippingAddress || null,
-//         products: order.products.map(item => ({
-//           productId: item.productId?._id,
-//           name: item.productId?.name || "Unknown Product",
-//           variant: item.productId?.variant || null,
-//           brand: item.productId?.brand || null,
-//           category: item.productId?.category || null,
-//           image: item.productId?.images?.[0] || null,
-//           quantity: item.quantity,
-//           price: item.price,
-//           total: item.quantity * item.price,
-//         })),
-//         payment: {
-//           method: order.paymentMethod || "Manual",
-//           status: order.paymentStatus || "pending",
-//           transactionId: order.transactionId || null,
-//         },
-//         expectedDelivery:
-//           order.expectedDelivery ||
-//           new Date(order.date.getTime() + 5 * 24 * 60 * 60 * 1000),
-//       };
-//     });
-
-//     res.status(200).json({ orders: cleanedOrders });
-//   } catch (err) {
-//     console.error("🔥 Error fetching user orders:", err);
-//     res.status(500).json({ message: "Failed to fetch orders" });
-//   }
-// };
-
-// export const getUserOrders = async (req, res) => {
-//   try {
 //     // ✅ Fetch all user orders sorted by latest first
-//     const orders = await Order.find({ user: req.user._id })
+//     const orders = await Order.find({
+//       user: req.user._id,
+//       isDraft: false    // ✅ hide draft orders
+//     })
 //       .populate({
 //         path: "products.productId",
 //         select: "name images brand category variants",
@@ -97,9 +45,10 @@ function mapShipmentStatus(status) {
 //       });
 //     }
 
-//     // ✅ Remove duplicate orders by orderId (keep latest)
+//     // ✅ Remove duplicate orders by orderId, keep the latest
 //     const uniqueOrdersMap = new Map();
 //     orders.forEach(order => {
+//       // If no entry exists, or current order is newer, set it
 //       if (!uniqueOrdersMap.has(order.orderId)) {
 //         uniqueOrdersMap.set(order.orderId, order);
 //       }
@@ -162,7 +111,6 @@ function mapShipmentStatus(status) {
 
 //         expectedDelivery: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
 //           .toLocaleDateString("en-IN", { weekday: "short", month: "short", day: "numeric", year: "numeric" })
-
 //       };
 //     });
 
@@ -180,189 +128,12 @@ function mapShipmentStatus(status) {
 //     });
 //   }
 // };
-
-
-// ----------------------- ORDER INITIATE (unchanged) -----------------------
-// export const initiateOrderFromCart = async (req, res) => {
-//   try {
-//     if (!req.user || !req.user._id) {
-//       return res.status(401).json({ message: "Unauthorized" });
-//     }
-
-//     const user = await User.findById(req.user._id).populate("cart.product");
-//     if (!user) return res.status(404).json({ message: "User not found" });
-//     if (!user.cart?.length)
-//       return res.status(400).json({ message: "Cart is empty" });
-
-//     const summaryData = await calculateCartSummary(user, {
-//       discount: req.body?.discountCode || req.query?.discount,
-//       pointsToUse: req.body?.pointsToUse || req.query?.pointsToUse,
-//       giftCardCode: req.body?.giftCardCode || req.query?.giftCardCode,
-//       giftCardPin: req.body?.giftCardPin || req.query?.giftCardPin,
-//       giftCardAmount: req.body?.giftCardAmount || req.query?.giftCardAmount,
-//     });
-
-//     const {
-//       cart,
-//       priceDetails,
-//       appliedCoupon,
-//       pointsUsed,
-//       pointsDiscount,
-//       giftCardApplied,
-//       grandTotal,
-//     } = summaryData;
-
-//     if (!cart?.length) {
-//       return res.status(400).json({ message: "Cart is empty" });
-//     }
-
-//     const productIds = cart.map((i) => i.product);
-//     const products = await Product.find({ _id: { $in: productIds } }).lean();
-
-//     const latestOrder = await Order.findOne().sort({ createdAt: -1 });
-//     const nextOrderNumber = latestOrder ? latestOrder.orderNumber + 1 : 1001;
-//     const orderId = `ORDER-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
-//     const finalCart = cart.map((item) => {
-//       const product = products.find((p) => p._id.toString() === item.product.toString());
-//       if (!product) throw new Error(`Product not found: ${item.product}`);
-
-//       let dbVariant =
-//         product.variants.find(
-//           (v) =>
-//             String(v.sku).trim().toLowerCase() ===
-//             String(item.variant?.sku).trim().toLowerCase()
-//         ) ||
-//         product.variants.find(
-//           (v) =>
-//             String(v.shadeName).trim().toLowerCase() ===
-//             String(item.variant?.shadeName).trim().toLowerCase()
-//         ) ||
-//         product.variants.find(
-//           (v) => v._id?.toString() === item.variant?._id?.toString()
-//         ) ||
-//         product.variants?.[0];
-
-//       if (!dbVariant) {
-//         throw new Error(`Variant not found for product: ${product.name}`);
-//       }
-
-//       const finalPrice =
-//         item.variant?.discountedPrice ??
-//         item.variant?.displayPrice ??
-//         dbVariant.discountedPrice ??
-//         dbVariant.displayPrice ??
-//         product.price ??
-//         0;
-
-//       const variantSnapshot = {
-//         sku: dbVariant.sku || item.variant?.sku || null,
-//         shadeName: dbVariant.shadeName || item.variant?.shadeName || null,
-//         hex: dbVariant.hex || item.variant?.hex || null,
-//         images:
-//           dbVariant.images?.length
-//             ? dbVariant.images
-//             : item.variant?.images?.length
-//               ? item.variant.images
-//               : product.images || [],
-//         image:
-//           dbVariant.images?.[0] ||
-//           item.variant?.image ||
-//           product.images?.[0] ||
-//           null,
-//         stock: typeof dbVariant.stock === "number" ? dbVariant.stock : 0,
-//         originalPrice:
-//           item.variant?.originalPrice ??
-//           dbVariant.originalPrice ??
-//           product.price ??
-//           0,
-//         discountedPrice: finalPrice,
-//         displayPrice: finalPrice,
-//         discountPercent:
-//           item.variant?.discountPercent ??
-//           (dbVariant.originalPrice && dbVariant.discountedPrice
-//             ? Math.round(
-//               ((dbVariant.originalPrice - dbVariant.discountedPrice) /
-//                 dbVariant.originalPrice) *
-//               100
-//             )
-//             : 0),
-//         discountAmount:
-//           item.variant?.discountAmount ??
-//           (dbVariant.originalPrice && dbVariant.discountedPrice
-//             ? dbVariant.originalPrice - dbVariant.discountedPrice
-//             : 0),
-//       };
-
-//       const productSnapshot = {
-//         id: product._id,
-//         name: product.name,
-//         brand: product.brand,
-//         category: product.category,
-//       };
-
-//       return {
-//         productId: String(product._id),
-//         productSnapshot,
-//         name: product.name,
-//         quantity: item.quantity || 1,
-//         price: finalPrice,
-//         variant: variantSnapshot,
-//       };
-//     });
-
-//     const newOrder = new Order({
-//       products: finalCart,
-//       orderId,
-//       orderNumber: nextOrderNumber,
-//       user: user._id,
-//       customerName: user.name,
-//       date: new Date(),
-//       status: "Pending",
-//       orderType: "Online",
-//       amount: grandTotal,
-//       subtotal: priceDetails.bagMrp,
-//       totalSavings:
-//         priceDetails.bagDiscount +
-//         priceDetails.couponDiscount +
-//         priceDetails.referralPointsDiscount +
-//         priceDetails.giftCardDiscount,
-//       couponDiscount: priceDetails.couponDiscount,
-//       pointsDiscount: priceDetails.referralPointsDiscount,
-//       giftCardDiscount: priceDetails.giftCardDiscount,
-//       discountCode: appliedCoupon?.code || null,
-//       paid: false,
-//       paymentStatus: "pending",
-//     });
-
-//     await newOrder.save();
-
-//     return res.status(200).json({
-//       message: "✅ Order initiated",
-//       orderId: newOrder._id,
-//       displayOrderId: newOrder.orderId,
-//       finalAmount: grandTotal,
-//       priceBreakdown: priceDetails,
-//       cart: finalCart,
-//       appliedCoupon,
-//       pointsUsed,
-//       pointsDiscount,
-//       giftCardApplied,
-//     });
-//   } catch (err) {
-//     console.error("❌ initiateOrderFromCart error:", err);
-//     return res.status(500).json({
-//       message: "Failed to initiate order",
-//       error: err.message,
-//     });
-//   }
-// };
 export const getUserOrders = async (req, res) => {
   try {
     // ✅ Fetch all user orders sorted by latest first
     const orders = await Order.find({
       user: req.user._id,
-      isDraft: false    // ✅ hide draft orders
+      isDraft: false // ✅ hide draft orders
     })
       .populate({
         path: "products.productId",
@@ -382,7 +153,6 @@ export const getUserOrders = async (req, res) => {
     // ✅ Remove duplicate orders by orderId, keep the latest
     const uniqueOrdersMap = new Map();
     orders.forEach(order => {
-      // If no entry exists, or current order is newer, set it
       if (!uniqueOrdersMap.has(order.orderId)) {
         uniqueOrdersMap.set(order.orderId, order);
       }
@@ -391,15 +161,37 @@ export const getUserOrders = async (req, res) => {
 
     // ✅ Format final clean response
     const cleanedOrders = uniqueOrders.map(order => {
-      const shipmentStatus = order.shipment?.status || order.shipmentStatus || "Created";
-      const combinedStatus = shipmentStatus || order.status;
+      // 🧠 Dynamic smart status logic
+      let dynamicStatus = order.orderStatus || order.status || "Pending";
+
+      // 👉 If refund process started or failed/completed
+      if (order.paymentStatus?.startsWith("refund")) {
+        dynamicStatus =
+          "Refund " +
+          order.paymentStatus
+            .replace("refund_", "")
+            .replace("_", " ")
+            .replace(/\b\w/g, c => c.toUpperCase());
+      }
+
+      // 👉 If order was cancelled
+      if (
+        order.cancellation?.reason &&
+        (order.orderStatus === "Cancelled" || order.status === "Cancelled")
+      ) {
+        dynamicStatus = "Cancelled";
+      }
+
+      const shipmentStatus = order.shipment?.status || "Created";
+      const combinedStatus =
+        shipmentStatus !== "Created" ? shipmentStatus : dynamicStatus;
 
       return {
         _id: order._id,
         orderId: order.orderId,
         orderNumber: order.orderNumber,
         date: order.date,
-        status: order.status || "Pending",
+        status: dynamicStatus,
         shipmentStatus,
         combinedStatus,
         amount: order.amount,
@@ -424,7 +216,8 @@ export const getUserOrders = async (req, res) => {
           name: item.productId?.name || item.name || "Unknown Product",
           variant:
             item.variant ||
-            item.productId?.variants?.find(v => v._id === item.variantId)?.shadeName ||
+            item.productId?.variants?.find(v => v._id === item.variantId)
+              ?.shadeName ||
             null,
           brand: item.productId?.brand || null,
           category: item.productId?.category || null,
@@ -443,15 +236,23 @@ export const getUserOrders = async (req, res) => {
           transactionId: order.transactionId || null,
         },
 
-        expectedDelivery: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-          .toLocaleDateString("en-IN", { weekday: "short", month: "short", day: "numeric", year: "numeric" })
+        expectedDelivery: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString(
+          "en-IN",
+          {
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          }
+        ),
       };
     });
 
     // ✅ Final response
     res.status(200).json({
       success: true,
-      message: `Found ${cleanedOrders.length} order${cleanedOrders.length > 1 ? "s" : ""}.`,
+      message: `Found ${cleanedOrders.length} order${cleanedOrders.length > 1 ? "s" : ""
+        }.`,
       orders: cleanedOrders,
     });
   } catch (err) {
@@ -463,221 +264,6 @@ export const getUserOrders = async (req, res) => {
   }
 };
 
-// export const initiateOrderFromCart = async (req, res) => {
-//   try {
-//     // ✅ Authentication check
-//     if (!req.user || !req.user._id) {
-//       return res.status(401).json({ message: "Unauthorized" });
-//     }
-
-//     // ✅ Fetch user + cart
-//     const user = await User.findById(req.user._id).populate("cart.product");
-//     if (!user) return res.status(404).json({ message: "User not found" });
-//     if (!user.cart?.length)
-//       return res.status(400).json({ message: "Cart is empty" });
-
-//     // ✅ Recalculate latest cart summary
-//     const summaryData = await calculateCartSummary(user, {
-//       discount: req.body?.discountCode || req.query?.discount,
-//       pointsToUse: req.body?.pointsToUse || req.query?.pointsToUse,
-//       giftCardCode: req.body?.giftCardCode || req.query?.giftCardCode,
-//       giftCardPin: req.body?.giftCardPin || req.query?.giftCardPin,
-//       giftCardAmount: req.body?.giftCardAmount || req.query?.giftCardAmount,
-//     });
-
-//     const {
-//       cart,
-//       priceDetails,
-//       appliedCoupon,
-//       pointsUsed,
-//       pointsDiscount,
-//       giftCardApplied,
-//       grandTotal,
-//     } = summaryData;
-
-//     if (!cart?.length) {
-//       return res.status(400).json({ message: "Cart is empty" });
-//     }
-
-//     // ✅ Fetch products referenced in cart
-//     const productIds = cart.map((i) => i.product);
-//     const products = await Product.find({ _id: { $in: productIds } }).lean();
-
-//     // ✅ Generate unique order IDs
-//     const latestOrder = await Order.findOne().sort({ createdAt: -1 });
-//     const nextOrderNumber = latestOrder ? latestOrder.orderNumber + 1 : 1001;
-//     const orderId = `ORDER-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
-//     // // ✅ Safe enum-based order type validation with fallback
-//     // const validOrderTypes = ["Online", "COD", "Wallet"];
-//     // const orderType = validOrderTypes.includes(req.body.orderType)
-//     //   ? req.body.orderType
-//     //   : "Online";
-
-//     // ✅ Finalize cart item structure
-//     const finalCart = cart.map((item) => {
-//       const product = products.find(
-//         (p) => p._id.toString() === item.product.toString()
-//       );
-//       if (!product) throw new Error(`Product not found: ${item.product}`);
-
-//       let dbVariant =
-//         product.variants.find(
-//           (v) =>
-//             String(v.sku).trim().toLowerCase() ===
-//             String(item.variant?.sku).trim().toLowerCase()
-//         ) ||
-//         product.variants.find(
-//           (v) =>
-//             String(v.shadeName).trim().toLowerCase() ===
-//             String(item.variant?.shadeName).trim().toLowerCase()
-//         ) ||
-//         product.variants.find(
-//           (v) => v._id?.toString() === item.variant?._id?.toString()
-//         ) ||
-//         product.variants?.[0];
-
-//       if (!dbVariant) {
-//         throw new Error(`Variant not found for product: ${product.name}`);
-//       }
-
-//       // ✅ Stock validation (user-friendly messages)
-//       const requestedQty = item.quantity || 1;
-//       if (typeof dbVariant.stock !== "number" || dbVariant.stock <= 0) {
-//         return res.status(400).json({
-//           success: false,
-//           message: `⚠️ ${product.name} (${dbVariant.shadeName || dbVariant.sku}) is currently out of stock.`,
-//           action: "remove_or_replace_item",
-//           productId: product._id,
-//           variantSku: dbVariant.sku
-//         });
-//       }
-
-//       if (dbVariant.stock < requestedQty) {
-//         return res.status(400).json({
-//           success: false,
-//           message: `⚠️ Only ${dbVariant.stock} left for ${product.name} (${dbVariant.shadeName || dbVariant.sku}). Please reduce quantity to proceed.`,
-//           action: "adjust_quantity",
-//           productId: product._id,
-//           variantSku: dbVariant.sku,
-//           availableStock: dbVariant.stock
-//         });
-//       }
-
-//       const finalPrice =
-//         item.variant?.discountedPrice ??
-//         item.variant?.displayPrice ??
-//         dbVariant.discountedPrice ??
-//         dbVariant.displayPrice ??
-//         product.price ??
-//         0;
-
-//       const variantSnapshot = {
-//         sku: dbVariant.sku || item.variant?.sku || null,
-//         shadeName: dbVariant.shadeName || item.variant?.shadeName || null,
-//         hex: dbVariant.hex || item.variant?.hex || null,
-//         images:
-//           dbVariant.images?.length
-//             ? dbVariant.images
-//             : item.variant?.images?.length
-//               ? item.variant.images
-//               : product.images || [],
-//         image:
-//           dbVariant.images?.[0] ||
-//           item.variant?.image ||
-//           product.images?.[0] ||
-//           null,
-//         stock: typeof dbVariant.stock === "number" ? dbVariant.stock : 0,
-//         originalPrice:
-//           item.variant?.originalPrice ??
-//           dbVariant.originalPrice ??
-//           product.price ??
-//           0,
-//         discountedPrice: finalPrice,
-//         displayPrice: finalPrice,
-//         discountPercent:
-//           item.variant?.discountPercent ??
-//           (dbVariant.originalPrice && dbVariant.discountedPrice
-//             ? Math.round(
-//               ((dbVariant.originalPrice - dbVariant.discountedPrice) /
-//                 dbVariant.originalPrice) *
-//               100
-//             )
-//             : 0),
-//         discountAmount:
-//           item.variant?.discountAmount ??
-//           (dbVariant.originalPrice && dbVariant.discountedPrice
-//             ? dbVariant.originalPrice - dbVariant.discountedPrice
-//             : 0),
-//       };
-
-//       const productSnapshot = {
-//         id: product._id,
-//         name: product.name,
-//         brand: product.brand,
-//         category: product.category,
-//       };
-
-//       return {
-//         productId: String(product._id),
-//         productSnapshot,
-//         name: product.name,
-//         quantity: item.quantity || 1,
-//         price: finalPrice,
-//         variant: variantSnapshot,
-//       };
-//     });
-
-//     // ✅ Create and save new order
-//     const newOrder = new Order({
-//       products: finalCart,
-//       orderId,
-//       orderNumber: nextOrderNumber,
-//       user: user._id,
-//       customerName: user.name,
-//       date: new Date(),
-//       status: "Pending",
-//       orderType: null, // ✅ will be updated later
-//       amount: grandTotal,
-//       subtotal: priceDetails.bagMrp,
-//       totalSavings:
-//         priceDetails.bagDiscount +
-//         priceDetails.couponDiscount +
-//         priceDetails.referralPointsDiscount +
-//         priceDetails.giftCardDiscount,
-//       couponDiscount: priceDetails.couponDiscount,
-//       pointsDiscount: priceDetails.referralPointsDiscount,
-//       giftCardDiscount: priceDetails.giftCardDiscount,
-//       discountCode: appliedCoupon?.code || null,
-//       paid: false,
-//       paymentStatus: "pending",
-//       isDraft: true        // ✅ this is new
-
-//     });
-
-//     await newOrder.save();
-
-//     return res.status(200).json({
-//       message: "✅ Order initiated",
-//       orderId: newOrder._id,
-//       displayOrderId: newOrder.orderId,
-//       nextStep: "SELECT_PAYMENT_METHOD",   // ✅ add this
-//       finalAmount: grandTotal,
-//       priceBreakdown: priceDetails,
-//       cart: finalCart,
-//       appliedCoupon,
-//       pointsUsed,
-//       pointsDiscount,
-//       giftCardApplied,
-//     });
-//   } catch (err) {
-//     console.error("❌ initiateOrderFromCart error:", err);
-//     return res.status(500).json({
-//       message: "Failed to initiate order",
-//       error: err.message,
-//     });
-//   }
-// };
 export const initiateOrderFromCart = async (req, res) => {
   try {
     // ✅ Authentication check

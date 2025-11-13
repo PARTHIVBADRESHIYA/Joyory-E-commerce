@@ -215,13 +215,23 @@ const RefundSchema = new mongoose.Schema({
     method: { type: String, enum: ["razorpay", "wallet", "manual_upi"] },
     status: {
         type: String,
-        enum: ["requested", "approved", "initiated", "processing", "completed", "failed"],
+        enum: ["requested", "approved", "rejected", "initiated", "processing", "completed", "failed"],
         default: "requested"
     },
     reason: String,
     requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Admin" },
     gatewayRefundId: String,
+    refundAudit: [
+        {
+            status: String,
+            changedBy: { type: mongoose.Schema.Types.ObjectId, refPath: "refundAudit.changedByModel" },
+            changedByModel: { type: String, enum: ["User", "Admin"] },
+            timestamp: { type: Date, default: Date.now },
+            note: String
+        }
+    ]
+    ,
     attempts: { type: Number, default: 0 },
     refundedAt: Date
 }, { timestamps: true });

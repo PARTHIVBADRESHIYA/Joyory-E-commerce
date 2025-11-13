@@ -4141,9 +4141,11 @@ export const cancelOrder = async (req, res) => {
 
         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
 
+        // ✅ Ensure only order owner or admin can cancel
         if (String(order.user._id) !== String(userId) && !req.user?.isAdmin)
             return res.status(403).json({ success: false, message: "Unauthorized" });
 
+        // ✅ Prevent cancelling shipped or delivered orders
         const nonCancelableStatuses = ["Shipped", "Out for Delivery", "Delivered"];
         if (nonCancelableStatuses.includes(order.orderStatus))
             return res.status(400).json({ success: false, message: `Order cannot be cancelled once ${order.orderStatus}` });
@@ -4165,28 +4167,68 @@ export const cancelOrder = async (req, res) => {
                     method: null,
                     status: "requested",
                     reason,
-                    requestedBy: userId
+                    requestedBy: userId,
+                    refundAudit: [
+                        {
+                            status: "requested",
+                            changedBy: userId,
+                            changedByModel: "User",
+                            note: "Refund requested automatically after order cancellation"
+                        }
+                    ]
                 };
             }
+
 
             await order.save({ session });
         });
 
+        // ✅ Available refund options if payment was made
         const refundMethodsAvailable = order.paid
             ? [
-                { method: "razorpay", label: "Original Payment Method" },
+                { method: "razorpay", label: "Original Payment Method (Razorpay)" },
                 { method: "wallet", label: "Add to Wallet" }
             ]
             : [];
 
+        // ✅ Send email confirmation to user
+        await sendEmail(
+            order.user.email,
+            "🛒 Order Cancellation Confirmation",
+            `
+            <p>Hi ${order.user.name},</p>
+            <p>We have successfully received your cancellation request for Order <strong>#${order._id}</strong>.</p>
+            <p><strong>Reason:</strong> ${reason || "No reason provided"}</p>
+            
+            ${order.paid
+                ? `
+                    <p>Your payment was already completed, so a refund request has been initiated automatically.</p>
+                    <p><strong>Next Step:</strong> Please select your preferred refund method:</p>
+                    <ul>
+                        <li>💳 <strong>Original Payment Method (Razorpay)</strong></li>
+                        <li>💰 <strong>Joyory Wallet</strong></li>
+                    </ul>
+                    <p>Once you choose a refund method, our team will process it within a few business days.</p>
+                    `
+                : `<p>Since your payment wasn’t completed, no refund is needed.</p>`
+            }
+
+            <p>Thank you for shopping with us. We hope to serve you again soon!</p>
+            <p>Regards,<br/>Team Joyory Beauty</p>
+            `
+        );
+
+        // ✅ Send response to user
         res.status(200).json({
             success: true,
-            message: "Order cancelled. Choose refund method.",
+            message: order.paid
+                ? "Order cancelled successfully. Refund initiated — please select your preferred refund method."
+                : "Order cancelled successfully.",
             refundMethodsAvailable
         });
 
     } catch (err) {
-        console.error("Cancel order error:", err);
+        console.error("❌ Cancel order error:", err);
         res.status(500).json({ success: false, message: "Cancel order failed" });
     } finally {
         await session.endSession();
@@ -4374,26 +4416,6 @@ export const initiateRefund = async (req, res) => {
     }
 };
 
-// export const setRefundMethod = async (req, res) => {
-//     const { orderId, method } = req.body;
-//     const userId = req.user?._id;
-
-//     const order = await Order.findById(orderId);
-//     if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-
-//     order.refund.method = method;
-//     order.refund.status = "requested";
-//     order.refund.requestedBy = userId;
-
-//     await order.save();
-
-//     res.status(200).json({
-//         success: true,
-//         message: "Refund method submitted. Waiting for admin approval."
-//     });
-// };
-
-
 export const setRefundMethod = async (req, res) => {
     const { orderId, method } = req.body;
     const userId = req.user?._id;
@@ -4403,6 +4425,35 @@ export const setRefundMethod = async (req, res) => {
 
     order.refund.method = method;
     order.refund.status = "requested";
+
+    order.refund.refundAudit.push({
+        status: "requested",
+        changedBy: userId,
+        changedByModel: "User",
+        note: `User selected refund method: ${method}`
+    });
+    // Notify Admin (You can replace with your admin email or from DB)
+    await sendEmail(
+        process.env.ADMIN_EMAIL || "admin@joyorybeauty.com",
+        "⚠️ New Refund Request Received",
+        `
+  <p>Hello Admin,</p>
+  <p>A new refund request has been received.</p>
+
+  <ul>
+    <li><strong>Order ID:</strong> ${order._id}</li>
+    <li><strong>User:</strong> ${order.user.name} (${order.user.email})</li>
+    <li><strong>Amount:</strong> ₹${order.amount}</li>
+    <li><strong>Requested Method:</strong> ${method || "Not selected yet"}</li>
+    <li><strong>Reason:</strong> ${order.refund.reason || "No reason provided"}</li>
+  </ul>
+
+  <p>Please review this request in your Admin Dashboard.</p>
+  <p>— Joyory Refund System</p>
+  `
+    );
+
+
     order.refund.requestedBy = userId;
 
     await order.save();
@@ -4433,6 +4484,72 @@ export const setRefundMethod = async (req, res) => {
         message: "Refund method submitted. Waiting for admin approval."
     });
 };
+
+// export const cancelOrder = async (req, res) => {
+//     const session = await mongoose.startSession();
+//     try {
+//         const { orderId, reason } = req.body;
+//         const userId = req.user?._id;
+
+//         if (!orderId) return res.status(400).json({ success: false, message: "orderId is required" });
+
+//         const order = await Order.findById(orderId)
+//             .populate("products.productId")
+//             .populate("user");
+
+//         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+//         if (String(order.user._id) !== String(userId) && !req.user?.isAdmin)
+//             return res.status(403).json({ success: false, message: "Unauthorized" });
+
+//         const nonCancelableStatuses = ["Shipped", "Out for Delivery", "Delivered"];
+//         if (nonCancelableStatuses.includes(order.orderStatus))
+//             return res.status(400).json({ success: false, message: `Order cannot be cancelled once ${order.orderStatus}` });
+
+//         await session.withTransaction(async () => {
+//             order.orderStatus = "Cancelled";
+//             order.paymentStatus = order.paid ? "refund_requested" : "cancelled";
+
+//             order.cancellation = {
+//                 cancelledBy: userId,
+//                 reason,
+//                 requestedAt: new Date(),
+//                 allowed: true
+//             };
+
+//             if (order.paid) {
+//                 order.refund = {
+//                     amount: order.amount,
+//                     method: null,
+//                     status: "requested",
+//                     reason,
+//                     requestedBy: userId
+//                 };
+//             }
+
+//             await order.save({ session });
+//         });
+
+//         const refundMethodsAvailable = order.paid
+//             ? [
+//                 { method: "razorpay", label: "Original Payment Method" },
+//                 { method: "wallet", label: "Add to Wallet" }
+//             ]
+//             : [];
+
+//         res.status(200).json({
+//             success: true,
+//             message: "Order cancelled. Choose refund method.",
+//             refundMethodsAvailable
+//         });
+
+//     } catch (err) {
+//         console.error("Cancel order error:", err);
+//         res.status(500).json({ success: false, message: "Cancel order failed" });
+//     } finally {
+//         await session.endSession();
+//     }
+// };
 
 
 // export const cancelOrder = async (req, res) => {
