@@ -219,7 +219,7 @@ async function trackShipments() {
 
                     // ✅ map orderStatus from shipment_status
                     if (currentStatus) {
-                        const lower = currentStatus.toLowerCase();
+                        const lower = String(currentStatus).toLowerCase();
                         if (lower.includes("in transit") || lower.includes("shipped")) {
                             order.orderStatus = "Shipped";
                         } else if (lower.includes("out for delivery")) {
@@ -230,6 +230,7 @@ async function trackShipments() {
                             order.orderStatus = "Cancelled";
                         }
                     }
+
 
                     // ✅ update tracking history only if we have a valid new status
                     if (currentStatus) {
