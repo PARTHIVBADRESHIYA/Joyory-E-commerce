@@ -1,3 +1,371 @@
+// // middlewares/utils/recommendationService.js
+// import mongoose from "mongoose";
+// import Product from "../../models/Product.js";
+// import Promotion from "../../models/Promotion.js";
+// import Category from "../../models/Category.js";
+// import Order from "../../models/Order.js";
+// import ProductViewLog from "../../models/ProductViewLog.js";
+// import { buildOptions, normalizeImages } from "../../controllers/user/userProductController.js";
+// import { getCategoryFallbackChain } from "../../middlewares/utils/categoryUtils.js";
+// import { calculateVariantPrices } from "../../middlewares/services/promotionHelper.js";
+// import { enrichProductWithStockAndOptions, enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
+
+// export const getPseudoVariant = (product) => ({
+//     sku: product._id.toString(),
+//     stock: product.quantity || 0,
+//     price: product.price || 0,
+//     discountedPrice: product.discountedPrice || product.price || 0,
+//     originalPrice: product.price || 0,
+//     displayPrice: product.discountedPrice || product.price || 0,
+//     discountAmount: (product.price || 0) - (product.discountedPrice || product.price || 0),
+//     discountPercent: product.discountPercent || 0,
+//     status: product.quantity > 0 ? "inStock" : "outOfStock",
+//     message: product.quantity > 0 ? "In-stock" : "No stock available",
+//     images: product.images || [],
+// });
+
+// export const formatProductCard = async (product, promotions = []) => {
+//     if (!product) return null;
+
+//     // 🔹 Fetch category info
+//     let categoryObj = null;
+//     if (mongoose.Types.ObjectId.isValid(product.category)) {
+//         categoryObj = await Category.findById(product.category)
+//             .select("name slug")
+//             .lean();
+//     }
+
+//     const { shadeOptions, colorOptions } = buildOptions(product);
+
+//     // 🔹 Normalize variants
+//     let variantsArray = [];
+
+//     if (Array.isArray(product.variants) && product.variants.length > 0) {
+//         // ✅ Real variants (shadeName, hex, etc.)
+//         variantsArray = calculateVariantPrices(product.variants, product, promotions);
+//     } else if (product.variant && (!product.variants || !product.variants.length)) {
+//         // ✅ Old legacy single variant like "30ml", "60g", etc.
+//         const legacyVariant = {
+//             name: product.variant,
+//             sku: product.sku ?? `${product._id}-default`,
+//             stock: product.quantity ?? 0,
+//             originalPrice: product.mrp ?? product.price ?? 0,
+//             displayPrice: product.price ?? 0,
+//             discountPercent: product.mrp && product.mrp > product.price
+//                 ? Math.round(((product.mrp - product.price) / product.mrp) * 100)
+//                 : 0,
+//             message: product.quantity > 0 ? "In-stock" : "No stock available",
+//             status: product.quantity > 0 ? "inStock" : "outOfStock",
+//             images: normalizeImages(product.images || []),
+//         };
+//         variantsArray = calculateVariantPrices([legacyVariant], product, promotions);
+//     }
+//     // ❌ else no variants at all (product without variant fields)
+
+//     // 🔹 Display price logic
+//     const displayVariant = variantsArray[0];
+//     const price = displayVariant?.displayPrice ?? product.price ?? 0;
+//     const mrp = displayVariant?.originalPrice ?? product.mrp ?? product.price ?? 0;
+//     const discountPercent = mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
+
+//     // 🔹 Stock & message
+//     const status = displayVariant?.status || (product.quantity > 0 ? "inStock" : "outOfStock");
+//     const message = displayVariant?.message || (product.quantity > 0 ? "In-stock" : "No stock available");
+//     const inStock = displayVariant?.stock > 0 || product.quantity > 0;
+
+//     return {
+//         _id: product._id,
+//         name: product.name,
+//         brand: product.brand,
+//         variant: product.variant ?? null, // ⚡ Keep legacy field
+//         price,
+//         mrp,
+//         discountPercent,
+//         discountAmount: mrp - price,
+//         images: normalizeImages(product.images || []),
+//         shadeOptions,
+//         colorOptions,
+//         avgRating: product.avgRating || 0,
+//         totalRatings: product.commentsCount || 0,
+//         status,
+//         message,
+//         inStock,
+//         variants: variantsArray, // ✅ will only appear if variant/variants exist
+//         selectedVariant: null,
+//         category: categoryObj
+//             ? { _id: categoryObj._id, name: categoryObj.name, slug: categoryObj.slug }
+//             : null,
+//     };
+// };
+
+// export const getRecommendations = async ({
+//     mode,
+//     productId,
+//     categorySlug,
+//     skinTypeSlug,
+//     userId,
+//     limit = 6
+// }) => {
+//     try {
+//         let products = [];
+//         let message = "";
+
+//         // 1️⃣ Active promotions
+//         const now = new Date();
+//         const promotions = await Promotion.find({
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now }
+//         }).lean();
+
+//         // 🔹 Trending products
+//         const getTrending = async () => {
+//             return await Product.find({
+//                 sales: { $gt: 0 },
+//                 isDeleted: { $ne: true },
+//                 isPublished: true
+//             })
+//                 .sort({ sales: -1 })
+//                 .limit(Number(limit))
+//                 .lean();
+//         };
+
+//         // 🔹 Category fallback chain
+//         const fallbackCategoryChain = async (categoryId) => {
+//             const chain = await getCategoryFallbackChain(await Category.findById(categoryId).lean());
+//             for (const cat of chain) {
+//                 const prods = await Product.find({
+//                     category: cat._id,
+//                     isDeleted: { $ne: true },
+//                     isPublished: true
+//                 })
+//                     .sort({ sales: -1 })
+//                     .limit(Number(limit))
+//                     .lean();
+//                 if (prods.length) return { products: prods, fallbackFrom: cat.name };
+//             }
+//             return { products: [], fallbackFrom: null };
+//         };
+
+//         // 🔹 SkinType helper
+//         const getSkinTypeProducts = async (skinTypeId, categoryIds = []) => {
+//             const filter = {
+//                 skinTypes: skinTypeId,
+//                 isDeleted: { $ne: true },
+//                 isPublished: true
+//             };
+//             if (categoryIds.length) filter.category = { $in: categoryIds };
+//             return await Product.find(filter).sort({ sales: -1 }).limit(Number(limit)).lean();
+//         };
+
+//         // 2️⃣ Mode-based logic (unchanged)
+//         switch (mode) {
+//             case "moreLikeThis": {
+//                 const product = await Product.findById(productId).lean();
+//                 if (!product) return { success: false, products: [], message: "Product not found" };
+
+//                 products = await Product.find({
+//                     _id: { $ne: product._id },
+//                     category: product.category,
+//                     brand: product.brand,
+//                     isDeleted: { $ne: true },
+//                     isPublished: true
+//                 })
+//                     .sort({ sales: -1 })
+//                     .limit(Number(limit))
+//                     .lean();
+
+//                 let fallbackFrom = null;
+//                 if (!products.length) {
+//                     products = await Product.find({
+//                         _id: { $ne: product._id },
+//                         category: product.category,
+//                         isDeleted: { $ne: true },
+//                         isPublished: true
+//                     })
+//                         .sort({ sales: -1 })
+//                         .limit(Number(limit))
+//                         .lean();
+//                     fallbackFrom = "same category";
+//                 }
+
+//                 if (!products.length && product.category) {
+//                     const fallback = await fallbackCategoryChain(product.category);
+//                     products = fallback.products;
+//                     fallbackFrom = fallback.fallbackFrom
+//                         ? `parent category: ${fallback.fallbackFrom}`
+//                         : null;
+//                 }
+
+//                 if (!products.length) {
+//                     products = await getTrending();
+//                     fallbackFrom = "trending products";
+//                 }
+
+//                 message = fallbackFrom
+//                     ? `More like this (showing from ${fallbackFrom})`
+//                     : "More like this";
+//                 break;
+//             }
+
+//             case "boughtTogether": {
+//                 const orders = await Order.aggregate([
+//                     { $unwind: "$products" },
+//                     {
+//                         $match: {
+//                             "products.productId": { $ne: new mongoose.Types.ObjectId(productId) }
+//                         }
+//                     },
+//                     { $group: { _id: "$products.productId", count: { $sum: 1 } } },
+//                     { $sort: { count: -1 } },
+//                     { $limit: Number(limit) }
+//                 ]);
+//                 const productIds = orders.map((o) => o._id);
+//                 products = await Product.find({
+//                     _id: { $in: productIds },
+//                     isDeleted: { $ne: true },
+//                     isPublished: true
+//                 }).lean();
+
+//                 let fallbackFrom = null;
+//                 if (!products.length) {
+//                     const prod = await Product.findById(productId).lean();
+//                     if (prod?.category) {
+//                         const fallback = await fallbackCategoryChain(prod.category);
+//                         products = fallback.products;
+//                         fallbackFrom = fallback.fallbackFrom
+//                             ? `parent category: ${fallback.fallbackFrom}`
+//                             : null;
+//                     }
+//                 }
+
+//                 if (!products.length) {
+//                     products = await getTrending();
+//                     fallbackFrom = "trending products";
+//                 }
+
+//                 message = fallbackFrom
+//                     ? `Frequently bought together (showing from ${fallbackFrom})`
+//                     : "Frequently bought together";
+//                 break;
+//             }
+
+//             case "alsoViewed": {
+//                 const viewed = await ProductViewLog.find({ userId })
+//                     .sort({ createdAt: -1 })
+//                     .limit(Number(limit))
+//                     .populate("productId")
+//                     .lean();
+//                 products = viewed
+//                     .map((v) => v.productId)
+//                     .filter((p) => p && p.isPublished);
+
+//                 let fallbackFrom = null;
+//                 if (!products.length && productId) {
+//                     const prod = await Product.findById(productId).lean();
+//                     if (prod?.category) {
+//                         const fallback = await fallbackCategoryChain(prod.category);
+//                         products = fallback.products;
+//                         fallbackFrom = fallback.fallbackFrom
+//                             ? `parent category: ${fallback.fallbackFrom}`
+//                             : null;
+//                     }
+//                 }
+
+//                 if (!products.length) {
+//                     products = await getTrending();
+//                     fallbackFrom = "trending products";
+//                 }
+
+//                 message = fallbackFrom
+//                     ? `Also viewed (showing from ${fallbackFrom})`
+//                     : "Also viewed by others";
+//                 break;
+//             }
+
+//             case "skinType": {
+//                 const skinType = await SkinType.findOne({
+//                     slug: skinTypeSlug,
+//                     isDeleted: false
+//                 }).lean();
+//                 if (!skinType) return { success: false, products: [], message: "Skin type not found" };
+
+//                 let fallbackFrom = null;
+//                 let categoryIds = [];
+//                 if (categorySlug) {
+//                     const cat = await Category.findOne({ slug: categorySlug }).lean();
+//                     if (cat) categoryIds = [cat._id];
+//                 }
+
+//                 products = await getSkinTypeProducts(skinType._id, categoryIds);
+
+//                 if (!products.length && categoryIds.length) {
+//                     products = await getSkinTypeProducts(skinType._id);
+//                     fallbackFrom = `skin type: ${skinType.name}`;
+//                 }
+
+//                 if (!products.length) {
+//                     products = await getTrending();
+//                     fallbackFrom = "trending products";
+//                 }
+
+//                 message = fallbackFrom
+//                     ? `Recommended for ${skinType.name} (showing from ${fallbackFrom})`
+//                     : `Recommended for ${skinType.name}`;
+//                 break;
+//             }
+
+//             case "categoryTopSelling": {
+//                 const cat = await Category.findOne({ slug: categorySlug }).lean();
+//                 if (!cat) return { success: false, products: [], message: "Category not found" };
+
+//                 products = await Product.find({
+//                     category: cat._id,
+//                     isDeleted: { $ne: true },
+//                     isPublished: true
+//                 })
+//                     .sort({ sales: -1 })
+//                     .limit(Number(limit))
+//                     .lean();
+
+//                 let fallbackFrom = null;
+//                 if (!products.length) {
+//                     const fallback = await fallbackCategoryChain(cat._id);
+//                     products = fallback.products;
+//                     fallbackFrom = fallback.fallbackFrom;
+//                 }
+
+//                 if (!products.length) {
+//                     products = await getTrending();
+//                     fallbackFrom = "trending products";
+//                 }
+
+//                 message = fallbackFrom
+//                     ? `Top selling (showing from ${fallbackFrom})`
+//                     : `Top selling in ${cat.name}`;
+//                 break;
+//             }
+
+//             default: {
+//                 products = await getTrending();
+//                 message = "Trending products";
+//             }
+//         }
+
+//         // 3️⃣ Use helper to enrich & normalize all products
+//         const enrichedProducts = await enrichProductsUnified(products, promotions);
+
+//         return { success: true, products: enrichedProducts, message };
+
+//     } catch (err) {
+//         console.error("❌ Recommendation service error:", err);
+//         return { success: false, products: [], message: "Server error", error: err.message };
+//     }
+// };
+
+
+
+
 // middlewares/utils/recommendationService.js
 import mongoose from "mongoose";
 import Product from "../../models/Product.js";
@@ -5,11 +373,16 @@ import Promotion from "../../models/Promotion.js";
 import Category from "../../models/Category.js";
 import Order from "../../models/Order.js";
 import ProductViewLog from "../../models/ProductViewLog.js";
+import SkinType from "../../models/SkinType.js";
 import { buildOptions, normalizeImages } from "../../controllers/user/userProductController.js";
 import { getCategoryFallbackChain } from "../../middlewares/utils/categoryUtils.js";
 import { calculateVariantPrices } from "../../middlewares/services/promotionHelper.js";
-import { enrichProductWithStockAndOptions, enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
+import { enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
+import redis from "../utils/redis.js";
 
+/**
+ * Pseudo variant helper
+ */
 export const getPseudoVariant = (product) => ({
     sku: product._id.toString(),
     stock: product.quantity || 0,
@@ -24,27 +397,23 @@ export const getPseudoVariant = (product) => ({
     images: product.images || [],
 });
 
+/**
+ * Format single product card
+ */
 export const formatProductCard = async (product, promotions = []) => {
     if (!product) return null;
 
-    // 🔹 Fetch category info
     let categoryObj = null;
     if (mongoose.Types.ObjectId.isValid(product.category)) {
-        categoryObj = await Category.findById(product.category)
-            .select("name slug")
-            .lean();
+        categoryObj = await Category.findById(product.category).select("name slug").lean();
     }
 
     const { shadeOptions, colorOptions } = buildOptions(product);
-
-    // 🔹 Normalize variants
     let variantsArray = [];
 
     if (Array.isArray(product.variants) && product.variants.length > 0) {
-        // ✅ Real variants (shadeName, hex, etc.)
         variantsArray = calculateVariantPrices(product.variants, product, promotions);
     } else if (product.variant && (!product.variants || !product.variants.length)) {
-        // ✅ Old legacy single variant like "30ml", "60g", etc.
         const legacyVariant = {
             name: product.variant,
             sku: product.sku ?? `${product._id}-default`,
@@ -60,15 +429,11 @@ export const formatProductCard = async (product, promotions = []) => {
         };
         variantsArray = calculateVariantPrices([legacyVariant], product, promotions);
     }
-    // ❌ else no variants at all (product without variant fields)
 
-    // 🔹 Display price logic
     const displayVariant = variantsArray[0];
     const price = displayVariant?.displayPrice ?? product.price ?? 0;
     const mrp = displayVariant?.originalPrice ?? product.mrp ?? product.price ?? 0;
     const discountPercent = mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
-
-    // 🔹 Stock & message
     const status = displayVariant?.status || (product.quantity > 0 ? "inStock" : "outOfStock");
     const message = displayVariant?.message || (product.quantity > 0 ? "In-stock" : "No stock available");
     const inStock = displayVariant?.stock > 0 || product.quantity > 0;
@@ -77,7 +442,7 @@ export const formatProductCard = async (product, promotions = []) => {
         _id: product._id,
         name: product.name,
         brand: product.brand,
-        variant: product.variant ?? null, // ⚡ Keep legacy field
+        variant: product.variant ?? null,
         price,
         mrp,
         discountPercent,
@@ -90,7 +455,7 @@ export const formatProductCard = async (product, promotions = []) => {
         status,
         message,
         inStock,
-        variants: variantsArray, // ✅ will only appear if variant/variants exist
+        variants: variantsArray,
         selectedVariant: null,
         category: categoryObj
             ? { _id: categoryObj._id, name: categoryObj.name, slug: categoryObj.slug }
@@ -98,67 +463,96 @@ export const formatProductCard = async (product, promotions = []) => {
     };
 };
 
-export const getRecommendations = async ({
-    mode,
-    productId,
-    categorySlug,
-    skinTypeSlug,
-    userId,
-    limit = 6
-}) => {
+/**
+ * Active promotions ⚡ cache 5 mins
+ */
+const getActivePromotions = async () => {
+    const redisKey = "activePromotions";
+    const cached = await redis.get(redisKey);
+    if (cached) return JSON.parse(cached);
+
+    const now = new Date();
+    const promotions = await Promotion.find({
+        status: "active",
+        startDate: { $lte: now },
+        endDate: { $gte: now }
+    }).lean();
+
+    await redis.set(redisKey, JSON.stringify(promotions), "EX", 300);
+    return promotions;
+};
+
+/**
+ * Trending products ⚡ cache top 50
+ */
+const getTrendingProducts = async (limit) => {
+    const redisKey = `trendingProducts:top50`;
+    const cached = await redis.get(redisKey);
+    let trending = [];
+
+    if (cached) trending = JSON.parse(cached);
+    else {
+        trending = await Product.find({
+            sales: { $gt: 0 },
+            isDeleted: { $ne: true },
+            isPublished: true
+        }).sort({ sales: -1 }).limit(50).lean();
+
+        await redis.set(redisKey, JSON.stringify(trending), "EX", 300);
+    }
+
+    return trending.slice(0, limit);
+};
+
+/**
+ * Batch fetch products by IDs
+ */
+const getProductsByIds = async (ids, limit) => {
+    if (!ids.length) return [];
+    return await Product.find({
+        _id: { $in: ids },
+        isDeleted: { $ne: true },
+        isPublished: true
+    }).limit(limit).lean();
+};
+
+/**
+ * Fallback category chain products
+ */
+const getFallbackProducts = async (categoryId, limit) => {
+    const chain = await getCategoryFallbackChain(await Category.findById(categoryId).lean());
+    for (const cat of chain) {
+        const prods = await Product.find({
+            category: cat._id,
+            isDeleted: { $ne: true },
+            isPublished: true
+        }).sort({ sales: -1 }).limit(limit).lean();
+        if (prods.length) return { products: prods, fallbackFrom: cat.name };
+    }
+    return { products: [], fallbackFrom: null };
+};
+
+/**
+ * Skin type products batch query
+ */
+const getSkinTypeProducts = async (skinTypeId, categoryIds = [], limit) => {
+    const filter = { skinTypes: skinTypeId, isDeleted: { $ne: true }, isPublished: true };
+    if (categoryIds.length) filter.category = { $in: categoryIds };
+    return await Product.find(filter).sort({ sales: -1 }).limit(limit).lean();
+};
+
+/**
+ * Main recommendations service ⚡ optimized
+ */
+export const getRecommendations = async ({ mode, productId, categorySlug, skinTypeSlug, userId, limit = 6 }) => {
     try {
+        const promotions = await getActivePromotions();
         let products = [];
         let message = "";
 
-        // 1️⃣ Active promotions
-        const now = new Date();
-        const promotions = await Promotion.find({
-            status: "active",
-            startDate: { $lte: now },
-            endDate: { $gte: now }
-        }).lean();
+        const fallbackCategoryChain = async (categoryId) => getFallbackProducts(categoryId, limit);
+        const trendingProducts = async () => getTrendingProducts(limit);
 
-        // 🔹 Trending products
-        const getTrending = async () => {
-            return await Product.find({
-                sales: { $gt: 0 },
-                isDeleted: { $ne: true },
-                isPublished: true
-            })
-                .sort({ sales: -1 })
-                .limit(Number(limit))
-                .lean();
-        };
-
-        // 🔹 Category fallback chain
-        const fallbackCategoryChain = async (categoryId) => {
-            const chain = await getCategoryFallbackChain(await Category.findById(categoryId).lean());
-            for (const cat of chain) {
-                const prods = await Product.find({
-                    category: cat._id,
-                    isDeleted: { $ne: true },
-                    isPublished: true
-                })
-                    .sort({ sales: -1 })
-                    .limit(Number(limit))
-                    .lean();
-                if (prods.length) return { products: prods, fallbackFrom: cat.name };
-            }
-            return { products: [], fallbackFrom: null };
-        };
-
-        // 🔹 SkinType helper
-        const getSkinTypeProducts = async (skinTypeId, categoryIds = []) => {
-            const filter = {
-                skinTypes: skinTypeId,
-                isDeleted: { $ne: true },
-                isPublished: true
-            };
-            if (categoryIds.length) filter.category = { $in: categoryIds };
-            return await Product.find(filter).sort({ sales: -1 }).limit(Number(limit)).lean();
-        };
-
-        // 2️⃣ Mode-based logic (unchanged)
         switch (mode) {
             case "moreLikeThis": {
                 const product = await Product.findById(productId).lean();
@@ -170,10 +564,7 @@ export const getRecommendations = async ({
                     brand: product.brand,
                     isDeleted: { $ne: true },
                     isPublished: true
-                })
-                    .sort({ sales: -1 })
-                    .limit(Number(limit))
-                    .lean();
+                }).sort({ sales: -1 }).limit(limit).lean();
 
                 let fallbackFrom = null;
                 if (!products.length) {
@@ -182,50 +573,35 @@ export const getRecommendations = async ({
                         category: product.category,
                         isDeleted: { $ne: true },
                         isPublished: true
-                    })
-                        .sort({ sales: -1 })
-                        .limit(Number(limit))
-                        .lean();
+                    }).sort({ sales: -1 }).limit(limit).lean();
                     fallbackFrom = "same category";
                 }
 
                 if (!products.length && product.category) {
                     const fallback = await fallbackCategoryChain(product.category);
                     products = fallback.products;
-                    fallbackFrom = fallback.fallbackFrom
-                        ? `parent category: ${fallback.fallbackFrom}`
-                        : null;
+                    fallbackFrom = fallback.fallbackFrom ? `parent category: ${fallback.fallbackFrom}` : null;
                 }
 
                 if (!products.length) {
-                    products = await getTrending();
+                    products = await trendingProducts();
                     fallbackFrom = "trending products";
                 }
 
-                message = fallbackFrom
-                    ? `More like this (showing from ${fallbackFrom})`
-                    : "More like this";
+                message = fallbackFrom ? `More like this (showing from ${fallbackFrom})` : "More like this";
                 break;
             }
 
             case "boughtTogether": {
                 const orders = await Order.aggregate([
                     { $unwind: "$products" },
-                    {
-                        $match: {
-                            "products.productId": { $ne: new mongoose.Types.ObjectId(productId) }
-                        }
-                    },
+                    { $match: { "products.productId": { $ne: new mongoose.Types.ObjectId(productId) } } },
                     { $group: { _id: "$products.productId", count: { $sum: 1 } } },
                     { $sort: { count: -1 } },
-                    { $limit: Number(limit) }
+                    { $limit: limit }
                 ]);
-                const productIds = orders.map((o) => o._id);
-                products = await Product.find({
-                    _id: { $in: productIds },
-                    isDeleted: { $ne: true },
-                    isPublished: true
-                }).lean();
+
+                products = await getProductsByIds(orders.map(o => o._id), limit);
 
                 let fallbackFrom = null;
                 if (!products.length) {
@@ -233,32 +609,23 @@ export const getRecommendations = async ({
                     if (prod?.category) {
                         const fallback = await fallbackCategoryChain(prod.category);
                         products = fallback.products;
-                        fallbackFrom = fallback.fallbackFrom
-                            ? `parent category: ${fallback.fallbackFrom}`
-                            : null;
+                        fallbackFrom = fallback.fallbackFrom ? `parent category: ${fallback.fallbackFrom}` : null;
                     }
                 }
 
                 if (!products.length) {
-                    products = await getTrending();
+                    products = await trendingProducts();
                     fallbackFrom = "trending products";
                 }
 
-                message = fallbackFrom
-                    ? `Frequently bought together (showing from ${fallbackFrom})`
-                    : "Frequently bought together";
+                message = fallbackFrom ? `Frequently bought together (showing from ${fallbackFrom})` : "Frequently bought together";
                 break;
             }
 
             case "alsoViewed": {
-                const viewed = await ProductViewLog.find({ userId })
-                    .sort({ createdAt: -1 })
-                    .limit(Number(limit))
-                    .populate("productId")
-                    .lean();
-                products = viewed
-                    .map((v) => v.productId)
-                    .filter((p) => p && p.isPublished);
+                const viewed = await ProductViewLog.find({ userId }).sort({ createdAt: -1 }).limit(limit).lean();
+                const viewedIds = viewed.map(v => v.productId).filter(Boolean);
+                products = await getProductsByIds(viewedIds, limit);
 
                 let fallbackFrom = null;
                 if (!products.length && productId) {
@@ -266,28 +633,21 @@ export const getRecommendations = async ({
                     if (prod?.category) {
                         const fallback = await fallbackCategoryChain(prod.category);
                         products = fallback.products;
-                        fallbackFrom = fallback.fallbackFrom
-                            ? `parent category: ${fallback.fallbackFrom}`
-                            : null;
+                        fallbackFrom = fallback.fallbackFrom ? `parent category: ${fallback.fallbackFrom}` : null;
                     }
                 }
 
                 if (!products.length) {
-                    products = await getTrending();
+                    products = await trendingProducts();
                     fallbackFrom = "trending products";
                 }
 
-                message = fallbackFrom
-                    ? `Also viewed (showing from ${fallbackFrom})`
-                    : "Also viewed by others";
+                message = fallbackFrom ? `Also viewed (showing from ${fallbackFrom})` : "Also viewed by others";
                 break;
             }
 
             case "skinType": {
-                const skinType = await SkinType.findOne({
-                    slug: skinTypeSlug,
-                    isDeleted: false
-                }).lean();
+                const skinType = await SkinType.findOne({ slug: skinTypeSlug, isDeleted: false }).lean();
                 if (!skinType) return { success: false, products: [], message: "Skin type not found" };
 
                 let fallbackFrom = null;
@@ -297,21 +657,19 @@ export const getRecommendations = async ({
                     if (cat) categoryIds = [cat._id];
                 }
 
-                products = await getSkinTypeProducts(skinType._id, categoryIds);
+                products = await getSkinTypeProducts(skinType._id, categoryIds, limit);
 
                 if (!products.length && categoryIds.length) {
-                    products = await getSkinTypeProducts(skinType._id);
+                    products = await getSkinTypeProducts(skinType._id, [], limit);
                     fallbackFrom = `skin type: ${skinType.name}`;
                 }
 
                 if (!products.length) {
-                    products = await getTrending();
+                    products = await trendingProducts();
                     fallbackFrom = "trending products";
                 }
 
-                message = fallbackFrom
-                    ? `Recommended for ${skinType.name} (showing from ${fallbackFrom})`
-                    : `Recommended for ${skinType.name}`;
+                message = fallbackFrom ? `Recommended for ${skinType.name} (showing from ${fallbackFrom})` : `Recommended for ${skinType.name}`;
                 break;
             }
 
@@ -319,14 +677,8 @@ export const getRecommendations = async ({
                 const cat = await Category.findOne({ slug: categorySlug }).lean();
                 if (!cat) return { success: false, products: [], message: "Category not found" };
 
-                products = await Product.find({
-                    category: cat._id,
-                    isDeleted: { $ne: true },
-                    isPublished: true
-                })
-                    .sort({ sales: -1 })
-                    .limit(Number(limit))
-                    .lean();
+                products = await Product.find({ category: cat._id, isDeleted: { $ne: true }, isPublished: true })
+                    .sort({ sales: -1 }).limit(limit).lean();
 
                 let fallbackFrom = null;
                 if (!products.length) {
@@ -336,25 +688,21 @@ export const getRecommendations = async ({
                 }
 
                 if (!products.length) {
-                    products = await getTrending();
+                    products = await trendingProducts();
                     fallbackFrom = "trending products";
                 }
 
-                message = fallbackFrom
-                    ? `Top selling (showing from ${fallbackFrom})`
-                    : `Top selling in ${cat.name}`;
+                message = fallbackFrom ? `Top selling (showing from ${fallbackFrom})` : `Top selling in ${cat.name}`;
                 break;
             }
 
             default: {
-                products = await getTrending();
+                products = await trendingProducts();
                 message = "Trending products";
             }
         }
 
-        // 3️⃣ Use helper to enrich & normalize all products
         const enrichedProducts = await enrichProductsUnified(products, promotions);
-
         return { success: true, products: enrichedProducts, message };
 
     } catch (err) {

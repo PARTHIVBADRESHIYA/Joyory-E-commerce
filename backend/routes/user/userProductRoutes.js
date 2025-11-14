@@ -4,7 +4,6 @@ import {
     getSingleProduct,
     getProductsByCategory,
     getTopSellingProducts,
-    getProductWithRelated,
     getTopCategories,
     getProductsBySkinType,
     getAllSkinTypes,
@@ -38,9 +37,6 @@ router.get("/category/:slug/products", getProductsByCategory);
 
 // ✅ Products by skin type (use a distinct prefix to avoid conflicts)
 router.get("/skintype/:slug", validate(productQuerySchema), getProductsBySkinType);
-
-// ✅ Related product info
-router.get("/top-sellers/:id", getProductWithRelated);
 
 // ✅ Single product details (dynamic routes last!)
 router.get(
