@@ -265,7 +265,7 @@ async function trackShipments() {
 // 🔹 Start cron job without blocking server
 export function startTrackingJob() {
     cron.schedule(
-        "* * * * *", // ✅ runs every 1 minute
+        "*/30 * * * *",
         () => {
             trackShipments().catch((err) =>
                 console.error("❌ Tracking error:", err.message)

@@ -307,6 +307,62 @@ export const uploadMedia = multer({
   },
 });
 
+
+// Define allowed MIME types first
+const imageMimeTypes = ["image/jpeg", "image/png", "image/webp"];
+const videoMimeTypes = [
+  "video/mp4",
+  "video/webm",
+  "video/ogg",
+  "video/quicktime", // .mov
+  "video/x-msvideo", // .avi
+  "video/x-matroska", // .mkv
+];
+
+export const uploadVideoWithThumbnail = multer({
+  storage: new CloudinaryStorage({
+    cloudinary,
+    params: async (req, file) => {
+      if (file.fieldname === "video") {
+        return {
+          folder: "videos",
+          resource_type: "video",
+          allowed_formats: ["mp4", "mov", "avi", "webm", "mkv"],
+          access_mode: "public",
+        };
+      } else if (file.fieldname === "thumbnail") {
+        return {
+          folder: "thumbnails",
+          resource_type: "image",
+          allowed_formats: ["jpg", "jpeg", "png", "webp"],
+          access_mode: "public",
+        };
+      }
+    },
+  }),
+
+  fileFilter: (req, file, cb) => {
+    if (file.fieldname === "video" && videoMimeTypes.includes(file.mimetype)) {
+      return cb(null, true);
+    }
+    if (file.fieldname === "thumbnail" && imageMimeTypes.includes(file.mimetype)) {
+      return cb(null, true);
+    }
+
+    return cb(
+      new multer.MulterError(
+        "LIMIT_UNEXPECTED_FILE",
+        `Invalid file type for ${file.fieldname}.`
+      )
+    );
+  },
+
+  limits: {
+    fileSize: 100 * 1024 * 1024, // max 100MB total
+    files: 2, // one video + one thumbnail
+  },
+});
+
 // -------------------- Exported Uploaders --------------------
 export const uploadEcard = makeCloudinaryPdfUploader("ecards", 1);
 export const uploadProduct = makeCloudinaryUploader('products', 25);

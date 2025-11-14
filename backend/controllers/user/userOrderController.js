@@ -7,6 +7,23 @@ import { calculateCartSummary } from "../../middlewares/utils/cartPricingHelper.
 import axios from "axios";
 import { getShiprocketToken, createShiprocketOrder } from "../../middlewares/services/shiprocket.js"; // helper to fetch token
 
+
+// 🔄 Convert Shiprocket numeric status → human readable
+const shiprocketStatusMap = {
+  0: "Not Picked",
+  1: "Pickup Scheduled",
+  2: "Pickup Error",
+  3: "Picked Up",
+  4: "In Transit",
+  5: "Out For Delivery",
+  6: "Delivered",
+  7: "Cancelled",
+  8: "RTO Initiated",
+  9: "RTO In Transit",
+  10: "RTO Delivered"
+};
+
+
 // helper to normalize statuses
 function mapShipmentStatus(status) {
   if (!status) return "Pending";
@@ -495,21 +512,23 @@ export const getOrderTracking = async (req, res) => {
     const order = await Order.findById(id).populate("products.productId");
     if (!order) return res.status(404).json({ message: "Order not found" });
 
-    // --- Build timeline from trackingHistory
-    const timeline = (order.trackingHistory || []).map(t => ({
-      status: t.status,
-      timestamp: t.timestamp,
-      location: t.location || null,
-    }));
+    // Timeline sorted + deduplicated
+    const timeline = [];
 
-    // Include shipment as the last step
-    if (order.shipment?.status) {
-      timeline.push({
-        status: order.shipment.status,
-        timestamp: order.shipment.assignedAt || order.updatedAt || null,
-        location: order.shipment.courier_name || null,
+    (order.trackingHistory || [])
+      .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+      .forEach(entry => {
+        const cleanStatus = shiprocketStatusMap[entry.status] || entry.status;
+        const last = timeline[timeline.length - 1];
+
+        if (!last || last.status !== cleanStatus) {
+          timeline.push({
+            status: cleanStatus,
+            timestamp: entry.timestamp,
+            location: entry.location || null
+          });
+        }
       });
-    }
 
     // --- Live Shiprocket tracking (optional) ---
     let liveTracking = null;
@@ -527,6 +546,14 @@ export const getOrderTracking = async (req, res) => {
       }
     }
 
+    // Convert live numeric status to readable text
+    const rawLiveStatus = liveTracking?.tracking_data?.shipment_status;
+    const mappedLiveStatus =
+      shiprocketStatusMap[rawLiveStatus] ||
+      rawLiveStatus ||
+      order.shipment?.status ||
+      "Created";
+
     res.json({
       _id: order._id, // ✅ MongoDB ObjectId
       orderId: order.orderId,
@@ -536,8 +563,7 @@ export const getOrderTracking = async (req, res) => {
         awb_code: order.shipment?.awb_code || null,
         courier_id: order.shipment?.courier_id || null,
         courier_name: liveTracking?.tracking_data?.courier_name || order.shipment?.courier_name || null,
-        current_status:
-          liveTracking?.tracking_data?.shipment_status || order.shipment?.status || "Created",
+        current_status: mappedLiveStatus,
         tracking_url: order.shipment?.tracking_url || null,
       },
       products: order.products.map((item) => ({

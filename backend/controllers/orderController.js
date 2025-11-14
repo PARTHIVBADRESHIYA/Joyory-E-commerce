@@ -701,21 +701,21 @@ export const getOrderById = async (req, res) => {
 
         if (!order) return res.status(404).json({ message: "Order not found" });
 
-        // 🧭 Timeline history (status progress)
-        const timeline = (order.trackingHistory || []).map(t => ({
-            status: t.status,
-            date: t.timestamp,
-            location: t.location || "",
-        }));
+        // Timeline sorted + deduplicated
+        const timeline = [];
 
-        // Include shipment status if available
-        if (order.shipment?.status) {
-            timeline.push({
-                status: order.shipment.status,
-                date: order.shipment.assignedAt || null,
-                location: order.shipment.courier_name || "",
+        (order.trackingHistory || [])
+            .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+            .forEach(entry => {
+                const last = timeline[timeline.length - 1];
+                if (!last || last.status !== entry.status) {
+                    timeline.push({
+                        status: entry.status,
+                        timestamp: entry.timestamp,
+                        location: entry.location || null
+                    });
+                }
             });
-        }
 
         // 🧾 Order summary
         const summary = {

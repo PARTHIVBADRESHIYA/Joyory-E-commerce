@@ -36,24 +36,6 @@ export const verifyOrderOwnership = async (req, res, next) => {
     }
 };
 
-// export const authenticateUser = async (req, res, next) => {
-//     try {
-//         const token = req.headers.authorization?.split(' ')[1];
-//         if (!token) return res.status(401).json({ message: 'Unauthorized' });
-
-//         const decoded = jwt.verify(token, JWT_SECRET);
-//         const user = await User.findById(decoded.id);
-
-//         if (!user || user.role !== 'user') {
-//             return res.status(403).json({ message: 'Forbidden: Not a user' });
-//         }
-
-//         req.user = user;
-//         next();
-//     } catch (err) {
-//         res.status(401).json({ message: 'Invalid Token', error: err.message });
-//     }
-// };
 export const authenticateUser = async (req, res, next) => {
     try {
         // ✅ Read token from cookie
@@ -77,9 +59,7 @@ export const authenticateUser = async (req, res, next) => {
         return res.status(401).json({ message: 'Invalid token', error: err.message });
     }
 };
-/* ===============================
-   SELLER AUTHENTICATION
-================================ */
+
 export const authenticateSeller = async (req, res, next) => {
     try {
         const token = req.headers.authorization?.split(" ")[1];
@@ -235,30 +215,6 @@ export const verifyRoleAdmin = async (req, res, next) => {
     }
 };
 
-// export const optionalAuth = async (req, res, next) => {
-//     try {
-//         // Read JWT from cookie (e.g. "token" cookie)
-//         const token = req.cookies?.token;
-//         if (!token) {
-//             return next(); // No cookie → guest
-//         }
-
-//         // Verify JWT
-//         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-//         if (!decoded?.id) {
-//             return next(); // Invalid payload → guest
-//         }
-
-//         // Find user in DB
-//         const user = await User.findById(decoded.id).select("-password");
-//         if (user) {
-//             req.user = user; // attach user to request
-//         }
-//     } catch (err) {
-//         console.warn("⚠️ Invalid or expired cookie token, continuing as guest");
-//     }
-//     next();
-// };
 export const optionalAuth = async (req, res, next) => {
     try {
         const token = req.cookies?.token;
@@ -298,33 +254,6 @@ export const guestSession = (req, res, next) => {
         next();
     }
 };
-
-
-
-// export const guestSession = (req, res, next) => {
-//     try {
-//         if (req.user?._id) return next();
-
-//         req.guestId = req.cookies?.guestId || req.header("x-guest-id") || new mongoose.Types.ObjectId().toString();
-//         res.setHeader("x-guest-id", req.guestId);
-
-//         // Always link guestCart directly to session
-//         req.session.guestCart = req.session.guestCart || [];
-//         Object.defineProperty(req, "guestCart", {
-//             get: () => req.session.guestCart,
-//             set: (v) => {
-//                 req.session.guestCart = v;
-//                 req.session.save(() => { }); // auto-save
-//             },
-//             configurable: true,
-//         });
-
-//         next();
-//     } catch (err) {
-//         console.error("guestSession middleware error:", err);
-//         next();
-//     }
-// };
 
 export const protect = authenticateUser;
 export const isAdmin = verifyAdminOrTeamMember;
