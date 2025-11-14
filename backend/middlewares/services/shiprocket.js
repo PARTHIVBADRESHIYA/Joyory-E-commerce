@@ -378,35 +378,3 @@ export async function validatePincodeServiceability(pincode, cod = true) {
         throw new Error("Failed to validate pincode via Shiprocket");
     }
 }
-
-
-
-
-
-
-
-
-
-// export async function retryFailedShipments() {
-//     const failedOrders = await Order.find({
-//         "shipment.status": {
-//             $in: ["Shipment Creation Failed", "Created (AWB not assigned)", "Awaiting Pickup"]
-//         }
-//     });
-
-//     for (const order of failedOrders) {
-//         try {
-//             console.log(`🔁 Retrying shipment for order ${order._id}`);
-//             const res = await createShiprocketOrder(order);
-
-//             console.log("✅ Retried successfully:", res.shipmentDetails);
-
-//             // Update order with latest shipment info
-//             order.shipment = res.shipmentDetails;
-//             order.orderStatus = res.shipmentDetails.status;
-//             await order.save();
-//         } catch (err) {
-//             console.error("🚨 Retry failed for order", order._id, ":", err.response?.data || err.message);
-//         }
-//     }
-// }
