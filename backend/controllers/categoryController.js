@@ -67,75 +67,6 @@ const resolveBrandIds = async (brandInputs) => {
 };
 
 /* ---------------------- Controllers ---------------------- */
-
-// Create category
-// export const addCategory = async (req, res) => {
-//     try {
-//         const { name, description } = req.body;
-//         let { parentId } = req.body;
-
-//         if (!name) return res.status(400).json({ message: 'Name required' });
-
-//         // ✅ Normalize brand inputs (accepts: brand OR brands)
-//         let brandInputs = req.body.brands || req.body.brand || req.body['brands[]'];
-//         if (brandInputs && !Array.isArray(brandInputs)) {
-//             brandInputs = [brandInputs];
-//         }
-
-//         // Check duplicate category name
-//         const existingCategory = await Category.findOne({ name: { $regex: `^${name}$`, $options: 'i' } });
-//         if (existingCategory) {
-//             return res.status(400).json({ message: 'Category name already exists' });
-//         }
-
-//         // Resolve parent & ancestors
-//         let parent = null;
-//         let ancestors = [];
-//         if (parentId) {
-//             const resolvedId = await resolveParentId(parentId);
-//             if (!resolvedId) return res.status(400).json({ message: 'Parent category not found' });
-
-//             parent = await Category.findById(resolvedId);
-//             ancestors = [...(parent.ancestors || []), parent._id];
-//         }
-
-//         // ✅ Resolve brands
-//         const brandIds = await resolveBrandIds(brandInputs);
-//         if (brandInputs && brandIds.length === 0) {
-//             return res.status(400).json({ message: `No valid brands found for input` });
-//         }
-
-//         const slug = await generateUniqueSlug(name);
-
-//         // Handle multiple file uploads
-//         const bannerImages = (req.files?.bannerImage || []).slice(0, 5).map(f => f.path);
-//         const thumbnailImages = (req.files?.thumbnailImage || []).slice(0, 5).map(f => f.path);
-
-//         const category = new Category({
-//             name,
-//             slug,
-//             description,
-//             bannerImage: bannerImages,
-//             thumbnailImage: thumbnailImages,
-//             parent: parent ? parent._id : null,
-//             ancestors,
-//             brands: brandIds
-//         });
-
-//         await category.save();
-
-//         const fullCategory = await Category.findById(category._id)
-//             .populate("brands", "name slug")
-//             .populate("parent", "name slug");
-
-//         res.status(201).json({ message: 'Category created', category: fullCategory });
-
-//     } catch (err) {
-//         console.error(err);
-//         res.status(500).json({ message: err.message });
-//     }
-// };
-
 // Create category
 export const addCategory = async (req, res) => {
     try {
@@ -200,22 +131,6 @@ export const addCategory = async (req, res) => {
     }
 };
 
-
-// // Get all categories
-// export const getCategories = async (req, res) => {
-//     try {
-//         const categories = await Category.find()
-//             .sort({ name: 1 })
-//             .populate("brands", "name slug")
-//             .populate("parent", "name slug");
-
-//         res.json(categories);
-//     } catch (err) {
-//         res.status(500).json({ message: err.message });
-//     }
-// };
-
-
 export const getCategories = async (req, res) => {
     try {
         const categories = await Category.find()
@@ -229,28 +144,6 @@ export const getCategories = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
-
-
-// // Get single category by ID
-// export const getCategoryById = async (req, res) => {
-//     try {
-//         const { id } = req.params;
-//         if (!mongoose.Types.ObjectId.isValid(id)) {
-//             return res.status(400).json({ message: "Invalid category ID" });
-//         }
-
-//         const category = await Category.findById(id)
-//             .populate("brands", "name slug")
-//             .populate("parent", "name slug");
-
-//         if (!category) return res.status(404).json({ message: "Category not found" });
-
-//         res.json({ category });
-//     } catch (err) {
-//         console.error(err);
-//         res.status(500).json({ message: err.message });
-//     }
-// };
 
 export const getCategoryById = async (req, res) => {
     try {
@@ -272,96 +165,6 @@ export const getCategoryById = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
-
-
-
-// Update category
-// export const updateCategory = async (req, res) => {
-//     try {
-//         const { id } = req.params;
-//         const { name, description, parentId } = req.body;
-
-//         const category = await Category.findById(id);
-//         if (!category) return res.status(404).json({ message: 'Category not found' });
-
-//         // Check duplicate name
-//         if (name && name.toLowerCase() !== category.name.toLowerCase()) {
-//             const duplicate = await Category.findOne({
-//                 name: { $regex: `^${name}$`, $options: 'i' },
-//                 _id: { $ne: id }
-//             });
-//             if (duplicate) return res.status(400).json({ message: 'Category name already exists' });
-//         }
-
-//         // Handle parent change
-//         if (parentId && parentId !== String(category.parent)) {
-//             const resolvedId = await resolveParentId(parentId);
-//             if (!resolvedId) return res.status(400).json({ message: 'New parent not found' });
-
-//             const descendants = await Category.find({ ancestors: category._id }, '_id').lean();
-//             if (descendants.some(d => String(d._id) === String(resolvedId))) {
-//                 return res.status(400).json({ message: 'Invalid parent: would create cycle' });
-//             }
-
-//             const newParent = await Category.findById(resolvedId);
-//             category.parent = newParent._id;
-//             category.ancestors = [...(newParent.ancestors || []), newParent._id];
-
-//             // Update all descendants recursively
-//             const updateDescendants = async (catId, parentAncestors) => {
-//                 const children = await Category.find({ parent: catId });
-//                 for (const child of children) {
-//                     child.ancestors = [...parentAncestors, catId];
-//                     await child.save();
-//                     await updateDescendants(child._id, child.ancestors);
-//                 }
-//             };
-//             await updateDescendants(category._id, category.ancestors);
-//         }
-
-//         // ✅ Normalize brand inputs
-//         let brandInputs = req.body.brands || req.body.brand || req.body['brands[]'];
-//         if (brandInputs && !Array.isArray(brandInputs)) {
-//             brandInputs = [brandInputs];
-//         }
-
-//         // Update brands if provided
-//         if (brandInputs) {
-//             const brandIds = await resolveBrandIds(brandInputs);
-//             if (brandIds.length === 0) return res.status(400).json({ message: `No valid brands found for input` });
-//             category.brands = brandIds;
-//         }
-
-//         // Update name + slug
-//         if (name && name !== category.name) {
-//             category.name = name;
-//             category.slug = await generateUniqueSlug(name);
-//         }
-
-//         // Update description
-//         if (description !== undefined) category.description = description;
-
-//         // Update images
-//         if (req.files?.bannerImage) {
-//             category.bannerImage = req.files.bannerImage.slice(0, 5).map(f => f.path);
-//         }
-//         if (req.files?.thumbnailImage) {
-//             category.thumbnailImage = req.files.thumbnailImage.slice(0, 5).map(f => f.path);
-//         }
-
-//         await category.save();
-
-//         const fullCategory = await Category.findById(category._id)
-//             .populate("brands", "name slug")
-//             .populate("parent", "name slug");
-
-//         res.json({ message: 'Category updated', category: fullCategory });
-
-//     } catch (err) {
-//         console.error(err);
-//         res.status(500).json({ message: err.message });
-//     }
-// };
 
 // Update category
 export const updateCategory = async (req, res) => {

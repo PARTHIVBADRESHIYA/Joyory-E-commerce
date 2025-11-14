@@ -1,7 +1,6 @@
 // routes/user/userProductRoutes.js
 import express from "express";
 import {
-    getAllFilteredProducts,
     getSingleProduct,
     getProductsByCategory,
     getTopSellingProducts,
@@ -25,15 +24,6 @@ import { validate } from "../../middlewares/validations/validate.js";
 import { protect } from "../../middlewares/authMiddleware.js";
 
 const router = express.Router();
-
-// ✅ Filtered product list
-router.get(
-    "/",
-    productListRateLimiter,
-
-    validate(productQuerySchema),
-    getAllFilteredProducts
-);
 
 // ✅ Filter metadata
 router.get("/filters", getFilterMetadata);

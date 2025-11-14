@@ -27,7 +27,7 @@ const categorySchema = new mongoose.Schema({
         }
     ],
 
-    image : { type: String, default: null },
+    image: [{ type: String }],
 
     // 👇 New: define attributes this category supports
     attributes: [
