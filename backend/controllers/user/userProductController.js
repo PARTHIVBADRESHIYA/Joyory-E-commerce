@@ -1077,6 +1077,8 @@
 //     }
 // };
 
+
+
 import Product from '../../models/Product.js';
 import ProductViewLog from "../../models/ProductViewLog.js";
 import Promotion from '../../models/Promotion.js';
@@ -1090,7 +1092,7 @@ import { getDescendantCategoryIds } from '../../middlewares/utils/categoryUtils.
 import { getRecommendations } from '../../middlewares/utils/recommendationService.js';
 import redis from '../../middlewares/utils/redis.js';
 
-import { enrichProductWithStockAndOptions, enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
+import { enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
 import mongoose from 'mongoose';
 
 

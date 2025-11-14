@@ -298,6 +298,7 @@
 
 
 
+
 // helpers/productHelpers.js
 import { productMatchesPromo } from "../../controllers/user/userPromotionController.js";
 import Product from "../../models/Product.js";
@@ -307,9 +308,9 @@ import { calculateVariantPrices } from "../../middlewares/services/promotionHelp
 import { getPseudoVariant } from "../utils/recommendationService.js";
 import redis from "../utils/redis.js";
 
-// Cache TTLs
-const PRODUCT_PROMO_TTL = 300; // 5 minutes
-const ENRICHED_PRODUCT_TTL = 300; // 5 minutes
+// Cache TTLs (shorter to reflect promo expiry quickly)
+const PRODUCT_PROMO_TTL = 5; // 5 seconds for promo freshness
+const ENRICHED_PRODUCT_TTL = 5; // 5 seconds to auto-refresh after expiry
 
 export const enrichProductWithStockAndOptions = (product, promotions = []) => {
     const { shadeOptions, colorOptions } = buildOptions(product);
@@ -440,7 +441,6 @@ export const enrichProductsUnified = async (products, promotions = [], options =
     const list = Array.isArray(products) ? products : [products];
     const productIds = list.map(p => p._id.toString());
 
-    // 🔹 Check Redis cache first
     const cacheKeys = productIds.map(id => `enrichedProduct:${id}`);
     const cachedProducts = await redis.mget(cacheKeys);
     const enrichedList = [];
@@ -455,7 +455,6 @@ export const enrichProductsUnified = async (products, promotions = [], options =
     }
 
     if (missingProducts.length > 0) {
-        // 🔹 Batch review aggregation
         const reviewStats = await Review.aggregate([
             { $match: { productId: { $in: missingProducts.map(p => p._id) }, status: "Active" } },
             { $group: { _id: "$productId", avg: { $avg: "$rating" }, count: { $sum: 1 } } }
@@ -473,7 +472,6 @@ export const enrichProductsUnified = async (products, promotions = [], options =
                 normalizedVariants = calculateVariantPrices([getPseudoVariant(enriched)], enriched, promotions);
             }
 
-            // 🔹 Ensure promo logic consistency
             normalizedVariants = normalizedVariants.map(v => {
                 const variantMrp = Number(v.originalPrice ?? enriched.mrp ?? 0);
                 const staticPrice = Number(v.discountedPrice ?? v.price ?? variantMrp);
@@ -543,7 +541,7 @@ export const enrichProductsUnified = async (products, promotions = [], options =
                 selectedVariant: displayVariant,
             };
 
-            // 🔹 Cache individual product
+            // 🔹 Short TTL to reflect promo changes immediately
             await redis.set(`enrichedProduct:${p._id}`, JSON.stringify(finalEnriched), "EX", ENRICHED_PRODUCT_TTL);
             enrichedList.push(finalEnriched);
         }
