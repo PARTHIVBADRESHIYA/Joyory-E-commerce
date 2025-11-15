@@ -29,6 +29,9 @@ const categorySchema = new mongoose.Schema({
 
     image: [{ type: String }],
 
+    isTopCategory: { type: Boolean, default: false },
+
+
     // 👇 New: define attributes this category supports
     attributes: [
         {

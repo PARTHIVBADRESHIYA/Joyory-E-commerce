@@ -20,7 +20,6 @@ import {
     productDetailQuerySchema,
 } from "../../middlewares/validations/productQueryValidation.js";
 import { validate } from "../../middlewares/validations/validate.js";
-import { protect } from "../../middlewares/authMiddleware.js";
 
 const router = express.Router();
 

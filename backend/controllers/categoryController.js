@@ -264,3 +264,35 @@ export const deleteCategory = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 };
+
+export const setTopCategories = async (req, res) => {
+    try {
+        let { categoryIds } = req.body;
+
+        if (!Array.isArray(categoryIds)) {
+            return res.status(400).json({ message: "categoryIds must be an array" });
+        }
+
+        // 1️⃣ Remove top flag from all
+        await Category.updateMany({}, { isTopCategory: false });
+
+        // 2️⃣ Add top flag to selected categories
+        await Category.updateMany(
+            { _id: { $in: categoryIds } },
+            { isTopCategory: true }
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: "Top categories updated successfully",
+        });
+
+    } catch (err) {
+        console.error("🔥 Failed to update top categories:", err);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to update top categories",
+            error: err.message
+        });
+    }
+};

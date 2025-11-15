@@ -1761,83 +1761,106 @@ export const getTopSellingProducts = async (req, res) => {
     }
 };
 
+// export const getTopCategories = async (req, res) => {
+//     try {
+//         const BASE_SLUGS = ["lips", "eyes", "face", "skin"];
+
+//         // 1️⃣ Base categories
+//         const baseCategories = await Category.find({
+//             slug: { $in: BASE_SLUGS }
+//         })
+//             .select("name slug thumbnailImage")
+//             .lean();
+
+//         // 2️⃣ Aggregate top-selling categories
+//         const topFromOrders = await Order.aggregate([
+//             { $unwind: "$items" },
+//             {
+//                 $lookup: {
+//                     from: "products",
+//                     localField: "items.productId",
+//                     foreignField: "_id",
+//                     as: "product"
+//                 }
+//             },
+//             { $unwind: "$product" },
+//             {
+//                 $group: {
+//                     _id: "$product.category",
+//                     totalOrders: { $sum: "$items.qty" }
+//                 }
+//             },
+//             { $sort: { totalOrders: -1 } },
+//             { $limit: 10 }
+//         ]);
+
+//         const orderedCategoryIds = topFromOrders.map(o => o._id);
+
+//         // 3️⃣ Get category docs
+//         const orderedCategories = await Category.find({
+//             _id: { $in: orderedCategoryIds }
+//         })
+//             .select("name slug thumbnailImage")
+//             .lean();
+
+//         // 4️⃣ Merge
+//         const mergedMap = new Map();
+
+//         baseCategories.forEach(c =>
+//             mergedMap.set(c.slug, {
+//                 _id: c._id,
+//                 name: c.name,
+//                 slug: c.slug,
+//                 image: c.thumbnailImage || null,
+//                 _sortValue: 0
+//             })
+//         );
+
+//         orderedCategories.forEach(c => {
+//             const totalOrders =
+//                 topFromOrders.find(o => String(o._id) === String(c._id))?.totalOrders || 0;
+
+//             mergedMap.set(c.slug, {
+//                 _id: c._id,
+//                 name: c.name,
+//                 slug: c.slug,
+//                 image: c.thumbnailImage || null,
+//                 _sortValue: totalOrders
+//             });
+//         });
+
+//         // 5️⃣ Sort & limit
+//         const result = Array.from(mergedMap.values())
+//             .sort((a, b) => b._sortValue - a._sortValue)
+//             .slice(0, 6)
+//             .map(({ _sortValue, ...rest }) => rest);
+
+//         return res.status(200).json({
+//             success: true,
+//             categories: result
+//         });
+
+//     } catch (err) {
+//         console.error("🔥 Failed to fetch top categories:", err);
+//         return res.status(500).json({
+//             success: false,
+//             message: "Failed to fetch top categories",
+//             error: err.message
+//         });
+//     }
+// };
 export const getTopCategories = async (req, res) => {
     try {
-        const BASE_SLUGS = ["lips", "eyes", "face", "skin"];
-
-        // 1️⃣ Base categories
-        const baseCategories = await Category.find({
-            slug: { $in: BASE_SLUGS }
+        const categories = await Category.find({
+            isTopCategory: true,
+            isActive: true
         })
-            .select("name slug thumbnailImage")
+            .select("name slug thumbnailImage image")
             .lean();
-
-        // 2️⃣ Aggregate top-selling categories
-        const topFromOrders = await Order.aggregate([
-            { $unwind: "$items" },
-            {
-                $lookup: {
-                    from: "products",
-                    localField: "items.productId",
-                    foreignField: "_id",
-                    as: "product"
-                }
-            },
-            { $unwind: "$product" },
-            {
-                $group: {
-                    _id: "$product.category",
-                    totalOrders: { $sum: "$items.qty" }
-                }
-            },
-            { $sort: { totalOrders: -1 } },
-            { $limit: 10 }
-        ]);
-
-        const orderedCategoryIds = topFromOrders.map(o => o._id);
-
-        // 3️⃣ Get category docs
-        const orderedCategories = await Category.find({
-            _id: { $in: orderedCategoryIds }
-        })
-            .select("name slug thumbnailImage")
-            .lean();
-
-        // 4️⃣ Merge
-        const mergedMap = new Map();
-
-        baseCategories.forEach(c =>
-            mergedMap.set(c.slug, {
-                _id: c._id,
-                name: c.name,
-                slug: c.slug,
-                image: c.thumbnailImage || null,
-                _sortValue: 0
-            })
-        );
-
-        orderedCategories.forEach(c => {
-            const totalOrders =
-                topFromOrders.find(o => String(o._id) === String(c._id))?.totalOrders || 0;
-
-            mergedMap.set(c.slug, {
-                _id: c._id,
-                name: c.name,
-                slug: c.slug,
-                image: c.thumbnailImage || null,
-                _sortValue: totalOrders
-            });
-        });
-
-        // 5️⃣ Sort & limit
-        const result = Array.from(mergedMap.values())
-            .sort((a, b) => b._sortValue - a._sortValue)
-            .slice(0, 6)
-            .map(({ _sortValue, ...rest }) => rest);
 
         return res.status(200).json({
             success: true,
-            categories: result
+            categories
         });
 
     } catch (err) {

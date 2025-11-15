@@ -5,18 +5,20 @@ import {
     getCategoryById,
     getCategories,
     updateCategory,
-    deleteCategory
+    deleteCategory,
+    setTopCategories
 } from '../controllers/categoryController.js';
 import { verifyAdminOrTeamMember } from '../middlewares/authMiddleware.js';
 import { uploadCategory } from '../middlewares/upload.js';
 
 const router = express.Router();
 
+router.post('/top', verifyAdminOrTeamMember, setTopCategories);
 // Add category with banner + thumbnail upload
 router.post(
     '/',
     verifyAdminOrTeamMember,
-    uploadCategory.fields([
+    uploadCategory.fields([ 
         { name: 'bannerImage', maxCount: 5 },
         { name: 'thumbnailImage', maxCount: 5 },
         { name: 'image', maxCount: 1 }
@@ -25,6 +27,7 @@ router.post(
 );
 
 router.get('/', verifyAdminOrTeamMember, getCategories);
+
 
 router.get('/:id', verifyAdminOrTeamMember, getCategoryById);
 // Update category (optional banner image update)
