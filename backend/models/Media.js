@@ -7,6 +7,14 @@ const mediaSchema = new mongoose.Schema(
         url: { type: String, required: true },
         publicId: { type: String, required: true },
         uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Admin" },
+
+        // ⭐ NEW FIELDS
+        title: { type: String, default: null },
+        description: { type: String, default: null },
+
+        // ⭐ Dynamic button (Shop Now, Learn More, Buy Now...)
+        buttonText: { type: String, default: null },
+        buttonLink: { type: String, default: null }
     },
     { timestamps: true }
 );

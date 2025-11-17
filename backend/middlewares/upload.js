@@ -302,7 +302,7 @@ export const uploadMedia = multer({
     cb(null, true);
   },
   limits: {
-    fileSize: 100 * 1024 * 1024, // 100MB max (covers both image & video)
+    fileSize: 10 * 1024 * 1024, // 10MB max (covers both image & video)
     files: 5, // allow up to 5 files
   },
 });

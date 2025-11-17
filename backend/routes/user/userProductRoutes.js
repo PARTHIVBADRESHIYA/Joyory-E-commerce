@@ -1,6 +1,7 @@
 // routes/user/userProductRoutes.js
 import express from "express";
 import {
+    getAllProducts,
     getSingleProduct,
     getProductsByCategory,
     getTopSellingProducts,
@@ -25,6 +26,9 @@ const router = express.Router();
 
 // ✅ Filter metadata
 router.get("/filters", getFilterMetadata);
+
+// ✅ Product list (static routes first!)
+router.get("/all", productListRateLimiter, validate(productQuerySchema), getAllProducts);
 
 // ✅ Top sellers & top categories (static routes first!)
 router.get("/skin-types", getAllSkinTypes);
