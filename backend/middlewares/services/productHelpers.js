@@ -442,7 +442,9 @@ export const enrichProductsUnified = async (products, promotions = [], options =
     const productIds = list.map(p => p._id.toString());
 
     const cacheKeys = productIds.map(id => `enrichedProduct:${id}`);
-    const cachedProducts = await redis.mget(cacheKeys);
+    const cachedProducts = cacheKeys.length
+        ? await redis.mget(...cacheKeys)
+        : [];
     const enrichedList = [];
     const missingProducts = [];
 

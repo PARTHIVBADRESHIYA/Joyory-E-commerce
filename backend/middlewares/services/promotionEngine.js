@@ -331,7 +331,9 @@ export const applyPromotions = async (itemsInput, ctx = {}) => {
         const ids = itemsInput.map((i) => i.productId).filter(isObjectId);
 
         const productCacheKeys = ids.map((id) => `promoProduct:${id}`);
-        const cachedProducts = await redis.mget(productCacheKeys);
+        const cachedProducts = productCacheKeys.length
+            ? await redis.mget(...productCacheKeys)
+            : [];
 
         let dbProducts = [];
         let missingIds = [];
