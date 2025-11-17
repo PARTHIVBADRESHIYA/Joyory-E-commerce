@@ -618,6 +618,24 @@ export const getPromotionProducts = async (req, res) => {
         // 🔹 Base filter setup
         const baseMatch = { isPublished: true };
 
+
+        // 🔹 Apply promotionConfig filters
+        if (promo.promotionConfig) {
+            if (promo.promotionConfig.maxProductPrice) {
+                baseMatch.price = { $lte: promo.promotionConfig.maxProductPrice };
+            }
+            if (promo.promotionConfig.minProductPrice) {
+                baseMatch.price = {
+                    ...baseMatch.price,
+                    $gte: promo.promotionConfig.minProductPrice
+                };
+            }
+            if (promo.promotionConfig.minDiscount) {
+                baseMatch.discountPercent = { $gte: promo.promotionConfig.minDiscount };
+            }
+        }
+
+
         if (promo.scope === "category" && promo.categories?.length) {
             const catIds = promo.categories
                 .map(c => c?.category?._id ?? c)
