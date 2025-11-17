@@ -60,7 +60,7 @@ export const getInventoryItems = async (req, res) => {
             maxPrice,
             minQuantity,
             maxQuantity,
-            availability, 
+            availability,
             expiryFrom,
             expiryTo
         } = req.query;
@@ -96,7 +96,7 @@ export const getInventoryItems = async (req, res) => {
             // ✅ Product has variants
             if (Array.isArray(p.variants) && p.variants.length > 0) {
                 for (const v of p.variants) {
-                    
+
                     const stock = v.stock ?? 0;
                     const threshold = v.thresholdValue ?? 0;
 
@@ -126,6 +126,11 @@ export const getInventoryItems = async (req, res) => {
                         if (expiryTo && exp > new Date(expiryTo)) continue;
                     }
 
+                    const productExpiry = p.expiryDate
+                        ? p.expiryDate.toISOString().split("T")[0]
+                        : "N/A";
+
+
                     variantList.push({
                         productId: p._id,
                         category: p.category?.name || "N/A",
@@ -135,13 +140,13 @@ export const getInventoryItems = async (req, res) => {
                         sku: v.sku || "N/A",
                         stock,
                         thresholdValue: threshold,
-                        expiryDate: v.expiryDate ? v.expiryDate.toISOString().split("T")[0] : "N/A",
+                        expiryDate: productExpiry,
                         availability:
                             stock === 0
                                 ? "Out of stock"
                                 : stock <= threshold
-                                ? "Low stock"
-                                : "In-stock"
+                                    ? "Low stock"
+                                    : "In-stock"
                     });
                 }
             }
@@ -182,8 +187,8 @@ export const getInventoryItems = async (req, res) => {
                         stock === 0
                             ? "Out of stock"
                             : stock <= threshold
-                            ? "Low stock"
-                            : "In-stock"
+                                ? "Low stock"
+                                : "In-stock"
                 });
             }
         }

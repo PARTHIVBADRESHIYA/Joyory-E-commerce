@@ -1855,7 +1855,7 @@ export const getTopCategories = async (req, res) => {
             isTopCategory: true,
             isActive: true
         })
-            .select("name slug thumbnailImage image")
+            .select("name slug thumbnailImage")
             .lean();
 
         return res.status(200).json({

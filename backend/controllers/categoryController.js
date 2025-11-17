@@ -246,7 +246,6 @@ export const updateCategory = async (req, res) => {
     }
 };
 
-
 // Delete category
 export const deleteCategory = async (req, res) => {
     try {
