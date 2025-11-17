@@ -280,7 +280,7 @@ const orderSchema = new mongoose.Schema({
     date: Date,
     customerName: String,
 
-    status: { type: String, enum: ['Pending', 'Delivered', 'Cancelled', 'Completed'], default: 'Pending' },
+    // status: { type: String, enum: ['Pending', 'Delivered', 'Cancelled', 'Completed'], default: 'Pending' },
 
     orderType: { type: String, enum: ['COD', 'Online', 'Credit card'], default: null },
     isDraft: { type: Boolean, default: true },

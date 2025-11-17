@@ -145,6 +145,7 @@ function mapShipmentStatus(status) {
 //     });
 //   }
 // };
+
 export const getUserOrders = async (req, res) => {
   try {
     // ✅ Fetch all user orders sorted by latest first
@@ -566,15 +567,43 @@ export const getOrderTracking = async (req, res) => {
         current_status: mappedLiveStatus,
         tracking_url: order.shipment?.tracking_url || null,
       },
-      products: order.products.map((item) => ({
-        productId: item.productId?._id,
-        name: item.productId?.name,
-        variant: item.productId?.variant || null,
-        price: item.price,
-        quantity: item.quantity,
-        image: item.productId?.images?.[0] || null,
-        brand: item.productId?.brand || null,
-      })),
+      products: order.products.map(item => {
+        const product = item.productId || {};
+
+        // Detect variant like getUserOrders
+        const variantName =
+          item.variant ||
+          product?.variants?.find(v => String(v._id) === String(item.variantId))
+            ?.shadeName ||
+          null;
+
+        // Variant-level image if exists
+        const variantImage =
+          product?.variants?.find(v => String(v._id) === String(item.variantId))
+            ?.image ||
+          null;
+
+        return {
+          productId: product._id,
+          name: product.name || item.name || "Unknown Product",
+
+          // ✔ final variant same as getUserOrders
+          variant: variantName,
+
+          // ✔ detect image priority
+          image:
+            variantImage ||
+            product.images?.[0] ||
+            item.image ||
+            "https://cdn-icons-png.flaticon.com/512/679/679922.png",
+
+          brand: product.brand || null,
+          price: item.price,
+          quantity: item.quantity,
+          total: item.price * item.quantity
+        };
+      }),
+
       amount: order.amount,
       payment: {
         transactionId: order.transactionId,

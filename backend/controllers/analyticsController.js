@@ -232,23 +232,1166 @@ const calculateProductRevenue = order => {
 // };
 
 
-// Regex for status detection
-const deliveredRegex = /delivered|completed/i;
-const cancelRegex = /cancel/i;
+// // Regex for status detection
+// const deliveredRegex = /delivered|completed/i;
+// const cancelRegex = /cancel/i;
 
-// Calculate growth
-const calcGrowth = (current, previous = 0) => {
-    if (previous === 0 && current === 0)
-        return { value: 0, changePercent: 0, trend: "neutral" };
+// // Calculate growth
+// const calcGrowth = (current, previous = 0) => {
+//     if (previous === 0 && current === 0)
+//         return { value: 0, changePercent: 0, trend: "neutral" };
 
-    if (previous === 0)
-        return { value: current, changePercent: 100, trend: "up" };
+//     if (previous === 0)
+//         return { value: current, changePercent: 100, trend: "up" };
 
-    const percent = ((current - previous) / previous) * 100;
-    const trend = current > previous ? "up" : current < previous ? "down" : "neutral";
+//     const percent = ((current - previous) / previous) * 100;
+//     const trend = current > previous ? "up" : current < previous ? "down" : "neutral";
 
-    return { value: current, changePercent: Number(percent.toFixed(1)), trend };
+//     return { value: current, changePercent: Number(percent.toFixed(1)), trend };
+// };
+
+// export const getAnalyticsDashboard = async (req, res) => {
+//     try {
+//         const { range = "1m" } = req.query;
+
+//         const now = dayjs();
+//         const ranges = {
+//             "1d": { start: now.startOf("day"), end: now.endOf("day") },
+//             "7d": { start: now.subtract(7, "day").startOf("day"), end: now.endOf("day") },
+//             "1m": { start: now.subtract(1, "month").startOf("day"), end: now.endOf("day") },
+//             "1y": { start: now.subtract(1, "year").startOf("day"), end: now.endOf("day") },
+//             "5y": { start: now.subtract(5, "year").startOf("day"), end: now.endOf("day") },
+//         };
+
+//         const { start: currentStart, end: currentEnd } = ranges[range] || ranges["1m"];
+//         const periodMs = currentEnd.diff(currentStart);
+
+//         const prevStart = currentStart.subtract(periodMs, "ms");
+//         const prevEnd = currentStart.subtract(1, "ms");
+
+//         // ------------------------------
+//         // BASIC COUNTS
+//         // ------------------------------
+//         const [
+//             totalOrders,
+//             prevTotalOrders,
+//             refundOrders,
+//             prevRefundOrders,
+//             draftOrdersCount
+//         ] = await Promise.all([
+//             Order.countDocuments({ isDraft: false, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } }),
+//             Order.countDocuments({ isDraft: false, createdAt: { $gte: prevStart.toDate(), $lte: prevEnd.toDate() } }),
+
+//             Order.countDocuments({
+//                 isDraft: false,
+//                 "refund.status": "completed",
+//                 "refund.refundedAt": { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
+//             }),
+//             Order.countDocuments({
+//                 isDraft: false,
+//                 "refund.status": "completed",
+//                 "refund.refundedAt": { $gte: prevStart.toDate(), $lte: prevEnd.toDate() }
+//             }),
+
+//             Order.countDocuments({ isDraft: true })
+//         ]);
+
+//         // ------------------------------
+//         // COMPLETED / CANCELLED (trackingHistory)
+//         // ------------------------------
+//         const makeStatusAgg = (regex, start, end) => [
+//             { $match: { isDraft: false } },
+//             { $unwind: "$trackingHistory" },
+//             {
+//                 $match: {
+//                     "trackingHistory.status": regex,
+//                     "trackingHistory.timestamp": { $gte: start.toDate(), $lte: end.toDate() }
+//                 }
+//             },
+//             { $group: { _id: "$_id" } },
+//             { $count: "count" }
+//         ];
+
+//         const [
+//             completedAgg,
+//             prevCompletedAgg,
+//             cancelledAgg,
+//             prevCancelledAgg
+//         ] = await Promise.all([
+//             Order.aggregate(makeStatusAgg(deliveredRegex, currentStart, currentEnd)),
+//             Order.aggregate(makeStatusAgg(deliveredRegex, prevStart, prevEnd)),
+//             Order.aggregate(makeStatusAgg(cancelRegex, currentStart, currentEnd)),
+//             Order.aggregate(makeStatusAgg(cancelRegex, prevStart, prevEnd)),
+//         ]);
+
+//         const completedOrders = completedAgg?.[0]?.count || 0;
+//         const prevCompletedOrders = prevCompletedAgg?.[0]?.count || 0;
+
+//         const cancelledOrders = cancelledAgg?.[0]?.count || 0;
+//         const prevCancelledOrders = prevCancelledAgg?.[0]?.count || 0;
+
+//         // ------------------------------
+//         // ACTIVE ORDERS
+//         // ------------------------------
+//         const activeOrders = totalOrders - completedOrders - cancelledOrders - refundOrders;
+//         const prevActiveOrders = prevTotalOrders - prevCompletedOrders - prevCancelledOrders - prevRefundOrders;
+
+//         // ------------------------------
+//         // REFUND LOSS + PENDING REFUNDS
+//         // ------------------------------
+//         const refundSumAgg = await Order.aggregate([
+//             {
+//                 $match: {
+//                     isDraft: false,
+//                     "refund.status": "completed",
+//                     "refund.refundedAt": { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
+//                 }
+//             },
+//             { $group: { _id: null, total: { $sum: "$refund.amount" } } }
+//         ]);
+
+//         const totalRefundLoss = refundSumAgg?.[0]?.total || 0;
+
+//         const pendingRefundCount = await Order.countDocuments({
+//             isDraft: false,
+//             "refund.status": { $in: ["requested", "initiated", "processing"] }
+//         });
+
+//         // ------------------------------
+//         // CANCELLED LOSS (sum order.amount)
+//         // ------------------------------
+//         const cancelledLossAgg = await Order.aggregate([
+//             { $match: { isDraft: false } },
+//             { $unwind: "$trackingHistory" },
+//             {
+//                 $match: {
+//                     "trackingHistory.status": cancelRegex,
+//                     "trackingHistory.timestamp": { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
+//                 }
+//             },
+//             { $group: { _id: null, total: { $sum: "$amount" } } }
+//         ]);
+
+//         const totalCancelledLoss = cancelledLossAgg?.[0]?.total || 0;
+
+//         // ------------------------------
+//         // REVENUE AGGREGATION
+//         // ------------------------------
+//         const revenueAgg = await Order.aggregate([
+//             { $match: { isDraft: false, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
+//             { $unwind: "$trackingHistory" },
+//             { $match: { "trackingHistory.status": deliveredRegex } },
+//             { $unwind: "$products" },
+//             {
+//                 $addFields: {
+//                     "products.priceUsed": {
+//                         $ifNull: [
+//                             "$products.variant.discountedPrice",
+//                             "$products.price",
+//                             "$products.variant.displayPrice",
+//                             0
+//                         ]
+//                     }
+//                 }
+//             },
+//             {
+//                 $group: {
+//                     _id: "$_id",
+//                     orderAmount: { $first: "$amount" },
+//                     productTotal: { $sum: { $multiply: ["$products.quantity", "$products.priceUsed"] } },
+//                     discount: { $first: { $add: [{ $ifNull: ["$discountAmount", 0] }, { $ifNull: ["$buyerDiscountAmount", 0] }] } },
+//                     giftCard: { $first: { $ifNull: ["$giftCard.amount", 0] } }
+//                 }
+//             },
+//             {
+//                 $group: {
+//                     _id: null,
+//                     totalUserPaidRevenue: { $sum: "$orderAmount" },
+//                     totalCompanyProductRevenue: { $sum: "$productTotal" },
+//                     totalDiscountGiven: { $sum: "$discount" },
+//                     totalGiftCardRevenue: { $sum: "$giftCard" },
+//                     countOrders: { $sum: 1 }
+//                 }
+//             }
+//         ]);
+
+//         const revenue = revenueAgg?.[0] || {
+//             totalUserPaidRevenue: 0,
+//             totalCompanyProductRevenue: 0,
+//             totalDiscountGiven: 0,
+//             totalGiftCardRevenue: 0,
+//             countOrders: 0
+//         };
+
+//         // ------------------------------
+//         // CALCULATED KPIs
+//         // ------------------------------
+//         const netRevenue = revenue.totalUserPaidRevenue - totalRefundLoss;
+
+//         const completedCount = revenue.countOrders;
+//         const AOV = completedCount ? Number((revenue.totalUserPaidRevenue / completedCount).toFixed(2)) : 0;
+
+//         // repeat customer / unique customer
+//         const userAgg = await Order.aggregate([
+//             { $match: { isDraft: false, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
+//             { $unwind: "$trackingHistory" },
+//             { $match: { "trackingHistory.status": deliveredRegex } },
+//             { $group: { _id: "$user", orders: { $sum: 1 } } }
+//         ]);
+
+//         const uniqueCustomers = userAgg.length;
+//         const repeatCustomerCount = userAgg.filter(u => u.orders > 1).length;
+//         const AOC = uniqueCustomers ? Number((completedCount / uniqueCustomers).toFixed(2)) : 0;
+
+//         // ------------------------------
+//         // NEW USERS
+//         // ------------------------------
+//         const newUsersCount = await Order.distinct("user", {
+//             createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
+//         }).then(users => users.length);
+
+//         // ------------------------------
+//         // PAYMENT SPLIT
+//         // ------------------------------
+//         const paymentSplit = {};
+//         const paymentAgg = await Order.aggregate([
+//             { $match: { isDraft: false, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
+//             { $unwind: "$trackingHistory" },
+//             { $match: { "trackingHistory.status": deliveredRegex } },
+//             {
+//                 $group: {
+//                     _id: "$orderType",
+//                     count: { $sum: 1 },
+//                     revenue: { $sum: "$amount" }
+//                 }
+//             }
+//         ]);
+//         paymentAgg.forEach(p => {
+//             paymentSplit[p._id || "unknown"] = { count: p.count, revenue: p.revenue };
+//         });
+
+//         // ------------------------------
+//         // TOP PRODUCTS
+//         // ------------------------------
+//         const topProducts = await Order.aggregate([
+//             { $match: { isDraft: false, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
+//             { $unwind: "$trackingHistory" },
+//             { $match: { "trackingHistory.status": deliveredRegex } },
+//             { $unwind: "$products" },
+//             {
+//                 $group: {
+//                     _id: "$products.productId",
+//                     qtySold: { $sum: "$products.quantity" },
+//                     revenue: {
+//                         $sum: {
+//                             $multiply: ["$products.quantity", { $ifNull: ["$products.variant.discountedPrice", "$products.price"] }]
+//                         }
+//                     }
+//                 }
+//             },
+//             {
+//                 $lookup: {
+//                     from: Product.collection.name,
+//                     localField: "_id",
+//                     foreignField: "_id",
+//                     as: "product"
+//                 }
+//             },
+//             { $unwind: "$product" },
+//             { $sort: { qtySold: -1 } },
+//             { $limit: 10 }
+//         ]);
+
+//         // ------------------------------
+//         // TOP CATEGORIES
+//         // ------------------------------
+//         const topCategories = await Order.aggregate([
+//             { $match: { isDraft: false, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
+//             { $unwind: "$trackingHistory" },
+//             { $match: { "trackingHistory.status": deliveredRegex } },
+//             { $unwind: "$products" },
+//             {
+//                 $lookup: {
+//                     from: Product.collection.name,
+//                     localField: "products.productId",
+//                     foreignField: "_id",
+//                     as: "product"
+//                 }
+//             },
+//             { $unwind: "$product" },
+//             {
+//                 $group: {
+//                     _id: "$product.category",
+//                     sales: { $sum: "$products.quantity" }
+//                 }
+//             },
+//             {
+//                 $lookup: {
+//                     from: Category.collection.name,
+//                     localField: "_id",
+//                     foreignField: "_id",
+//                     as: "category"
+//                 }
+//             },
+//             { $unwind: "$category" },
+//             { $sort: { sales: -1 } },
+//             { $limit: 10 }
+//         ]);
+
+//         // ------------------------------
+//         // TOP BRANDS
+//         // ------------------------------
+//         const topBrands = await Order.aggregate([
+//             { $match: { isDraft: false, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
+//             { $unwind: "$trackingHistory" },
+//             { $match: { "trackingHistory.status": deliveredRegex } },
+//             { $unwind: "$products" },
+//             {
+//                 $lookup: {
+//                     from: Product.collection.name,
+//                     localField: "products.productId",
+//                     foreignField: "_id",
+//                     as: "product"
+//                 }
+//             },
+//             { $unwind: "$product" },
+//             {
+//                 $group: {
+//                     _id: "$product.brand",
+//                     sales: { $sum: "$products.quantity" }
+//                 }
+//             },
+//             {
+//                 $lookup: {
+//                     from: Brand.collection.name,
+//                     localField: "_id",
+//                     foreignField: "_id",
+//                     as: "brand"
+//                 }
+//             },
+//             { $unwind: "$brand" },
+//             { $sort: { sales: -1 } },
+//             { $limit: 10 }
+//         ]);
+
+//         // ------------------------------
+//         // STOCK ALERTS (auto generate)
+//         // ------------------------------
+//         const stockAlerts = await Product.find(
+//             { stock: { $lte: 6 } },
+//             { name: 1, stock: 1, price: 1 }
+//         ).sort({ stock: 1 });
+
+//         // ------------------------------
+//         // RECENT ORDERS
+//         // ------------------------------
+//         const recentOrders = await Order.find(
+//             { isDraft: false },
+//             { products: 1, amount: 1, orderId: 1, createdAt: 1, customerName: 1, orderType: 1, orderStatus: 1 , paymentStatus: 1}
+//         )
+//             .populate("products.productId", "name")
+//             .sort({ createdAt: -1 })
+//             .limit(10);
+
+//         const formattedOrders = recentOrders.map(o => ({
+//             productName: o.products?.[0]?.productId?.name || "N/A",
+//             orderId: o.orderId,
+//             date: dayjs(o.createdAt).format("MMM D, YYYY"),
+//             customerName: o.customerName || "Unknown",
+//             status: o.orderStatus,
+//             paymentStatus: o.paymentStatus,
+//             paymentMode: o.orderType,
+//             amount: o.amount
+//         }));
+
+//         // ------------------------------
+//         // CATEGORY TRENDS (based on sales)
+//         // ------------------------------
+//         const categoryTrends = await Order.aggregate([
+//             { $match: { isDraft: false, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
+//             { $unwind: "$trackingHistory" },
+//             { $match: { "trackingHistory.status": deliveredRegex } },
+//             { $unwind: "$products" },
+//             {
+//                 $lookup: {
+//                     from: Product.collection.name,
+//                     localField: "products.productId",
+//                     foreignField: "_id",
+//                     as: "product"
+//                 }
+//             },
+//             { $unwind: "$product" },
+//             {
+//                 $group: {
+//                     _id: "$product.category",
+//                     sales: { $sum: "$products.quantity" },
+//                     revenue: {
+//                         $sum: {
+//                             $multiply: ["$products.quantity", { $ifNull: ["$products.variant.discountedPrice", "$products.price"] }]
+//                         }
+//                     }
+//                 }
+//             },
+//             {
+//                 $lookup: {
+//                     from: Category.collection.name,
+//                     localField: "_id",
+//                     foreignField: "_id",
+//                     as: "category"
+//                 }
+//             },
+//             { $unwind: "$category" },
+//             {
+//                 $project: {
+//                     category: "$category.name",
+//                     sales: 1,
+//                     revenue: 1
+//                 }
+//             },
+//             { $sort: { sales: -1 } }
+//         ]);
+
+//         // ------------------------------
+//         // FINAL RESPONSE
+//         // ------------------------------
+//         res.json({
+//             success: true,
+//             summary: {
+//                 totalOrders: calcGrowth(totalOrders, prevTotalOrders),
+//                 completedOrders: calcGrowth(completedOrders, prevCompletedOrders),
+//                 activeOrders: calcGrowth(activeOrders, prevActiveOrders),
+//                 cancelledOrders: calcGrowth(cancelledOrders, prevCancelledOrders),
+//                 refundOrders: calcGrowth(refundOrders, prevRefundOrders),
+//                 draftOrders: { value: draftOrdersCount },
+
+//                 totalUserPaidRevenue: calcGrowth(revenue.totalUserPaidRevenue, 0),
+//                 totalCompanyRevenue: calcGrowth(revenue.totalCompanyProductRevenue, 0),
+//                 totalDiscountGiven: calcGrowth(revenue.totalDiscountGiven, 0),
+//                 totalGiftCardRevenue: calcGrowth(revenue.totalGiftCardRevenue, 0),
+
+//                 totalRefundLoss,
+//                 totalCancelledLoss,
+//                 netRevenue,
+//                 AOV,
+//                 AOC,
+//                 repeatCustomerCount,
+//                 uniqueCustomers,
+//                 pendingRefundCount,
+//                 paymentSplit,
+//                 conversionRate: null,
+//                 newUsersCount,
+//                 profitEstimation: null
+//             },
+
+//             revenueBreakdown: {
+//                 userPaid: revenue.totalUserPaidRevenue,
+//                 companyProductRevenue: revenue.totalCompanyProductRevenue,
+//                 discounts: revenue.totalDiscountGiven,
+//                 giftCard: revenue.totalGiftCardRevenue,
+//                 refunds: totalRefundLoss,
+//                 cancelledLoss: totalCancelledLoss,
+//                 netRevenue
+//             },
+
+//             topProducts,
+//             topCategories,
+//             topBrands,
+//             stockAlerts,
+//             recentOrders: formattedOrders,
+//             categoryTrends
+//         });
+
+//     } catch (err) {
+//         console.error("Dashboard error:", err);
+//         res.status(500).json({ success: false, message: "Server error" });
+//     }
+// };
+
+
+// --- ASSUMPTIONS ---
+// 1. The models (Order, Product, Category, Brand) and the calcGrowth function are available in the scope.
+// 2. I have added a placeholder for 'totalCostOfGoodsSold' in revenueAgg, assuming you will add 'products.variant.costPrice'
+//    to your schema later for true profit calculation. Currently, it defaults to 0.
+// 3. I removed the redundant and complex 'makeStatusAgg' which relied on 'trackingHistory' and replaced it with
+//    simple 'countDocuments' using the main 'orderStatus' field.
+// -------------------
+
+// Assuming calcGrowth function is defined here or imported:
+
+// --- ASSUMPTIONS ---
+// 1. The models (Order, Product, Category, Brand) and the calcGrowth function are available in the scope.
+// 2. I'm using the paymentStatus for refund counts as requested ("refund_initiated" and "refunded").
+// 3. Sales aggregation for Top lists now strictly uses the quantity and pricing data present in the *Order* document.
+// -------------------
+
+// Assuming calcGrowth function is defined here or imported:
+// --- Start of Updated Code Block ---
+
+// const calcGrowth = (current, previous) => {
+//     if (previous === 0) {
+//         return { value: current, changePercent: current > 0 ? 100 : 0, trend: current > 0 ? "up" : "neutral" };
+//     }
+//     const changePercent = ((current - previous) / previous) * 100;
+//     const trend = changePercent > 0 ? "up" : changePercent < 0 ? "down" : "neutral";
+//     return { value: current, changePercent: Number(changePercent.toFixed(2)), trend };
+// };
+
+// const deliveredStatus = "Delivered";
+// const cancelledStatus = "Cancelled";
+// const refundStatuses = ["refund_initiated", "refunded"];
+
+// export const getAnalyticsDashboard = async (req, res) => {
+//     try {
+//         const { range = "1m" } = req.query;
+
+//         const now = dayjs();
+//         const ranges = {
+//             "1d": { start: now.startOf("day"), end: now.endOf("day") },
+//             "7d": { start: now.subtract(7, "day").startOf("day"), end: now.endOf("day") },
+//             "1m": { start: now.subtract(1, "month").startOf("day"), end: now.endOf("day") },
+//             "1y": { start: now.subtract(1, "year").startOf("day"), end: now.endOf("day") },
+//             "5y": { start: now.subtract(5, "year").startOf("day"), end: now.endOf("day") },
+//         };
+
+//         const { start: currentStart, end: currentEnd } = ranges[range] || ranges["1m"];
+//         const periodMs = currentEnd.diff(currentStart);
+
+//         const prevStart = currentStart.subtract(periodMs, "ms");
+//         const prevEnd = currentStart.subtract(1, "ms");
+
+//         // ------------------------------
+//         // BASIC COUNTS 
+//         // ------------------------------
+//         const [
+//             totalOrders,
+//             prevTotalOrders,
+//             completedOrders,
+//             prevCompletedOrders,
+//             cancelledOrders,
+//             prevCancelledOrders,
+//             refundOrders,
+//             prevRefundOrders,
+//             draftOrdersCount
+//         ] = await Promise.all([
+//             // totalOrders (non-draft, current period)
+//             Order.countDocuments({ isDraft: false, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } }),
+//             // prevTotalOrders (non-draft, previous period)
+//             Order.countDocuments({ isDraft: false, createdAt: { $gte: prevStart.toDate(), $lte: prevEnd.toDate() } }),
+
+//             // completedOrders (current period)
+//             Order.countDocuments({ isDraft: false, orderStatus: deliveredStatus, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } }),
+//             // prevCompletedOrders
+//             Order.countDocuments({ isDraft: false, orderStatus: deliveredStatus, createdAt: { $gte: prevStart.toDate(), $lte: prevEnd.toDate() } }),
+
+//             // cancelledOrders (current period)
+//             Order.countDocuments({ isDraft: false, orderStatus: cancelledStatus, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } }),
+//             // prevCancelledOrders
+//             Order.countDocuments({ isDraft: false, orderStatus: cancelledStatus, createdAt: { $gte: prevStart.toDate(), $lte: prevEnd.toDate() } }),
+
+//             // refundOrders (current period - using paymentStatus as requested)
+//             Order.countDocuments({
+//                 isDraft: false,
+//                 paymentStatus: { $in: refundStatuses },
+//                 createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
+//             }),
+//             // prevRefundOrders
+//             Order.countDocuments({
+//                 isDraft: false,
+//                 paymentStatus: { $in: refundStatuses },
+//                 createdAt: { $gte: prevStart.toDate(), $lte: prevEnd.toDate() }
+//             }),
+
+//             // draftOrdersCount
+//             Order.countDocuments({ isDraft: true })
+//         ]);
+
+//         // ------------------------------
+//         // ACTIVE ORDERS
+//         // ------------------------------
+//         const activeOrders = totalOrders - completedOrders - cancelledOrders - refundOrders;
+//         const prevActiveOrders = prevTotalOrders - prevCompletedOrders - prevCancelledOrders - prevRefundOrders;
+
+//         // ------------------------------
+//         // REFUND LOSS + PENDING REFUNDS
+//         // ------------------------------
+//         const refundSumAgg = await Order.aggregate([
+//             {
+//                 $match: {
+//                     isDraft: false,
+//                     orderStatus: "Delivered",
+//                     paymentStatus: { $in: ["refund_initiated", "refunded"] },
+//                     createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
+//                 }
+//             },
+
+//             {
+//                 $group: {
+//                     _id: null,
+//                     // Sum the amount from the nested refund document, using $ifNull in case it's missing
+//                     total: { $sum: { $ifNull: ["$refund.amount", 0] } }
+//                 }
+//             }
+//         ]);
+
+//         const totalRefundLoss = refundSumAgg?.[0]?.total || 0;
+
+//         const pendingRefundCount = await Order.countDocuments({
+//             isDraft: false,
+//             // Pending statuses: requested, initiated, processing
+//             paymentStatus: { $in: ["refund_requested", "refund_initiated", "refund_processing"] }
+//         });
+
+//         // ------------------------------
+//         // CANCELLED LOSS (Only count loss from *paid* cancelled orders)
+//         // ------------------------------
+//         const paidCancelledLossAgg = await Order.aggregate([
+//             {
+//                 $match: {
+//                     isDraft: false,
+//                     orderStatus: cancelledStatus,
+//                     // ASSUMPTION: You need a way to filter orders that were initially paid online.
+//                     // Assuming 'orderType' or 'paymentStatus' can distinguish a successful online payment.
+//                     // Example: paid online orders usually have paymentStatus: "paid" and orderType: "online"
+//                     // For this fix, I will assume a non-COD order was paid online, if your schema supports it.
+//                     // If 'orderType' is "COD", exclude it.
+//                     orderType: { $ne: "COD" },
+//                     createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
+//                 }
+//             },
+//             { $group: { _id: null, total: { $sum: "$amount" } } }
+//         ]);
+
+//         // This is the loss from cancelled orders that were *paid for*
+//         const paidCancelledLoss = paidCancelledLossAgg?.[0]?.total || 0;
+
+//         // The original logic for cancelled loss (might include unpaid/COD cancellations - keeping it for consistency)
+//         const totalCancelledLoss = await Order.aggregate([
+//             {
+//                 $match: {
+//                     isDraft: false,
+//                     orderStatus: cancelledStatus,
+//                     createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
+//                 }
+//             },
+//             { $group: { _id: null, total: { $sum: "$amount" } } }
+//         ]).then(res => res?.[0]?.total || 0);
+
+//         // ------------------------------
+//         // REVENUE AGGREGATION (User Paid & Company Revenue - ONLY DELIVERED ORDERS)
+//         // This is where you get the revenue from *successful* transactions (delivered)
+//         // ------------------------------
+//         const revenueAgg = await Order.aggregate([
+//             // Match delivered orders in the current period
+//             { $match: { isDraft: false, orderStatus: deliveredStatus, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
+//             { $unwind: "$products" },
+//             {
+//                 $addFields: {
+//                     "products.displayPriceUsed": {
+//                         $ifNull: [
+//                             "$products.variant.displayPrice",
+//                             "$products.variant.discountedPrice",
+//                             "$products.price",
+//                             0
+//                         ]
+//                     },
+//                     "products.costPrice": { $ifNull: ["$products.variant.costPrice", 0] }
+//                 }
+//             },
+//             {
+//                 $group: {
+//                     _id: "$_id",
+//                     orderAmount: { $first: "$amount" },
+//                     totalCompanyProductSales: { $sum: { $multiply: ["$products.quantity", "$products.displayPriceUsed"] } },
+//                     totalProductCost: { $sum: { $multiply: ["$products.quantity", "$products.costPrice"] } },
+//                     discount: { $first: { $add: [{ $ifNull: ["$discountAmount", 0] }, { $ifNull: ["$buyerDiscountAmount", 0] }] } },
+//                     giftCard: { $first: { $ifNull: ["$giftCard.amount", 0] } }
+//                 }
+//             },
+//             {
+//                 $group: {
+//                     _id: null,
+//                     totalUserPaidRevenue: { $sum: "$orderAmount" },
+//                     totalCompanyProductRevenue: { $sum: "$totalCompanyProductSales" },
+//                     totalDiscountGiven: { $sum: "$discount" },
+//                     totalGiftCardRevenue: { $sum: "$giftCard" },
+//                     totalCostOfGoodsSold: { $sum: "$totalProductCost" },
+//                     countOrders: { $sum: 1 }
+//                 }
+//             }
+//         ]);
+
+//         const revenue = revenueAgg?.[0] || {
+//             totalUserPaidRevenue: 0,
+//             totalCompanyProductRevenue: 0,
+//             totalDiscountGiven: 0,
+//             totalGiftCardRevenue: 0,
+//             totalCostOfGoodsSold: 0,
+//             countOrders: 0
+//         };
+
+//         // ------------------------------
+//         // CALCULATED KPIs (FIXED NET REVENUE)
+//         // ------------------------------
+//         // Net Revenue = Total User Paid Revenue (Delivered) - Total Refund Loss (Refunded) - Paid Cancelled Loss (Canceled & Paid)
+//         // The original 'totalCancelledLoss' might be inflated by unpaid/COD cancellations. 
+//         // Using 'paidCancelledLoss' for accurate financial deduction.
+//         const netRevenue = revenue.totalUserPaidRevenue - totalRefundLoss - paidCancelledLoss;
+
+//         const completedCount = revenue.countOrders;
+//         const AOV = completedCount ? Number((revenue.totalUserPaidRevenue / completedCount).toFixed(2)) : 0;
+
+//         // repeat customer / unique customer
+//         const userAgg = await Order.aggregate([
+//             { $match: { isDraft: false, orderStatus: deliveredStatus, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
+//             { $group: { _id: "$user", orders: { $sum: 1 } } }
+//         ]);
+
+//         const uniqueCustomers = userAgg.length;
+//         const repeatCustomerCount = userAgg.filter(u => u.orders > 1).length;
+//         const AOC = uniqueCustomers ? Number((completedCount / uniqueCustomers).toFixed(2)) : 0;
+
+//         // ------------------------------
+//         // NEW USERS
+//         // ------------------------------
+//         const newUsersCount = await Order.distinct("user", {
+//             createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
+//         }).then(users => users.length);
+
+//         // ------------------------------
+//         // PAYMENT SPLIT
+//         // ------------------------------
+//         const paymentSplit = {};
+//         const paymentAgg = await Order.aggregate([
+//             { $match: { isDraft: false, orderStatus: deliveredStatus, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
+//             {
+//                 $group: {
+//                     _id: "$orderType",
+//                     count: { $sum: 1 },
+//                     revenue: { $sum: "$amount" }
+//                 }
+//             }
+//         ]);
+//         paymentAgg.forEach(p => {
+//             paymentSplit[p._id || "unknown"] = { count: p.count, revenue: p.revenue };
+//         });
+
+//         // ------------------------------
+//         // TOP PRODUCTS (UPDATED: Revenue Calculation)
+//         // ------------------------------
+//         const topProducts = await Order.aggregate([
+//             {
+//                 $match: {
+//                     isDraft: false,
+//                     orderStatus: deliveredStatus,
+//                     createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
+//                 }
+//             },
+//             { $unwind: "$products" },
+
+//             // Group by VARIANT
+//             {
+//                 $group: {
+//                     _id: "$products.variant._id",   // variantId
+//                     productId: { $first: "$products.productId" },
+//                     variant: { $first: "$products.variant" },
+//                     qtySold: { $sum: "$products.quantity" },
+//                     revenue: {
+//                         $sum: {
+//                             $multiply: [
+//                                 "$products.quantity",
+//                                 {
+//                                     $ifNull: [
+//                                         "$products.variant.displayPrice",
+//                                         "$products.variant.discountedPrice",
+//                                         "$products.price",
+//                                         0
+//                                     ]
+//                                 }
+//                             ]
+//                         }
+//                     }
+//                 }
+//             },
+
+//             // Lookup product info
+//             {
+//                 $lookup: {
+//                     from: Product.collection.name,
+//                     localField: "productId",
+//                     foreignField: "_id",
+//                     as: "product"
+//                 }
+//             },
+//             { $unwind: "$product" },
+
+//             { $sort: { qtySold: -1 } },
+//             { $limit: 10 },
+
+//             // Final formatted output
+//             {
+//                 $project: {
+//                     _id: 0,
+//                     productName: "$product.name",
+//                     variantName: "$variant.name",
+//                     sales: "$qtySold",
+//                     price: "$variant.price",
+//                     displayPrice: "$variant.displayPrice",
+//                     stock: "$variant.stock",
+//                     revenue: 1
+//                 }
+//             }
+//         ]);
+
+//         // ------------------------------
+//         // TOP CATEGORIES (UPDATED: Revenue Calculation)
+//         // ------------------------------
+//         const topCategories = await Order.aggregate([
+//             {
+//                 $match: {
+//                     isDraft: false,
+//                     orderStatus: deliveredStatus,
+//                     createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
+//                 }
+//             },
+//             { $unwind: "$products" },
+
+//             // Join product to get category
+//             {
+//                 $lookup: {
+//                     from: Product.collection.name,
+//                     localField: "products.productId",
+//                     foreignField: "_id",
+//                     as: "product"
+//                 }
+//             },
+//             { $unwind: "$product" },
+
+//             // Group category *variant wise*
+//             {
+//                 $group: {
+//                     _id: "$product.category",
+//                     qtySold: { $sum: "$products.quantity" },
+//                     revenue: {
+//                         $sum: {
+//                             $multiply: [
+//                                 "$products.quantity",
+//                                 {
+//                                     $ifNull: [
+//                                         "$products.variant.displayPrice",
+//                                         "$products.variant.discountedPrice",
+//                                         "$products.price",
+//                                         0
+//                                     ]
+//                                 }
+//                             ]
+//                         }
+//                     }
+//                 }
+//             },
+
+//             {
+//                 $lookup: {
+//                     from: Category.collection.name,
+//                     localField: "_id",
+//                     foreignField: "_id",
+//                     as: "category"
+//                 }
+//             },
+//             { $unwind: "$category" },
+
+//             { $sort: { qtySold: -1 } },
+//             { $limit: 10 },
+
+//             {
+//                 $project: {
+//                     category: "$category.name",
+//                     sales: "$qtySold",
+//                     revenue: 1
+//                 }
+//             }
+//         ]);
+
+
+//         // ------------------------------
+//         // TOP BRANDS (UPDATED: Revenue Calculation)
+//         // ------------------------------
+//         const topBrands = await Order.aggregate([
+//             {
+//                 $match: {
+//                     isDraft: false,
+//                     orderStatus: deliveredStatus,
+//                     createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
+//                 }
+//             },
+//             { $unwind: "$products" },
+
+//             // Join product for brand
+//             {
+//                 $lookup: {
+//                     from: Product.collection.name,
+//                     localField: "products.productId",
+//                     foreignField: "_id",
+//                     as: "product"
+//                 }
+//             },
+//             { $unwind: "$product" },
+
+//             // Group *variant wise* inside brand
+//             {
+//                 $group: {
+//                     _id: "$product.brand",
+//                     qtySold: { $sum: "$products.quantity" },
+//                     revenue: {
+//                         $sum: {
+//                             $multiply: [
+//                                 "$products.quantity",
+//                                 {
+//                                     $ifNull: [
+//                                         "$products.variant.displayPrice",
+//                                         "$products.variant.discountedPrice",
+//                                         "$products.price",
+//                                         0
+//                                     ]
+//                                 }
+//                             ]
+//                         }
+//                     }
+//                 }
+//             },
+
+//             {
+//                 $lookup: {
+//                     from: Brand.collection.name,
+//                     localField: "_id",
+//                     foreignField: "_id",
+//                     as: "brand"
+//                 }
+//             },
+//             { $unwind: "$brand" },
+
+//             { $sort: { qtySold: -1 } },
+//             { $limit: 10 },
+
+//             {
+//                 $project: {
+//                     brand: "$brand.name",
+//                     sales: "$qtySold",
+//                     revenue: 1
+//                 }
+//             }
+//         ]);
+
+//         // ------------------------------
+//         // STOCK ALERTS (auto generate)
+//         // ------------------------------
+//         const LOW_STOCK_THRESHOLD = 10;
+
+//         const stockAlerts = await Product.aggregate([
+//             // 1. Filter for products with variants or products using top-level quantity
+//             {
+//                 $match: {
+//                     $or: [
+//                         // Products with variants: check if any variant stock is low
+//                         { "variants.stock": { $lte: LOW_STOCK_THRESHOLD } },
+//                         // Products without variants: check if top-level quantity is low
+//                         { quantity: { $lte: LOW_STOCK_THRESHOLD }, variants: { $size: 0 } }
+//                     ]
+//                 }
+//             },
+//             // 2. Unwind variants so we can process them individually
+//             { $unwind: { path: "$variants", preserveNullAndEmptyArrays: true } },
+//             // 3. Match only the variants (or the non-variant product) that are below the threshold
+//             {
+//                 $match: {
+//                     $or: [
+//                         // Match low stock variants
+//                         { "variants.stock": { $lte: LOW_STOCK_THRESHOLD } },
+//                         // Match low stock non-variant product (where variants is null/missing after unwind)
+//                         { quantity: { $lte: LOW_STOCK_THRESHOLD }, "variants": { $exists: false } }
+//                     ]
+//                 }
+//             },
+//             // 4. Project the necessary fields
+//             {
+//                 $project: {
+//                     _id: 0,
+//                     productId: "$_id",
+//                     productName: "$name",
+//                     // Use the variant's stock if it exists, otherwise use the parent product's quantity
+//                     stock: {
+//                         $ifNull: ["$variants.stock", "$quantity"]
+//                     },
+//                     // Include variant-specific info
+//                     variantId: "$variants.sku",
+//                     shadeName: "$variants.shadeName",
+//                     price: {
+//                         // Determine the price to display
+//                         $ifNull: [
+//                             "$variants.displayPrice",
+//                             "$variants.discountedPrice",
+//                             "$variants.price",
+//                             "$discountedPrice",
+//                             "$price"
+//                         ]
+//                     }
+//                 }
+//             },
+//             // 5. Sort by stock level (lowest first)
+//             { $sort: { stock: 1 } }
+//         ]);
+//         // ------------------------------
+//         // RECENT ORDERS
+//         // ------------------------------
+//         const recentOrders = await Order.find(
+//             { isDraft: false },
+//             { products: 1, amount: 1, orderId: 1, createdAt: 1, customerName: 1, orderType: 1, orderStatus: 1, paymentStatus: 1 }
+//         )
+//             .populate("products.productId", "name")
+//             .sort({ createdAt: -1 })
+//             .limit(10);
+
+//         const formattedOrders = recentOrders.map(o => ({
+//             productName: o.products?.[0]?.productId?.name || "N/A",
+//             orderId: o.orderId,
+//             date: dayjs(o.createdAt).format("MMM D, YYYY"),
+//             customerName: o.customerName || "Unknown",
+//             status: o.orderStatus,
+//             paymentStatus: o.paymentStatus,
+//             paymentMode: o.orderType,
+//             amount: o.amount
+//         }));
+
+//         // ------------------------------
+//         // CATEGORY TRENDS (based on sales)
+//         // ------------------------------
+//         const categoryTrends = await Order.aggregate([
+//             { $match: { isDraft: false, orderStatus: deliveredStatus, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
+//             { $unwind: "$products" },
+//             {
+//                 $lookup: {
+//                     from: Product.collection.name,
+//                     localField: "products.productId",
+//                     foreignField: "_id",
+//                     as: "product"
+//                 }
+//             },
+//             { $unwind: "$product" },
+//             {
+//                 $group: {
+//                     _id: "$product.category",
+//                     sales: { $sum: "$products.quantity" },
+//                     revenue: {
+//                         $sum: {
+//                             $multiply: [
+//                                 "$products.quantity",
+//                                 {
+//                                     $ifNull: [
+//                                         "$products.variant.displayPrice",
+//                                         "$products.variant.discountedPrice",
+//                                         "$products.price",
+//                                         0
+//                                     ]
+//                                 }
+//                             ]
+//                         }
+//                     }
+//                 }
+//             },
+//             {
+//                 $lookup: {
+//                     from: Category.collection.name,
+//                     localField: "_id",
+//                     foreignField: "_id",
+//                     as: "category"
+//                 }
+//             },
+//             { $unwind: "$category" },
+//             {
+//                 $project: {
+//                     category: "$category.name",
+//                     sales: 1,
+//                     revenue: 1
+//                 }
+//             },
+//             { $sort: { sales: -1 } }
+//         ]);
+
+//         // ------------------------------
+//         // FINAL RESPONSE
+//         // ------------------------------
+//         res.json({
+//             success: true,
+//             summary: {
+//                 totalOrders: calcGrowth(totalOrders, prevTotalOrders),
+//                 completedOrders: calcGrowth(completedOrders, prevCompletedOrders),
+//                 activeOrders: calcGrowth(activeOrders, prevActiveOrders),
+//                 cancelledOrders: calcGrowth(cancelledOrders, prevCancelledOrders),
+//                 refundOrders: calcGrowth(refundOrders, prevRefundOrders),
+//                 draftOrders: { value: draftOrdersCount },
+
+//                 totalUserPaidRevenue: calcGrowth(revenue.totalUserPaidRevenue, 0),
+//                 totalCompanyRevenue: calcGrowth(revenue.totalCompanyProductRevenue, 0),
+//                 totalDiscountGiven: calcGrowth(revenue.totalDiscountGiven, 0),
+//                 totalGiftCardRevenue: calcGrowth(revenue.totalGiftCardRevenue, 0),
+
+//                 totalRefundLoss,
+//                 totalCancelledLoss, // This is the total value of all cancelled orders (paid or unpaid/COD)
+//                 netRevenue,         // This now correctly deducts only the *paid* cancelled loss
+//                 AOV,
+//                 AOC,
+//                 repeatCustomerCount,
+//                 uniqueCustomers,
+//                 pendingRefundCount,
+//                 paymentSplit,
+//                 conversionRate: null,
+//                 newUsersCount,
+//                 profitEstimation: null
+//             },
+
+//             revenueBreakdown: {
+//                 userPaid: revenue.totalUserPaidRevenue,
+//                 companyProductRevenue: revenue.totalCompanyProductRevenue,
+//                 discounts: revenue.totalDiscountGiven,
+//                 giftCard: revenue.totalGiftCardRevenue,
+//                 refunds: totalRefundLoss,
+//                 cancelledLoss: paidCancelledLoss, // Display only the loss from paid, cancelled orders here
+//                 netRevenue
+//             },
+
+//             topProducts,
+//             topCategories,
+//             topBrands,
+//             stockAlerts,
+//             recentOrders: formattedOrders,
+//             categoryTrends
+//         });
+
+//     } catch (err) {
+//         console.error("Dashboard error:", err);
+//         res.status(500).json({ success: false, message: "Server error" });
+//     }
+// };
+// -----------------------------------------
+// IDEAL E-COMMERCE ANALYTICS (NYKAA STANDARD)
+// -----------------------------------------
+
+// Refund logic = only REFUND DELIVERED ORDERS
+// Cancelled paid orders DO NOT reduce revenue
+// COD cancellations produce NO loss
+// Net revenue = Delivered revenue - Delivered refund loss
+
+const calcGrowth = (current, previous) => {
+    if (previous === 0) {
+        return { value: current, changePercent: current > 0 ? 100 : 0, trend: current > 0 ? "up" : "neutral" };
+    }
+    const changePercent = ((current - previous) / previous) * 100;
+    const trend = changePercent > 0 ? "up" : changePercent < 0 ? "down" : "neutral";
+    return { value: current, changePercent: Number(changePercent.toFixed(2)), trend };
 };
+
+const deliveredStatus = "Delivered";
+const cancelledStatus = "Cancelled";
+const refundStatuses = ["refund_initiated", "refunded"];
 
 export const getAnalyticsDashboard = async (req, res) => {
     try {
@@ -270,11 +1413,15 @@ export const getAnalyticsDashboard = async (req, res) => {
         const prevEnd = currentStart.subtract(1, "ms");
 
         // ------------------------------
-        // BASIC COUNTS
+        // BASIC COUNTS 
         // ------------------------------
         const [
             totalOrders,
             prevTotalOrders,
+            completedOrders,
+            prevCompletedOrders,
+            cancelledOrders,
+            prevCancelledOrders,
             refundOrders,
             prevRefundOrders,
             draftOrdersCount
@@ -282,134 +1429,136 @@ export const getAnalyticsDashboard = async (req, res) => {
             Order.countDocuments({ isDraft: false, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } }),
             Order.countDocuments({ isDraft: false, createdAt: { $gte: prevStart.toDate(), $lte: prevEnd.toDate() } }),
 
+            Order.countDocuments({ isDraft: false, orderStatus: deliveredStatus, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } }),
+            Order.countDocuments({ isDraft: false, orderStatus: deliveredStatus, createdAt: { $gte: prevStart.toDate(), $lte: prevEnd.toDate() } }),
+
+            Order.countDocuments({ isDraft: false, orderStatus: cancelledStatus, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } }),
+            Order.countDocuments({ isDraft: false, orderStatus: cancelledStatus, createdAt: { $gte: prevStart.toDate(), $lte: prevEnd.toDate() } }),
+
             Order.countDocuments({
                 isDraft: false,
-                "refund.status": "completed",
-                "refund.refundedAt": { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
+                paymentStatus: { $in: refundStatuses },
+                createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
             }),
             Order.countDocuments({
                 isDraft: false,
-                "refund.status": "completed",
-                "refund.refundedAt": { $gte: prevStart.toDate(), $lte: prevEnd.toDate() }
+                paymentStatus: { $in: refundStatuses },
+                createdAt: { $gte: prevStart.toDate(), $lte: prevEnd.toDate() }
             }),
 
             Order.countDocuments({ isDraft: true })
         ]);
 
-        // ------------------------------
-        // COMPLETED / CANCELLED (trackingHistory)
-        // ------------------------------
-        const makeStatusAgg = (regex, start, end) => [
-            { $match: { isDraft: false } },
-            { $unwind: "$trackingHistory" },
-            {
-                $match: {
-                    "trackingHistory.status": regex,
-                    "trackingHistory.timestamp": { $gte: start.toDate(), $lte: end.toDate() }
-                }
-            },
-            { $group: { _id: "$_id" } },
-            { $count: "count" }
-        ];
-
-        const [
-            completedAgg,
-            prevCompletedAgg,
-            cancelledAgg,
-            prevCancelledAgg
-        ] = await Promise.all([
-            Order.aggregate(makeStatusAgg(deliveredRegex, currentStart, currentEnd)),
-            Order.aggregate(makeStatusAgg(deliveredRegex, prevStart, prevEnd)),
-            Order.aggregate(makeStatusAgg(cancelRegex, currentStart, currentEnd)),
-            Order.aggregate(makeStatusAgg(cancelRegex, prevStart, prevEnd)),
-        ]);
-
-        const completedOrders = completedAgg?.[0]?.count || 0;
-        const prevCompletedOrders = prevCompletedAgg?.[0]?.count || 0;
-
-        const cancelledOrders = cancelledAgg?.[0]?.count || 0;
-        const prevCancelledOrders = prevCancelledAgg?.[0]?.count || 0;
-
-        // ------------------------------
-        // ACTIVE ORDERS
-        // ------------------------------
+        // ACTIVE = not delivered, not cancelled, not refunded
         const activeOrders = totalOrders - completedOrders - cancelledOrders - refundOrders;
         const prevActiveOrders = prevTotalOrders - prevCompletedOrders - prevCancelledOrders - prevRefundOrders;
 
-        // ------------------------------
-        // REFUND LOSS + PENDING REFUNDS
-        // ------------------------------
-        const refundSumAgg = await Order.aggregate([
+
+        // ----------------------------------------------------------
+        // TOTAL USER PAID AMOUNT (ALL PAID ORDERS, ANY STATUS)
+        // ----------------------------------------------------------
+        const totalUserPaidAgg = await Order.aggregate([
             {
                 $match: {
                     isDraft: false,
-                    "refund.status": "completed",
-                    "refund.refundedAt": { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
-                }
-            },
-            { $group: { _id: null, total: { $sum: "$refund.amount" } } }
-        ]);
-
-        const totalRefundLoss = refundSumAgg?.[0]?.total || 0;
-
-        const pendingRefundCount = await Order.countDocuments({
-            isDraft: false,
-            "refund.status": { $in: ["requested", "initiated", "processing"] }
-        });
-
-        // ------------------------------
-        // CANCELLED LOSS (sum order.amount)
-        // ------------------------------
-        const cancelledLossAgg = await Order.aggregate([
-            { $match: { isDraft: false } },
-            { $unwind: "$trackingHistory" },
-            {
-                $match: {
-                    "trackingHistory.status": cancelRegex,
-                    "trackingHistory.timestamp": { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
+                    $or: [
+                        { paymentStatus: "Paid" },
+                        { paid: true }
+                    ]
                 }
             },
             { $group: { _id: null, total: { $sum: "$amount" } } }
         ]);
 
-        const totalCancelledLoss = cancelledLossAgg?.[0]?.total || 0;
+        const totalUserPaidAmount = totalUserPaidAgg?.[0]?.total || 0;
 
-        // ------------------------------
-        // REVENUE AGGREGATION
-        // ------------------------------
-        const revenueAgg = await Order.aggregate([
-            { $match: { isDraft: false, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
-            { $unwind: "$trackingHistory" },
-            { $match: { "trackingHistory.status": deliveredRegex } },
-            { $unwind: "$products" },
+
+        // ----------------------------------------------------------
+        // REFUND LOSS — ONLY REFUND DELIVERED ORDERS (REAL LOSS)
+        // ----------------------------------------------------------
+        const refundSumAgg = await Order.aggregate([
             {
-                $addFields: {
-                    "products.priceUsed": {
-                        $ifNull: [
-                            "$products.variant.discountedPrice",
-                            "$products.price",
-                            "$products.variant.displayPrice",
-                            0
-                        ]
-                    }
-                }
-            },
-            {
-                $group: {
-                    _id: "$_id",
-                    orderAmount: { $first: "$amount" },
-                    productTotal: { $sum: { $multiply: ["$products.quantity", "$products.priceUsed"] } },
-                    discount: { $first: { $add: [{ $ifNull: ["$discountAmount", 0] }, { $ifNull: ["$buyerDiscountAmount", 0] }] } },
-                    giftCard: { $first: { $ifNull: ["$giftCard.amount", 0] } }
+                $match: {
+                    isDraft: false,
+                    orderStatus: deliveredStatus,
+                    paymentStatus: { $in: ["refund_initiated", "refunded"] },
+                    createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
                 }
             },
             {
                 $group: {
                     _id: null,
+                    total: { $sum: { $ifNull: ["$refund.amount", 0] } }
+                }
+            }
+        ]);
+
+        const totalRefundLoss = refundSumAgg?.[0]?.total || 0;
+
+        // pending refunds
+        const pendingRefundCount = await Order.countDocuments({
+            isDraft: false,
+            paymentStatus: { $in: ["refund_requested", "refund_initiated", "refund_processing"] }
+        });
+
+        // ----------------------------------------------------------
+        // CANCELLED PAID LOSS (NOT subtracted from revenue)
+        // For reporting only
+        // ----------------------------------------------------------
+        const paidCancelledLossAgg = await Order.aggregate([
+            {
+                $match: {
+                    isDraft: false,
+                    orderStatus: cancelledStatus,
+                    orderType: { $ne: "COD" }, // online paid only
+                    createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
+                }
+            },
+            { $group: { _id: null, total: { $sum: "$amount" } } }
+        ]);
+
+        const paidCancelledLoss = paidCancelledLossAgg?.[0]?.total || 0;
+
+        // ----------------------------------------------------------
+        // REVENUE (ONLY DELIVERED ORDERS)
+        // ----------------------------------------------------------
+        const revenueAgg = await Order.aggregate([
+            { $match: { isDraft: false, orderStatus: deliveredStatus, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
+            { $unwind: "$products" },
+
+            {
+                $addFields: {
+                    "products.displayPriceUsed": {
+                        $ifNull: [
+                            "$products.variant.displayPrice",
+                            "$products.variant.discountedPrice",
+                            "$products.price",
+                            0
+                        ]
+                    },
+                    "products.costPrice": { $ifNull: ["$products.variant.costPrice", 0] }
+                }
+            },
+
+            {
+                $group: {
+                    _id: "$_id",
+                    orderAmount: { $first: "$amount" },
+                    totalCompanyProductSales: { $sum: { $multiply: ["$products.quantity", "$products.displayPriceUsed"] } },
+                    totalProductCost: { $sum: { $multiply: ["$products.quantity", "$products.costPrice"] } },
+                    discount: { $first: { $add: [{ $ifNull: ["$discountAmount", 0] }, { $ifNull: ["$buyerDiscountAmount", 0] }] } },
+                    giftCard: { $first: { $ifNull: ["$giftCard.amount", 0] } }
+                }
+            },
+
+            {
+                $group: {
+                    _id: null,
                     totalUserPaidRevenue: { $sum: "$orderAmount" },
-                    totalCompanyProductRevenue: { $sum: "$productTotal" },
+                    totalCompanyProductRevenue: { $sum: "$totalCompanyProductSales" },
                     totalDiscountGiven: { $sum: "$discount" },
                     totalGiftCardRevenue: { $sum: "$giftCard" },
+                    totalCostOfGoodsSold: { $sum: "$totalProductCost" },
                     countOrders: { $sum: 1 }
                 }
             }
@@ -420,22 +1569,21 @@ export const getAnalyticsDashboard = async (req, res) => {
             totalCompanyProductRevenue: 0,
             totalDiscountGiven: 0,
             totalGiftCardRevenue: 0,
+            totalCostOfGoodsSold: 0,
             countOrders: 0
         };
 
-        // ------------------------------
-        // CALCULATED KPIs
-        // ------------------------------
+        // ----------------------------------------------------------
+        // FINAL NET REVENUE (Corrected)
+        // ----------------------------------------------------------
         const netRevenue = revenue.totalUserPaidRevenue - totalRefundLoss;
 
         const completedCount = revenue.countOrders;
         const AOV = completedCount ? Number((revenue.totalUserPaidRevenue / completedCount).toFixed(2)) : 0;
 
-        // repeat customer / unique customer
+        // repeat customer
         const userAgg = await Order.aggregate([
-            { $match: { isDraft: false, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
-            { $unwind: "$trackingHistory" },
-            { $match: { "trackingHistory.status": deliveredRegex } },
+            { $match: { isDraft: false, orderStatus: deliveredStatus, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
             { $group: { _id: "$user", orders: { $sum: 1 } } }
         ]);
 
@@ -443,21 +1591,19 @@ export const getAnalyticsDashboard = async (req, res) => {
         const repeatCustomerCount = userAgg.filter(u => u.orders > 1).length;
         const AOC = uniqueCustomers ? Number((completedCount / uniqueCustomers).toFixed(2)) : 0;
 
-        // ------------------------------
+        // ----------------------------------------------------------
         // NEW USERS
-        // ------------------------------
+        // ----------------------------------------------------------
         const newUsersCount = await Order.distinct("user", {
             createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
         }).then(users => users.length);
 
-        // ------------------------------
+        // ----------------------------------------------------------
         // PAYMENT SPLIT
-        // ------------------------------
+        // ----------------------------------------------------------
         const paymentSplit = {};
         const paymentAgg = await Order.aggregate([
-            { $match: { isDraft: false, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
-            { $unwind: "$trackingHistory" },
-            { $match: { "trackingHistory.status": deliveredRegex } },
+            { $match: { isDraft: false, orderStatus: deliveredStatus, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
             {
                 $group: {
                     _id: "$orderType",
@@ -470,46 +1616,89 @@ export const getAnalyticsDashboard = async (req, res) => {
             paymentSplit[p._id || "unknown"] = { count: p.count, revenue: p.revenue };
         });
 
+        // ----------------------------------------------------------
+        // TOP PRODUCTS / CATEGORIES / BRANDS (unchanged)
         // ------------------------------
-        // TOP PRODUCTS
+        // TOP PRODUCTS (UPDATED: Revenue Calculation)
         // ------------------------------
         const topProducts = await Order.aggregate([
-            { $match: { isDraft: false, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
-            { $unwind: "$trackingHistory" },
-            { $match: { "trackingHistory.status": deliveredRegex } },
+            {
+                $match: {
+                    isDraft: false,
+                    orderStatus: deliveredStatus,
+                    createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
+                }
+            },
             { $unwind: "$products" },
+
+            // Group by VARIANT
             {
                 $group: {
-                    _id: "$products.productId",
+                    _id: "$products.variant._id",   // variantId
+                    productId: { $first: "$products.productId" },
+                    variant: { $first: "$products.variant" },
                     qtySold: { $sum: "$products.quantity" },
                     revenue: {
                         $sum: {
-                            $multiply: ["$products.quantity", { $ifNull: ["$products.variant.discountedPrice", "$products.price"] }]
+                            $multiply: [
+                                "$products.quantity",
+                                {
+                                    $ifNull: [
+                                        "$products.variant.displayPrice",
+                                        "$products.variant.discountedPrice",
+                                        "$products.price",
+                                        0
+                                    ]
+                                }
+                            ]
                         }
                     }
                 }
             },
+
+            // Lookup product info
             {
                 $lookup: {
                     from: Product.collection.name,
-                    localField: "_id",
+                    localField: "productId",
                     foreignField: "_id",
                     as: "product"
                 }
             },
             { $unwind: "$product" },
+
             { $sort: { qtySold: -1 } },
-            { $limit: 10 }
+            { $limit: 10 },
+
+            // Final formatted output
+            {
+                $project: {
+                    _id: 0,
+                    productName: "$product.name",
+                    variantName: "$variant.name",
+                    sales: "$qtySold",
+                    price: "$variant.price",
+                    displayPrice: "$variant.displayPrice",
+                    stock: "$variant.stock",
+                    revenue: 1
+                }
+            }
         ]);
 
         // ------------------------------
-        // TOP CATEGORIES
+        // TOP CATEGORIES (UPDATED: Revenue Calculation)
         // ------------------------------
         const topCategories = await Order.aggregate([
-            { $match: { isDraft: false, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
-            { $unwind: "$trackingHistory" },
-            { $match: { "trackingHistory.status": deliveredRegex } },
+            {
+                $match: {
+                    isDraft: false,
+                    orderStatus: deliveredStatus,
+                    createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
+                }
+            },
             { $unwind: "$products" },
+
+            // Join product to get category
             {
                 $lookup: {
                     from: Product.collection.name,
@@ -519,12 +1708,30 @@ export const getAnalyticsDashboard = async (req, res) => {
                 }
             },
             { $unwind: "$product" },
+
+            // Group category *variant wise*
             {
                 $group: {
                     _id: "$product.category",
-                    sales: { $sum: "$products.quantity" }
+                    qtySold: { $sum: "$products.quantity" },
+                    revenue: {
+                        $sum: {
+                            $multiply: [
+                                "$products.quantity",
+                                {
+                                    $ifNull: [
+                                        "$products.variant.displayPrice",
+                                        "$products.variant.discountedPrice",
+                                        "$products.price",
+                                        0
+                                    ]
+                                }
+                            ]
+                        }
+                    }
                 }
             },
+
             {
                 $lookup: {
                     from: Category.collection.name,
@@ -534,18 +1741,34 @@ export const getAnalyticsDashboard = async (req, res) => {
                 }
             },
             { $unwind: "$category" },
-            { $sort: { sales: -1 } },
-            { $limit: 10 }
+
+            { $sort: { qtySold: -1 } },
+            { $limit: 10 },
+
+            {
+                $project: {
+                    category: "$category.name",
+                    sales: "$qtySold",
+                    revenue: 1
+                }
+            }
         ]);
 
+
         // ------------------------------
-        // TOP BRANDS
+        // TOP BRANDS (UPDATED: Revenue Calculation)
         // ------------------------------
         const topBrands = await Order.aggregate([
-            { $match: { isDraft: false, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
-            { $unwind: "$trackingHistory" },
-            { $match: { "trackingHistory.status": deliveredRegex } },
+            {
+                $match: {
+                    isDraft: false,
+                    orderStatus: deliveredStatus,
+                    createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() }
+                }
+            },
             { $unwind: "$products" },
+
+            // Join product for brand
             {
                 $lookup: {
                     from: Product.collection.name,
@@ -555,12 +1778,30 @@ export const getAnalyticsDashboard = async (req, res) => {
                 }
             },
             { $unwind: "$product" },
+
+            // Group *variant wise* inside brand
             {
                 $group: {
                     _id: "$product.brand",
-                    sales: { $sum: "$products.quantity" }
+                    qtySold: { $sum: "$products.quantity" },
+                    revenue: {
+                        $sum: {
+                            $multiply: [
+                                "$products.quantity",
+                                {
+                                    $ifNull: [
+                                        "$products.variant.displayPrice",
+                                        "$products.variant.discountedPrice",
+                                        "$products.price",
+                                        0
+                                    ]
+                                }
+                            ]
+                        }
+                    }
                 }
             },
+
             {
                 $lookup: {
                     from: Brand.collection.name,
@@ -570,24 +1811,83 @@ export const getAnalyticsDashboard = async (req, res) => {
                 }
             },
             { $unwind: "$brand" },
-            { $sort: { sales: -1 } },
-            { $limit: 10 }
+
+            { $sort: { qtySold: -1 } },
+            { $limit: 10 },
+
+            {
+                $project: {
+                    brand: "$brand.name",
+                    sales: "$qtySold",
+                    revenue: 1
+                }
+            }
         ]);
 
         // ------------------------------
         // STOCK ALERTS (auto generate)
         // ------------------------------
-        const stockAlerts = await Product.find(
-            { stock: { $lte: 6 } },
-            { name: 1, stock: 1, price: 1 }
-        ).sort({ stock: 1 });
+        const LOW_STOCK_THRESHOLD = 10;
 
+        const stockAlerts = await Product.aggregate([
+            // 1. Filter for products with variants or products using top-level quantity
+            {
+                $match: {
+                    $or: [
+                        // Products with variants: check if any variant stock is low
+                        { "variants.stock": { $lte: LOW_STOCK_THRESHOLD } },
+                        // Products without variants: check if top-level quantity is low
+                        { quantity: { $lte: LOW_STOCK_THRESHOLD }, variants: { $size: 0 } }
+                    ]
+                }
+            },
+            // 2. Unwind variants so we can process them individually
+            { $unwind: { path: "$variants", preserveNullAndEmptyArrays: true } },
+            // 3. Match only the variants (or the non-variant product) that are below the threshold
+            {
+                $match: {
+                    $or: [
+                        // Match low stock variants
+                        { "variants.stock": { $lte: LOW_STOCK_THRESHOLD } },
+                        // Match low stock non-variant product (where variants is null/missing after unwind)
+                        { quantity: { $lte: LOW_STOCK_THRESHOLD }, "variants": { $exists: false } }
+                    ]
+                }
+            },
+            // 4. Project the necessary fields
+            {
+                $project: {
+                    _id: 0,
+                    productId: "$_id",
+                    productName: "$name",
+                    // Use the variant's stock if it exists, otherwise use the parent product's quantity
+                    stock: {
+                        $ifNull: ["$variants.stock", "$quantity"]
+                    },
+                    // Include variant-specific info
+                    variantId: "$variants.sku",
+                    shadeName: "$variants.shadeName",
+                    price: {
+                        // Determine the price to display
+                        $ifNull: [
+                            "$variants.displayPrice",
+                            "$variants.discountedPrice",
+                            "$variants.price",
+                            "$discountedPrice",
+                            "$price"
+                        ]
+                    }
+                }
+            },
+            // 5. Sort by stock level (lowest first)
+            { $sort: { stock: 1 } }
+        ]);
         // ------------------------------
         // RECENT ORDERS
         // ------------------------------
         const recentOrders = await Order.find(
             { isDraft: false },
-            { products: 1, amount: 1, orderId: 1, createdAt: 1, customerName: 1, orderType: 1, status: 1 }
+            { products: 1, amount: 1, orderId: 1, createdAt: 1, customerName: 1, orderType: 1, orderStatus: 1, paymentStatus: 1 }
         )
             .populate("products.productId", "name")
             .sort({ createdAt: -1 })
@@ -598,7 +1898,8 @@ export const getAnalyticsDashboard = async (req, res) => {
             orderId: o.orderId,
             date: dayjs(o.createdAt).format("MMM D, YYYY"),
             customerName: o.customerName || "Unknown",
-            status: o.status || "Pending",
+            status: o.orderStatus,
+            paymentStatus: o.paymentStatus,
             paymentMode: o.orderType,
             amount: o.amount
         }));
@@ -607,9 +1908,7 @@ export const getAnalyticsDashboard = async (req, res) => {
         // CATEGORY TRENDS (based on sales)
         // ------------------------------
         const categoryTrends = await Order.aggregate([
-            { $match: { isDraft: false, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
-            { $unwind: "$trackingHistory" },
-            { $match: { "trackingHistory.status": deliveredRegex } },
+            { $match: { isDraft: false, orderStatus: deliveredStatus, createdAt: { $gte: currentStart.toDate(), $lte: currentEnd.toDate() } } },
             { $unwind: "$products" },
             {
                 $lookup: {
@@ -626,7 +1925,17 @@ export const getAnalyticsDashboard = async (req, res) => {
                     sales: { $sum: "$products.quantity" },
                     revenue: {
                         $sum: {
-                            $multiply: ["$products.quantity", { $ifNull: ["$products.variant.discountedPrice", "$products.price"] }]
+                            $multiply: [
+                                "$products.quantity",
+                                {
+                                    $ifNull: [
+                                        "$products.variant.displayPrice",
+                                        "$products.variant.discountedPrice",
+                                        "$products.price",
+                                        0
+                                    ]
+                                }
+                            ]
                         }
                     }
                 }
@@ -650,54 +1959,65 @@ export const getAnalyticsDashboard = async (req, res) => {
             { $sort: { sales: -1 } }
         ]);
 
-        // ------------------------------
+
+        // ----------------------------------------------------------
         // FINAL RESPONSE
-        // ------------------------------
+        // ----------------------------------------------------------
         res.json({
             success: true,
+
             summary: {
-                totalOrders: calcGrowth(totalOrders, prevTotalOrders),
-                completedOrders: calcGrowth(completedOrders, prevCompletedOrders),
-                activeOrders: calcGrowth(activeOrders, prevActiveOrders),
-                cancelledOrders: calcGrowth(cancelledOrders, prevCancelledOrders),
-                refundOrders: calcGrowth(refundOrders, prevRefundOrders),
-                draftOrders: { value: draftOrdersCount },
+                orders: {
+                    total: calcGrowth(totalOrders, prevTotalOrders),
+                    completed: calcGrowth(completedOrders, prevCompletedOrders),
+                    active: calcGrowth(activeOrders, prevActiveOrders),
+                    cancelled: calcGrowth(cancelledOrders, prevCancelledOrders),
+                    refunded: calcGrowth(refundOrders, prevRefundOrders),
+                    draft: { value: draftOrdersCount }
+                },
 
-                totalUserPaidRevenue: calcGrowth(revenue.totalUserPaidRevenue, 0),
-                totalCompanyRevenue: calcGrowth(revenue.totalCompanyProductRevenue, 0),
-                totalDiscountGiven: calcGrowth(revenue.totalDiscountGiven, 0),
-                totalGiftCardRevenue: calcGrowth(revenue.totalGiftCardRevenue, 0),
+                revenue: {
+                    userPaidDelivered: revenue.totalUserPaidRevenue,
+                    userPaidAll: totalUserPaidAmount,
+                    companyProductRevenue: revenue.totalCompanyProductRevenue,
+                    discountGiven: revenue.totalDiscountGiven,
+                    giftCardRevenue: revenue.totalGiftCardRevenue,
+                    refundLoss: totalRefundLoss,
+                    cancelledPaidLoss: paidCancelledLoss,
+                    netRevenue
+                },
 
-                totalRefundLoss,
-                totalCancelledLoss,
-                netRevenue,
-                AOV,
-                AOC,
-                repeatCustomerCount,
-                uniqueCustomers,
-                pendingRefundCount,
-                paymentSplit,
-                conversionRate: null,
-                newUsersCount,
-                profitEstimation: null
+                metrics: {
+                    AOV,
+                    AOC,
+                    uniqueCustomers,
+                    repeatCustomers: repeatCustomerCount,
+                    pendingRefunds: pendingRefundCount,
+                    newUsers: newUsersCount
+                },
+
+                paymentSplit
             },
 
             revenueBreakdown: {
-                userPaid: revenue.totalUserPaidRevenue,
+                totalUserPaidAmount: totalUserPaidAmount,
+                deliveredUserPaidRevenue: revenue.totalUserPaidRevenue,
                 companyProductRevenue: revenue.totalCompanyProductRevenue,
                 discounts: revenue.totalDiscountGiven,
                 giftCard: revenue.totalGiftCardRevenue,
-                refunds: totalRefundLoss,
-                cancelledLoss: totalCancelledLoss,
+                refundLoss: totalRefundLoss,
+                cancelledPaidLoss: paidCancelledLoss,
                 netRevenue
             },
 
-            topProducts,
-            topCategories,
-            topBrands,
-            stockAlerts,
-            recentOrders: formattedOrders,
-            categoryTrends
+            lists: {
+                topProducts,
+                topCategories,
+                topBrands,
+                recentOrders: formattedOrders,
+                categoryTrends,
+                stockAlerts
+            }
         });
 
     } catch (err) {
@@ -705,8 +2025,6 @@ export const getAnalyticsDashboard = async (req, res) => {
         res.status(500).json({ success: false, message: "Server error" });
     }
 };
-
-
 
 export const getBestSellingCategories = async () => {
     const products = await Product.find()

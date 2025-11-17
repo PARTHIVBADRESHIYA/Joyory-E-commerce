@@ -6,6 +6,22 @@ import User from '../models/User.js';
 import { refundQueue } from "../middlewares/services/refundQueue.js";
 import { sendEmail } from "../middlewares/utils/emailService.js"; // ✅ assume you already have an email service
 
+
+const shiprocketStatusMap = {
+    0: "Not Picked",
+    1: "Pickup Scheduled",
+    2: "Pickup Error",
+    3: "Picked Up",
+    4: "In Transit",
+    5: "Out For Delivery",
+    6: "Delivered",
+    7: "Cancelled",
+    8: "RTO Initiated",
+    9: "RTO In Transit",
+    10: "RTO Delivered"
+};
+
+
 export const addOrder = async (req, res) => {
     try {
         const { products: reqProducts, orderType, status } = req.body;
@@ -473,7 +489,7 @@ export const getAllOrders = async (req, res) => {
             orderId: order.orderId,
             date: order.date?.toDateString() || "N/A",
             customerName: order.customerName || "Unknown",
-            status: order.status,
+            status: order.orderStatus,
             orderType: order.orderType,
             paid: order.paid,
             paymentStatus: order.paymentStatus,
@@ -492,6 +508,199 @@ export const getAllOrders = async (req, res) => {
     }
 };
 
+// export const getOrderSummary = async (req, res) => {
+//     try {
+//         const { range = "7d" } = req.query;
+
+//         const now = new Date();
+
+//         const buildRange = (r) => {
+//             const end = new Date(now);
+//             const start = new Date(now);
+//             switch (r) {
+//                 case "1d": start.setDate(now.getDate() - 1); break;
+//                 case "7d": start.setDate(now.getDate() - 7); break;
+//                 case "1m": start.setMonth(now.getMonth() - 1); break;
+//                 case "1y": start.setFullYear(now.getFullYear() - 1); break;
+//                 default: start.setDate(now.getDate() - 7);
+//             }
+//             return { start, end };
+//         };
+
+//         const { start: currentStart, end: currentEnd } = buildRange(range);
+
+//         const buildPrevRange = (r, currentStart) => {
+//             const prevEnd = new Date(currentStart);
+//             const prevStart = new Date(currentStart);
+//             switch (r) {
+//                 case "1d": prevStart.setDate(prevEnd.getDate() - 1); break;
+//                 case "7d": prevStart.setDate(prevEnd.getDate() - 7); break;
+//                 case "1m": prevStart.setMonth(prevEnd.getMonth() - 1); break;
+//                 case "1y": prevStart.setFullYear(prevEnd.getFullYear() - 1); break;
+//                 default: prevStart.setDate(prevEnd.getDate() - 7);
+//             }
+//             return { prevStart, prevEnd };
+//         };
+
+//         const { prevStart, prevEnd } = buildPrevRange(range, currentStart);
+
+//         const pctChange = (curr, prev) => {
+//             if (prev === 0 && curr > 0) return { change: 100, trend: "up" };
+//             if (prev === 0 && curr === 0) return { change: 0, trend: "no-change" };
+//             const diff = ((curr - prev) / prev) * 100;
+//             return {
+//                 change: Number(Math.abs(diff).toFixed(2)),
+//                 trend: diff > 0 ? "up" : diff < 0 ? "down" : "no-change"
+//             };
+//         };
+
+//         // ✅ TOTAL ORDERS
+//         const [totalOrders, prevTotalOrders] = await Promise.all([
+//             Order.countDocuments({
+//                 isDraft: false,
+//                 createdAt: { $gte: currentStart, $lte: currentEnd }
+//             }),
+//             Order.countDocuments({
+//                 isDraft: false,
+//                 createdAt: { $gte: prevStart, $lt: prevEnd }
+//             })
+//         ]);
+
+//         // ✅ REFUND ORDERS
+//         const refundedFilterCurrent = {
+//             isDraft: false,
+//             $or: [
+//                 { paymentStatus: "refunded" },
+//                 { "refund.isRefunded": true },
+//                 { "refund.status": "completed" }
+//             ],
+//             "refund.refundedAt": { $gte: currentStart, $lte: currentEnd }
+//         };
+
+//         const refundedFilterPrev = {
+//             isDraft: false,
+//             $or: [
+//                 { paymentStatus: "refunded" },
+//                 { "refund.isRefunded": true },
+//                 { "refund.status": "completed" }
+//             ],
+//             "refund.refundedAt": { $gte: prevStart, $lt: prevEnd }
+//         };
+
+//         const [refundOrders, prevRefundOrders] = await Promise.all([
+//             Order.countDocuments(refundedFilterCurrent),
+//             Order.countDocuments(refundedFilterPrev)
+//         ]);
+
+//         // ✅ COMPLETED ORDERS (Delivered in tracking)
+//         const deliveredRegex = /delivered|completed/i;
+
+//         const [completedAgg, prevCompletedAgg] = await Promise.all([
+//             Order.aggregate([
+//                 { $match: { isDraft: false } },
+//                 { $unwind: "$trackingHistory" },
+//                 {
+//                     $match: {
+//                         "trackingHistory.status": deliveredRegex,
+//                         "trackingHistory.timestamp": { $gte: currentStart, $lte: currentEnd }
+//                     }
+//                 },
+//                 { $group: { _id: "$_id" } },
+//                 { $count: "count" }
+//             ]),
+//             Order.aggregate([
+//                 { $match: { isDraft: false } },
+//                 { $unwind: "$trackingHistory" },
+//                 {
+//                     $match: {
+//                         "trackingHistory.status": deliveredRegex,
+//                         "trackingHistory.timestamp": { $gte: prevStart, $lt: prevEnd }
+//                     }
+//                 },
+//                 { $group: { _id: "$_id" } },
+//                 { $count: "count" }
+//             ])
+//         ]);
+
+//         const completedOrders = completedAgg?.[0]?.count || 0;
+//         const prevCompletedOrders = prevCompletedAgg?.[0]?.count || 0;
+
+//         const cancelRegex = /cancel/i;
+
+//         const cancelledFilterCurrent = {
+//             isDraft: false,
+//             $or: [
+//                 { orderStatus: cancelRegex },
+//                 { status: cancelRegex },
+//                 { paymentStatus: cancelRegex },
+//                 { "cancellation.reason": { $exists: true } },
+//                 { "trackingHistory.status": cancelRegex }
+//             ],
+//             createdAt: { $gte: currentStart, $lte: currentEnd }
+//         };
+
+//         const cancelledFilterPrev = {
+//             isDraft: false,
+//             $or: [
+//                 { orderStatus: cancelRegex },
+//                 { status: cancelRegex },
+//                 { paymentStatus: cancelRegex },
+//                 { "cancellation.reason": { $exists: true } },
+//                 { "trackingHistory.status": cancelRegex }
+//             ],
+//             createdAt: { $gte: prevStart, $lt: prevEnd }
+//         };
+
+//         const [cancelledOrders, prevCancelledOrders] = await Promise.all([
+//             Order.countDocuments(cancelledFilterCurrent),
+//             Order.countDocuments(cancelledFilterPrev)
+//         ]);
+
+
+//         // ✅ DRAFT COUNT (optional but useful)
+//         const draftOrders = await Order.countDocuments({ isDraft: true });
+
+//         res.json({
+//             range,
+
+//             totalOrders: {
+//                 count: totalOrders,
+//                 change: pctChange(totalOrders, prevTotalOrders),
+//                 note: `Last ${range}`
+//             },
+
+//             refundOrders: {
+//                 count: refundOrders,
+//                 change: pctChange(refundOrders, prevRefundOrders),
+//                 note: `Refunded in ${range}`
+//             },
+
+//             completedOrders: {
+//                 count: completedOrders,
+//                 change: pctChange(completedOrders, prevCompletedOrders),
+//                 note: `Last ${range}`
+//             },
+
+//             cancelledOrders: {
+//                 count: cancelledOrders,
+//                 change: pctChange(cancelledOrders, prevCancelledOrders),
+//                 note: `Last ${range}`
+//             },
+
+//             draftOrders: {
+//                 count: draftOrders,
+//                 note: "Draft / abandoned checkouts"
+//             }
+//         });
+
+//     } catch (error) {
+//         console.error(error);
+//         res.status(500).json({
+//             message: "Error generating order summary",
+//             error: error.message
+//         });
+//     }
+// };
 export const getOrderSummary = async (req, res) => {
     try {
         const { range = "7d" } = req.query;
@@ -538,7 +747,9 @@ export const getOrderSummary = async (req, res) => {
             };
         };
 
+        // --------------------------------------------
         // ✅ TOTAL ORDERS
+        // --------------------------------------------
         const [totalOrders, prevTotalOrders] = await Promise.all([
             Order.countDocuments({
                 isDraft: false,
@@ -550,25 +761,25 @@ export const getOrderSummary = async (req, res) => {
             })
         ]);
 
-        // ✅ REFUND ORDERS
+        // --------------------------------------------
+        // ✅ FIXED REFUND ORDERS ❗
+        // --------------------------------------------
         const refundedFilterCurrent = {
             isDraft: false,
             $or: [
-                { paymentStatus: "refunded" },
-                { "refund.isRefunded": true },
-                { "refund.status": "completed" }
+                { paymentStatus: { $in: ["refund_initiated", "refunded"] } },
+                { "refund.status": { $in: ["initiated", "completed"] } }
             ],
-            "refund.refundedAt": { $gte: currentStart, $lte: currentEnd }
+            updatedAt: { $gte: currentStart, $lte: currentEnd }
         };
 
         const refundedFilterPrev = {
             isDraft: false,
             $or: [
-                { paymentStatus: "refunded" },
-                { "refund.isRefunded": true },
-                { "refund.status": "completed" }
+                { paymentStatus: { $in: ["refund_initiated", "refunded"] } },
+                { "refund.status": { $in: ["initiated", "completed"] } }
             ],
-            "refund.refundedAt": { $gte: prevStart, $lt: prevEnd }
+            updatedAt: { $gte: prevStart, $lt: prevEnd }
         };
 
         const [refundOrders, prevRefundOrders] = await Promise.all([
@@ -576,73 +787,71 @@ export const getOrderSummary = async (req, res) => {
             Order.countDocuments(refundedFilterPrev)
         ]);
 
-        // ✅ COMPLETED ORDERS (Delivered in tracking)
-        const deliveredRegex = /delivered|completed/i;
+        // --------------------------------------------
+        // ✅ FIXED COMPLETED / DELIVERED ORDERS ❗
+        // --------------------------------------------
+        const completedFilterCurrent = {
+            isDraft: false,
+            $or: [
+                { status: "Delivered" },
+                { orderStatus: "Delivered" },
+                { "shipment.deliveredAt": { $exists: true } }
+            ],
+            updatedAt: { $gte: currentStart, $lte: currentEnd }
+        };
 
-        const [completedAgg, prevCompletedAgg] = await Promise.all([
-            Order.aggregate([
-                { $match: { isDraft: false } },
-                { $unwind: "$trackingHistory" },
-                {
-                    $match: {
-                        "trackingHistory.status": deliveredRegex,
-                        "trackingHistory.timestamp": { $gte: currentStart, $lte: currentEnd }
-                    }
-                },
-                { $group: { _id: "$_id" } },
-                { $count: "count" }
-            ]),
-            Order.aggregate([
-                { $match: { isDraft: false } },
-                { $unwind: "$trackingHistory" },
-                {
-                    $match: {
-                        "trackingHistory.status": deliveredRegex,
-                        "trackingHistory.timestamp": { $gte: prevStart, $lt: prevEnd }
-                    }
-                },
-                { $group: { _id: "$_id" } },
-                { $count: "count" }
-            ])
+        const completedFilterPrev = {
+            isDraft: false,
+            $or: [
+                { status: "Delivered" },
+                { orderStatus: "Delivered" },
+                { "shipment.deliveredAt": { $exists: true } }
+            ],
+            updatedAt: { $gte: prevStart, $lt: prevEnd }
+        };
+
+        const [completedOrders, prevCompletedOrders] = await Promise.all([
+            Order.countDocuments(completedFilterCurrent),
+            Order.countDocuments(completedFilterPrev)
         ]);
 
-        const completedOrders = completedAgg?.[0]?.count || 0;
-        const prevCompletedOrders = prevCompletedAgg?.[0]?.count || 0;
-
-        // ✅ CANCELLED ORDERS
+        // --------------------------------------------
+        // CANCELLED
+        // --------------------------------------------
         const cancelRegex = /cancel/i;
 
-        const [cancelledAgg, prevCancelledAgg] = await Promise.all([
-            Order.aggregate([
-                { $match: { isDraft: false } },
-                { $unwind: "$trackingHistory" },
-                {
-                    $match: {
-                        "trackingHistory.status": cancelRegex,
-                        "trackingHistory.timestamp": { $gte: currentStart, $lte: currentEnd }
-                    }
-                },
-                { $group: { _id: "$_id" } },
-                { $count: "count" }
-            ]),
-            Order.aggregate([
-                { $match: { isDraft: false } },
-                { $unwind: "$trackingHistory" },
-                {
-                    $match: {
-                        "trackingHistory.status": cancelRegex,
-                        "trackingHistory.timestamp": { $gte: prevStart, $lt: prevEnd }
-                    }
-                },
-                { $group: { _id: "$_id" } },
-                { $count: "count" }
-            ])
+        const cancelledFilterCurrent = {
+            isDraft: false,
+            $or: [
+                { orderStatus: cancelRegex },
+                { status: cancelRegex },
+                { paymentStatus: cancelRegex },
+                { "cancellation.reason": { $exists: true } },
+                { "trackingHistory.status": cancelRegex }
+            ],
+            createdAt: { $gte: currentStart, $lte: currentEnd }
+        };
+
+        const cancelledFilterPrev = {
+            isDraft: false,
+            $or: [
+                { orderStatus: cancelRegex },
+                { status: cancelRegex },
+                { paymentStatus: cancelRegex },
+                { "cancellation.reason": { $exists: true } },
+                { "trackingHistory.status": cancelRegex }
+            ],
+            createdAt: { $gte: prevStart, $lt: prevEnd }
+        };
+
+        const [cancelledOrders, prevCancelledOrders] = await Promise.all([
+            Order.countDocuments(cancelledFilterCurrent),
+            Order.countDocuments(cancelledFilterPrev)
         ]);
 
-        const cancelledOrders = cancelledAgg?.[0]?.count || 0;
-        const prevCancelledOrders = prevCancelledAgg?.[0]?.count || 0;
-
-        // ✅ DRAFT COUNT (optional but useful)
+        // --------------------------------------------
+        // DRAFT
+        // --------------------------------------------
         const draftOrders = await Order.countDocuments({ isDraft: true });
 
         res.json({
@@ -687,6 +896,148 @@ export const getOrderSummary = async (req, res) => {
     }
 };
 
+// export const getOrderById = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+
+//         const order = await Order.findById(id)
+//             .populate("user", "name email phone")
+//             .populate("products.productId", "name brand category images price")
+//             .populate("affiliate", "name referralCode")
+//             .populate("discount", "code type value")
+//             .lean();
+
+//         if (!order) return res.status(404).json({ message: "Order not found" });
+
+//         // Timeline sorted + deduplicated
+//         const timeline = [];
+
+//         (order.trackingHistory || [])
+//             .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+//             .forEach(entry => {
+//                 const last = timeline[timeline.length - 1];
+//                 if (!last || last.status !== entry.status) {
+//                     timeline.push({
+//                         status: entry.status,
+//                         timestamp: entry.timestamp,
+//                         location: entry.location || null
+//                     });
+//                 }
+//             });
+
+//         // 🧾 Order summary
+//         const summary = {
+//             orderId: order.orderId || order._id,
+//             orderNumber: order.orderNumber,
+//             date: order.date,
+//             totalAmount: order.amount,
+//             status: order.orderStatus,
+//             currentStatus: order.orderStatus || order.shipment?.status || order.status,
+//             orderType: order.orderType || "Online",
+//         };
+
+//         // 👤 Customer details
+//         const customer = {
+//             id: order.user?._id || null,
+//             name: order.user?.name || order.customerName || "",
+//             email: order.user?.email || "",
+//             phone: order.user?.phone || "",
+//         };
+
+//         // 📦 Product details (for both detail view + tracking view)
+//         const products = order.products.map((p) => ({
+//             id: p.productId?._id,
+//             name: p.productId?.name,
+//             brand: p.productId?.brand || "Unknown",
+//             category: p.productId?.category,
+//             image: p.productId?.images?.[0] || null,
+//             quantity: p.quantity,
+//             price: p.price,
+//             total: p.quantity * p.price,
+//         }));
+
+//         // 🚚 Shipping details
+//         const shipping = {
+//             name: order.shippingAddress?.name,
+//             phone: order.shippingAddress?.phone,
+//             address: [
+//                 order.shippingAddress?.addressLine1,
+//                 order.shippingAddress?.city,
+//                 order.shippingAddress?.state,
+//                 order.shippingAddress?.pincode,
+//             ].filter(Boolean).join(", "),
+//             expectedDelivery: order.expectedDelivery || null,
+//         };
+
+//         // 💳 Payment details
+//         const payment = {
+//             method: order.paymentMethod || "Not specified",
+//             status: order.paymentStatus || "Pending",
+//             transactionId: order.transactionId || null,
+//             amount: order.amount,
+//         };
+
+//         // 🎁 Discount and affiliate info
+//         const discount = order.discount
+//             ? {
+//                 code: order.discount.code,
+//                 type: order.discount.type,
+//                 value: order.discount.value,
+//                 discountAmount: order.discountAmount || 0,
+//                 buyerDiscountAmount: order.buyerDiscountAmount || 0,
+//             }
+//             : null;
+
+//         const affiliate = order.affiliate
+//             ? {
+//                 id: order.affiliate._id,
+//                 name: order.affiliate.name,
+//                 referralCode: order.affiliate.referralCode,
+//             }
+//             : null;
+
+//         // 📦 Shipment info
+//         const shipment = order.shipment
+//             ? {
+//                 courierName: order.shipment.courier_name || null,
+//                 trackingNumber: order.shipment.awb_code || null,
+//                 currentStatus: order.shipment.status || null,
+//                 assignedAt: order.shipment.assignedAt || null,
+//             }
+//             : null;
+
+//         // 🧠 Compute totals
+//         const subtotal = order.products.reduce((acc, p) => acc + p.price * p.quantity, 0);
+//         const shippingCharge = order.shippingCharge || 0;
+//         const tax = order.taxAmount || 0;
+//         const totalPrice = subtotal + shippingCharge + tax - (order.discountAmount || 0);
+
+//         // 🧩 Final structured response (for both UIs)
+//         const response = {
+//             summary,
+//             customer,
+//             products,
+//             shipping,
+//             payment,
+//             discount,
+//             affiliate,
+//             shipment,
+//             totals: {
+//                 subtotal,
+//                 shipping: shippingCharge,
+//                 tax,
+//                 totalPrice,
+//             },
+//             timeline,
+//         };
+
+//         res.status(200).json(response);
+//     } catch (err) {
+//         console.error("Error fetching order:", err);
+//         res.status(500).json({ message: "Failed to fetch order", error: err.message });
+//     }
+// };
+// Shared Shiprocket status map
 
 export const getOrderById = async (req, res) => {
     try {
@@ -694,41 +1045,52 @@ export const getOrderById = async (req, res) => {
 
         const order = await Order.findById(id)
             .populate("user", "name email phone")
-            .populate("products.productId", "name brand category images price")
+            .populate("products.productId", "name brand category images price variants")
             .populate("affiliate", "name referralCode")
             .populate("discount", "code type value")
             .lean();
 
         if (!order) return res.status(404).json({ message: "Order not found" });
 
-        // Timeline sorted + deduplicated
+        // ✅ TIMELINE WITH HUMAN-READABLE SHIPROCKET STATUS
         const timeline = [];
 
         (order.trackingHistory || [])
             .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
             .forEach(entry => {
+                const cleanStatus =
+                    shiprocketStatusMap[entry.status] || entry.status;
+
                 const last = timeline[timeline.length - 1];
-                if (!last || last.status !== entry.status) {
+
+                if (!last || last.status !== cleanStatus) {
                     timeline.push({
-                        status: entry.status,
+                        status: cleanStatus,
                         timestamp: entry.timestamp,
                         location: entry.location || null
                     });
                 }
             });
 
-        // 🧾 Order summary
+        // 🧾 SUMMARY
         const summary = {
             orderId: order.orderId || order._id,
             orderNumber: order.orderNumber,
             date: order.date,
             totalAmount: order.amount,
-            status: order.status,
-            currentStatus: order.orderStatus || order.shipment?.status || order.status,
+
+            // Set correct final status
+            status: order.orderStatus,
+            currentStatus:
+                shiprocketStatusMap[order.shipment?.status] ||  // map if numeric
+                order.orderStatus ||
+                order.shipment?.status ||
+                "Pending",
+
             orderType: order.orderType || "Online",
         };
 
-        // 👤 Customer details
+        // 👤 CUSTOMER
         const customer = {
             id: order.user?._id || null,
             name: order.user?.name || order.customerName || "",
@@ -736,19 +1098,39 @@ export const getOrderById = async (req, res) => {
             phone: order.user?.phone || "",
         };
 
-        // 📦 Product details (for both detail view + tracking view)
-        const products = order.products.map((p) => ({
-            id: p.productId?._id,
-            name: p.productId?.name,
-            brand: p.productId?.brand || "Unknown",
-            category: p.productId?.category,
-            image: p.productId?.images?.[0] || null,
-            quantity: p.quantity,
-            price: p.price,
-            total: p.quantity * p.price,
-        }));
+        // 📦 PRODUCTS WITH VARIANT LOGIC (like getUserOrders)
+        const products = order.products.map((p) => {
+            const product = p.productId || {};
 
-        // 🚚 Shipping details
+            // Detect variant if exists
+            const variantObj =
+                product?.variants?.find(v => String(v.sku) === String(p.variant?.sku));
+
+            const variantName =
+                p.variant?.shadeName ||
+                variantObj?.shadeName ||
+                null;
+
+            const variantImage =
+                variantObj?.image ||
+                p.variant?.image ||
+                product.images?.[0] ||
+                null;
+
+            return {
+                id: product._id,
+                name: product.name,
+                brand: product.brand || "Unknown",
+                category: product.category,
+                image: variantImage,
+                quantity: p.quantity,
+                price: p.price,
+                total: p.quantity * p.price,
+                variant: variantName
+            };
+        });
+
+        // 🚚 SHIPPING
         const shipping = {
             name: order.shippingAddress?.name,
             phone: order.shippingAddress?.phone,
@@ -761,7 +1143,7 @@ export const getOrderById = async (req, res) => {
             expectedDelivery: order.expectedDelivery || null,
         };
 
-        // 💳 Payment details
+        // 💳 PAYMENT
         const payment = {
             method: order.paymentMethod || "Not specified",
             status: order.paymentStatus || "Pending",
@@ -769,42 +1151,57 @@ export const getOrderById = async (req, res) => {
             amount: order.amount,
         };
 
-        // 🎁 Discount and affiliate info
+        // 🎁 DISCOUNT
         const discount = order.discount
             ? {
-                code: order.discount.code,
-                type: order.discount.type,
-                value: order.discount.value,
-                discountAmount: order.discountAmount || 0,
-                buyerDiscountAmount: order.buyerDiscountAmount || 0,
-            }
+                  code: order.discount.code,
+                  type: order.discount.type,
+                  value: order.discount.value,
+                  discountAmount: order.discountAmount || 0,
+                  buyerDiscountAmount: order.buyerDiscountAmount || 0,
+              }
             : null;
 
+        // 🌐 AFFILIATE
         const affiliate = order.affiliate
             ? {
-                id: order.affiliate._id,
-                name: order.affiliate.name,
-                referralCode: order.affiliate.referralCode,
-            }
+                  id: order.affiliate._id,
+                  name: order.affiliate.name,
+                  referralCode: order.affiliate.referralCode,
+              }
             : null;
 
-        // 📦 Shipment info
+        // 🛳️ SHIPMENT WITH HUMAN-READABLE STATUS
         const shipment = order.shipment
             ? {
-                courierName: order.shipment.courier_name || null,
-                trackingNumber: order.shipment.awb_code || null,
-                currentStatus: order.shipment.status || null,
-                assignedAt: order.shipment.assignedAt || null,
-            }
+                  courierName: order.shipment.courier_name || null,
+                  trackingNumber: order.shipment.awb_code || null,
+
+                  currentStatus:
+                      shiprocketStatusMap[order.shipment.status] ||
+                      order.shipment.status ||
+                      "Created",
+
+                  assignedAt: order.shipment.assignedAt || null,
+              }
             : null;
 
-        // 🧠 Compute totals
-        const subtotal = order.products.reduce((acc, p) => acc + p.price * p.quantity, 0);
+        // 🧠 TOTALS
+        const subtotal = order.products.reduce(
+            (acc, p) => acc + p.price * p.quantity,
+            0
+        );
+
         const shippingCharge = order.shippingCharge || 0;
         const tax = order.taxAmount || 0;
-        const totalPrice = subtotal + shippingCharge + tax - (order.discountAmount || 0);
 
-        // 🧩 Final structured response (for both UIs)
+        const totalPrice =
+            subtotal +
+            shippingCharge +
+            tax -
+            (order.discountAmount || 0);
+
+        // FINAL RESPONSE
         const response = {
             summary,
             customer,
@@ -825,7 +1222,7 @@ export const getOrderById = async (req, res) => {
 
         res.status(200).json(response);
     } catch (err) {
-        console.error("Error fetching order:", err);
+        console.error("🔥 getOrderById failed:", err);
         res.status(500).json({ message: "Failed to fetch order", error: err.message });
     }
 };
