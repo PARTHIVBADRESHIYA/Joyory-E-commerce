@@ -8,7 +8,13 @@ export const uploadVideoController = async (req, res) => {
 
         const isVideo = req.file.mimetype.startsWith("video/");
 
-        const { title, description, buttonText, buttonLink } = req.body;
+        const { 
+            title, 
+            descriptionMobile, 
+            descriptionDesktop, 
+            buttonText, 
+            buttonLink 
+        } = req.body;
 
         const media = await Media.create({
             type: isVideo ? "video" : "image",
@@ -17,7 +23,8 @@ export const uploadVideoController = async (req, res) => {
             uploadedBy: req.user?._id || null,
 
             title,
-            description,
+            descriptionMobile,
+            descriptionDesktop,
             buttonText,
             buttonLink
         });
@@ -32,6 +39,7 @@ export const uploadVideoController = async (req, res) => {
         return res.status(500).json({ success: false, message: error.message });
     }
 };
+
 // ================================
 // ⭐ LIST PUBLIC MEDIA
 // ================================
@@ -97,11 +105,23 @@ export const getMediaById = async (req, res) => {
 export const updateMedia = async (req, res) => {
     try {
         const { id } = req.params;
-        const { title, description, buttonText, buttonLink } = req.body;
+        const { 
+            title, 
+            descriptionMobile, 
+            descriptionDesktop, 
+            buttonText, 
+            buttonLink 
+        } = req.body;
 
-        const updateData = { title, description, buttonText, buttonLink };
+        const updateData = { 
+            title, 
+            descriptionMobile, 
+            descriptionDesktop, 
+            buttonText, 
+            buttonLink 
+        };
 
-        // Conditional: If new file uploaded
+        // If new file is uploaded
         if (req.file) {
             const isVideo = req.file.mimetype.startsWith("video/");
             updateData.type = isVideo ? "video" : "image";
