@@ -266,6 +266,21 @@ const orderSchema = new mongoose.Schema({
         }
     ],
 
+    subtotal: { type: Number, default: 0 },
+    totalSavings: { type: Number, default: 0 },
+
+    couponDiscount: { type: Number, default: 0 },
+    pointsDiscount: { type: Number, default: 0 },
+    giftCardDiscount: { type: Number, default: 0 },
+
+    pointsUsed: { type: Number, default: 0 },
+
+    giftCardApplied: {
+        code: { type: String },
+        amount: { type: Number, default: 0 },
+        templateId: { type: mongoose.Schema.Types.ObjectId, ref: "GiftCardTemplate" }
+    },
+
     giftCard: {
         templateId: { type: mongoose.Schema.Types.ObjectId, ref: "GiftCardTemplate" },
         recipient: { name: String, email: String, phone: String },
@@ -285,11 +300,8 @@ const orderSchema = new mongoose.Schema({
     orderType: { type: String, enum: ['COD', 'Online', 'Credit card'], default: null },
     isDraft: { type: Boolean, default: true },
 
-    discount: String,
     discountCode: String,
-    discountAmount: Number,
     affiliate: { type: mongoose.Schema.Types.ObjectId, ref: "Affiliate" },
-    buyerDiscountAmount: Number,
 
     shippingAddress: { type: Object },
 
