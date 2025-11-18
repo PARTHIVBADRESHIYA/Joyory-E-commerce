@@ -98,6 +98,7 @@ export async function createShiprocketOrder(order) {
         order_id: order._id.toString(),
         order_date: new Date(order.createdAt).toISOString().slice(0, 19).replace("T", " "),
         pickup_location: process.env.SHIPROCKET_PICKUP || "Primary",
+        pickup_address_id: 9479305,  // 🔥 REQUIRED
         billing_customer_name: order.customerName || order.user?.name || "Guest",
         billing_last_name: "",
         billing_address: order.shippingAddress.addressLine1,
@@ -212,16 +213,38 @@ export async function createShiprocketOrder(order) {
     };
 }
 
-export async function cancelShiprocketShipment(shipmentId) {
+// export async function cancelShiprocketShipment(shipmentId) {
+//     const token = await getShiprocketToken();
+//     const res = await shiprocketRequest(
+//         "https://apiv2.shiprocket.in/v1/external/orders/cancel",
+//         "post",
+//         { ids: [shipmentId] },
+//         token
+//     );
+//     return res.data;
+// }
+
+export async function cancelShiprocketShipment(shiprocketOrderId) {
     const token = await getShiprocketToken();
-    const res = await shiprocketRequest(
-        "https://apiv2.shiprocket.in/v1/external/orders/cancel",
-        "post",
-        { ids: [shipmentId] },
-        token
-    );
-    return res.data;
+
+    const payload = {
+        ids: [Number(shiprocketOrderId)]
+    };
+
+    try {
+        const res = await shiprocketRequest(
+            "https://apiv2.shiprocket.in/v1/external/orders/cancel",
+            "post",
+            payload,
+            token
+        );
+        return res.data;
+    } catch (err) {
+        console.error("❌ Shiprocket API Error:", err.response?.data || err.message);
+        throw err;
+    }
 }
+
 
 // 🔍 Track shipment
 export async function trackShiprocketShipment(shipmentId) {

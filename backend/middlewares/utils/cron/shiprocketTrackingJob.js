@@ -169,9 +169,10 @@ async function markCancelled(order, location = "Shiprocket") {
 async function trackShipments() {
     try {
         const pendingOrders = await Order.find({
-            "shipment.awb_code": { $exists: true, $ne: null },
+            "shipment.shiprocket_order_id": { $exists: true, $ne: null },
             orderStatus: { $nin: ["Delivered", "Cancelled"] }
         });
+
 
         if (!pendingOrders.length) return;
 

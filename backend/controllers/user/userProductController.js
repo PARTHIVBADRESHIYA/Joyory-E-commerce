@@ -1530,7 +1530,6 @@ export const getAllProducts = async (req, res) => {
     }
 };
 
-
 export const getProductsByCategory = async (req, res) => {
     try {
         const slug = req.params.slug.toLowerCase();
