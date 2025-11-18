@@ -1,4 +1,7 @@
 
+
+
+
 // // middlewares/utils/cron/shiprocketTrackingJob.js
 // import cron from "node-cron";
 // import axios from "axios";
@@ -31,15 +34,54 @@
 //                     const trackingData = res.data.tracking_data;
 //                     if (!trackingData) return;
 
-//                     const currentStatus = trackingData.shipment_status;
+//                     // -------------------------
+//                     // FIX #1: Read correct status
+//                     // -------------------------
+//                     let currentStatus =
+//                         trackingData.current_status ||
+//                         trackingData.shipment_status ||
+//                         trackingData.status ||
+//                         null;
 
-//                     // ✅ update shipment info
+//                     // -------------------------
+//                     // FIX #3: Fallback status from events
+//                     // -------------------------
+//                     if (!currentStatus && trackingData.track_activities?.length) {
+//                         const lastEvent = trackingData.track_activities.slice(-1)[0];
+//                         currentStatus = lastEvent.activity || null;
+//                     }
+
+//                     // -------------------------
+//                     // FIX #2: Handle CANCELLED instantly
+//                     // -------------------------
+//                     if (currentStatus && String(currentStatus).toLowerCase().includes("cancel")) {
+//                         order.orderStatus = "Cancelled";
+//                         order.shipment.status = "Cancelled";
+//                         order.shipment.tracking_url = null; // remove tracking link
+//                         order.shipment.awb_code = null; // optional cleanup
+
+//                         if (!order.trackingHistory) order.trackingHistory = [];
+
+//                         order.trackingHistory.push({
+//                             status: "Cancelled",
+//                             timestamp: new Date(),
+//                             location: trackingData.current_status_location || "Courier Partner"
+//                         });
+
+//                         await order.save();
+//                         return; // STOP further processing for cancelled orders
+//                     }
+
+//                     // -------------------------
+//                     // Your existing logic (unchanged)
+//                     // -------------------------
 //                     if (currentStatus) {
 //                         order.shipment.status = currentStatus;
 //                     }
-//                     order.shipment.tracking_url = trackingData.track_url || order.shipment.tracking_url;
 
-//                     // ✅ map orderStatus from shipment_status
+//                     order.shipment.tracking_url =
+//                         trackingData.track_url || order.shipment.tracking_url;
+
 //                     if (currentStatus) {
 //                         const lower = String(currentStatus).toLowerCase();
 //                         if (lower.includes("in transit") || lower.includes("shipped")) {
@@ -53,14 +95,11 @@
 //                         }
 //                     }
 
-
-//                     // ✅ update tracking history only if we have a valid new status
 //                     if (currentStatus) {
 //                         if (!order.trackingHistory) order.trackingHistory = [];
 
 //                         const lastEntry = order.trackingHistory[order.trackingHistory.length - 1];
 
-//                         // prevent duplicate spam: only push if status changed
 //                         if (!lastEntry || lastEntry.status !== currentStatus) {
 //                             order.trackingHistory.push({
 //                                 status: currentStatus,
@@ -125,6 +164,40 @@ async function trackShipments() {
         await Promise.allSettled(
             pendingOrders.map(async (order) => {
                 try {
+                    // --------------------------------------------------
+                    // ⭐ NEW FIX: Check Shiprocket Order Details ALSO
+                    // --------------------------------------------------
+                    const orderDetailsRes = await axios.get(
+                        `https://apiv2.shiprocket.in/v1/external/orders/show/${order.shipment.shiprocket_order_id}`,
+                        { headers: { Authorization: `Bearer ${token}` } }
+                    );
+
+                    const shipOrder = orderDetailsRes.data;
+
+                    if (
+                        shipOrder?.is_canceled ||
+                        String(shipOrder?.status).toLowerCase().includes("cancel")
+                    ) {
+                        order.orderStatus = "Cancelled";
+                        order.shipment.status = "Cancelled";
+                        order.shipment.tracking_url = null;
+                        order.shipment.awb_code = null;
+
+                        if (!order.trackingHistory) order.trackingHistory = [];
+
+                        order.trackingHistory.push({
+                            status: "Cancelled",
+                            timestamp: new Date(),
+                            location: "Shiprocket Dashboard"
+                        });
+
+                        await order.save();
+                        return; // STOP further processing
+                    }
+
+                    // --------------------------------------------------
+                    // EXISTING TRACK API CALL (UNCHANGED)
+                    // --------------------------------------------------
                     const res = await axios.get(
                         `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${order.shipment.awb_code}`,
                         { headers: { Authorization: `Bearer ${token}` } }
@@ -137,34 +210,27 @@ async function trackShipments() {
                     const trackingData = res.data.tracking_data;
                     if (!trackingData) return;
 
-                    // -------------------------
-                    // FIX #1: Read correct status
-                    // -------------------------
                     let currentStatus =
                         trackingData.current_status ||
                         trackingData.shipment_status ||
                         trackingData.status ||
                         null;
 
-                    // -------------------------
-                    // FIX #3: Fallback status from events
-                    // -------------------------
                     if (!currentStatus && trackingData.track_activities?.length) {
                         const lastEvent = trackingData.track_activities.slice(-1)[0];
                         currentStatus = lastEvent.activity || null;
                     }
 
-                    // -------------------------
-                    // FIX #2: Handle CANCELLED instantly
-                    // -------------------------
+                    // --------------------------------------------------
+                    // EXISTING CANCEL CHECK (kept same)
+                    // --------------------------------------------------
                     if (currentStatus && String(currentStatus).toLowerCase().includes("cancel")) {
                         order.orderStatus = "Cancelled";
                         order.shipment.status = "Cancelled";
-                        order.shipment.tracking_url = null; // remove tracking link
-                        order.shipment.awb_code = null; // optional cleanup
+                        order.shipment.tracking_url = null;
+                        order.shipment.awb_code = null;
 
                         if (!order.trackingHistory) order.trackingHistory = [];
-
                         order.trackingHistory.push({
                             status: "Cancelled",
                             timestamp: new Date(),
@@ -172,12 +238,13 @@ async function trackShipments() {
                         });
 
                         await order.save();
-                        return; // STOP further processing for cancelled orders
+                        return;
                     }
 
-                    // -------------------------
-                    // Your existing logic (unchanged)
-                    // -------------------------
+                    // --------------------------------------------------
+                    // Existing logic continues...
+                    // --------------------------------------------------
+
                     if (currentStatus) {
                         order.shipment.status = currentStatus;
                     }
@@ -198,18 +265,15 @@ async function trackShipments() {
                         }
                     }
 
-                    if (currentStatus) {
-                        if (!order.trackingHistory) order.trackingHistory = [];
+                    if (!order.trackingHistory) order.trackingHistory = [];
 
-                        const lastEntry = order.trackingHistory[order.trackingHistory.length - 1];
-
-                        if (!lastEntry || lastEntry.status !== currentStatus) {
-                            order.trackingHistory.push({
-                                status: currentStatus,
-                                timestamp: new Date(),
-                                location: trackingData.current_status_location || undefined
-                            });
-                        }
+                    const lastEntry = order.trackingHistory[order.trackingHistory.length - 1];
+                    if (!lastEntry || lastEntry.status !== currentStatus) {
+                        order.trackingHistory.push({
+                            status: currentStatus,
+                            timestamp: new Date(),
+                            location: trackingData.current_status_location || undefined
+                        });
                     }
 
                     await order.save();
@@ -226,7 +290,6 @@ async function trackShipments() {
     }
 }
 
-// 🔹 Start cron job without blocking server
 export function startTrackingJob() {
     cron.schedule(
         "*/30 * * * *",
