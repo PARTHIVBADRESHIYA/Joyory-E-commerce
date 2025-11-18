@@ -5,6 +5,8 @@ import Category from '../models/Category.js';
 import Formulation from '../models/shade/Formulation.js';
 import mongoose from 'mongoose';
 import moment from 'moment-timezone';
+// at top of admin controller file
+import { clearProductCacheForId, clearAllProductCaches } from '../middlewares/utils/cacheUtils.js';
 
 export const resolveFormulationId = async (input) => {
     if (!input) return null;
@@ -25,6 +27,506 @@ export const resolveFormulationId = async (input) => {
     return formulationDoc._id;
 };
 
+// const addProductController = async (req, res) => {
+//     try {
+//         const {
+//             name,
+//             variant,
+//             summary,
+//             description,
+//             ingredients,
+//             features,
+//             howToUse,
+//             price,
+//             buyingPrice,
+//             brand,
+//             category,
+//             categories,
+//             quantity,
+//             expiryDate,
+//             scheduledAt,
+//             productTags: rawTags,
+//             variants: rawVariants,
+//             thresholdValue: rawThresholdValue,
+//             formulation,
+//             seller,
+//         } = req.body;
+
+//         // ---------------- Basic Validations ----------------
+//         if (!name)
+//             return res.status(400).json({ message: "Product name is required" });
+
+//         const existingProduct = await Product.findOne({ name: name.trim() });
+//         if (existingProduct)
+//             return res.status(400).json({ message: `Product with name "${name}" already exists` });
+
+//         if (!category && (!categories || categories.length === 0)) {
+//             return res.status(400).json({ message: "Category is required" });
+//         }
+
+//         // ---------------- Handle Scheduling ----------------
+//         let isPublished = true;
+//         let scheduleDate = null;
+//         if (scheduledAt) {
+//             // User enters IST time (local)
+//             const parsedDateIST = moment.tz(scheduledAt, "YYYY-MM-DD HH:mm", "Asia/Kolkata");
+
+//             if (!parsedDateIST.isValid()) {
+//                 return res.status(400).json({ message: "❌ Invalid scheduledAt date format. Use YYYY-MM-DD HH:mm (IST)" });
+//             }
+
+//             // Convert IST to UTC before saving
+//             const parsedDateUTC = parsedDateIST.clone().tz("UTC").toDate();
+
+//             if (parsedDateUTC > new Date()) {
+//                 isPublished = false;
+//                 scheduleDate = parsedDateUTC; // ✅ saved in UTC
+//             }
+//         }
+
+//         // ---------------- Resolve Categories ----------------
+//         let finalCategories = categories && categories.length
+//             ? (Array.isArray(categories) ? categories : [categories])
+//             : [category];
+
+//         const resolvedCategories = [];
+//         for (let cat of finalCategories) {
+//             if (!cat) continue;
+//             const trimmed = String(cat).trim();
+//             if (mongoose.Types.ObjectId.isValid(trimmed)) {
+//                 resolvedCategories.push(trimmed);
+//             } else {
+//                 const foundCat = await Category.findOne({ name: { $regex: `^${trimmed}$`, $options: "i" } });
+//                 if (!foundCat)
+//                     return res.status(400).json({ message: `Category "${trimmed}" not found` });
+//                 resolvedCategories.push(foundCat._id);
+//             }
+//         }
+
+//         const foundCategories = await Category.find({ _id: { $in: resolvedCategories } });
+//         if (foundCategories.length !== resolvedCategories.length)
+//             return res.status(400).json({ message: "One or more category IDs are invalid" });
+
+//         // ---------------- Build Hierarchy ----------------
+//         const buildCategoryHierarchy = async (leafId) => {
+//             const hierarchy = [];
+//             let current = await Category.findById(leafId);
+//             while (current) {
+//                 hierarchy.unshift(current._id);
+//                 if (!current.parent) break;
+//                 current = await Category.findById(current.parent);
+//             }
+//             return hierarchy;
+//         };
+//         const categoryHierarchy = await buildCategoryHierarchy(resolvedCategories[0]);
+
+//         // ---------------- Parse Tags ----------------
+//         let productTags = [];
+//         try {
+//             productTags = rawTags
+//                 ? (typeof rawTags === "string" ? JSON.parse(rawTags) : rawTags)
+//                 : [];
+//         } catch {
+//             productTags = [];
+//         }
+
+//         // ---------------- Price Validations ----------------
+//         const parsedPrice = Number(price);
+//         const parsedBuyingPrice = Number(buyingPrice);
+//         if (isNaN(parsedPrice) || isNaN(parsedBuyingPrice))
+//             return res.status(400).json({ message: "❌ Invalid numeric values for price or buyingPrice" });
+
+//         // ---------------- Variants ----------------
+//         let variants = [];
+//         let shadeOptions = [];
+//         let colorOptions = [];
+//         let images = [];
+
+//         try {
+//             let variantArray = rawVariants
+//                 ? (typeof rawVariants === "string" ? JSON.parse(rawVariants) : rawVariants)
+//                 : [];
+
+//             if (variantArray.length > 0) {
+//                 // ✅ Variant Product Rules
+//                 if (quantity || rawThresholdValue || req.body.images || req.body.imageUrls) {
+//                     return res.status(400).json({
+//                         message: "❌ For variant products, do NOT provide global quantity, thresholdValue or images. Use variants only.",
+//                     });
+//                 }
+
+//                 // ✅ Validate all variants first
+//                 const skuSet = new Set();
+//                 for (let i = 0; i < variantArray.length; i++) {
+//                     const v = variantArray[i];
+//                     if (!v.sku) throw new Error(`Variant ${i + 1} is missing SKU`);
+//                     if (skuSet.has(v.sku))
+//                         throw new Error(`Duplicate SKU "${v.sku}" found`);
+//                     skuSet.add(v.sku);
+
+//                     if (v.stock === undefined || isNaN(Number(v.stock)))
+//                         throw new Error(`Variant ${v.sku} must have valid stock`);
+//                     if (v.thresholdValue === undefined || isNaN(Number(v.thresholdValue)))
+//                         throw new Error(`Variant ${v.sku} must have thresholdValue`);
+//                 }
+
+//                 // ✅ Upload variant images and build variant array
+//                 variants = await Promise.all(
+//                     variantArray.map(async (v, i) => {
+//                         const uploadedImages = [];
+//                         const variantFiles = req.files?.filter(
+//                             (f) => f.fieldname === `variants[${i}][images]`
+//                         ) || [];
+
+//                         for (const file of variantFiles) {
+//                             const result = await cloudinary.uploader.upload(file.path, {
+//                                 folder: "products/variants",
+//                             });
+//                             uploadedImages.push(result.secure_url);
+//                         }
+
+//                         const combinedImages = [
+//                             ...(Array.isArray(v.images) ? v.images : []),
+//                             ...uploadedImages,
+//                         ];
+
+//                         if (combinedImages.length === 0)
+//                             throw new Error(`Variant ${v.sku} must have at least one image`);
+
+//                         return {
+//                             ...v,
+//                             stock: Number(v.stock),
+//                             sales: Number(v.sales) || 0,
+//                             thresholdValue: Number(v.thresholdValue),
+//                             discountedPrice:
+//                                 v.discountedPrice !== undefined
+//                                     ? Number(v.discountedPrice)
+//                                     : null,
+//                             images: combinedImages.slice(-8),
+//                             isActive: v.isActive !== false,
+//                             createdAt: new Date(),
+//                         };
+//                     })
+//                 );
+
+//                 shadeOptions = variants.map((v) => v.shadeName).filter(Boolean);
+//                 colorOptions = variants.map((v) => v.hex).filter(Boolean);
+//             } else {
+//                 // ✅ Non-Variant Product Rules
+//                 if (quantity === undefined)
+//                     return res.status(400).json({
+//                         message: "❌ quantity is required for non-variant products",
+//                     });
+//                 if (rawThresholdValue === undefined)
+//                     return res.status(400).json({
+//                         message: "❌ thresholdValue is required for non-variant products",
+//                     });
+
+//                 // ✅ Upload global product images
+//                 const mainFiles = req.files?.filter((f) => f.fieldname === "images") || [];
+//                 for (const file of mainFiles) {
+//                     const result = await cloudinary.uploader.upload(file.path, {
+//                         folder: "products",
+//                     });
+//                     images.push(result.secure_url);
+//                 }
+
+//                 if (req.body.imageUrls) {
+//                     let urls =
+//                         typeof req.body.imageUrls === "string"
+//                             ? JSON.parse(req.body.imageUrls)
+//                             : req.body.imageUrls;
+//                     for (const url of urls) images.push(url);
+//                 }
+
+//                 if (images.length === 0)
+//                     return res.status(400).json({
+//                         message: "❌ Non-variant products must have at least one global image",
+//                     });
+//             }
+//         } catch (err) {
+//             console.error("❌ Variants parsing error:", err);
+//             return res.status(400).json({ message: err.message });
+//         }
+
+//         // ---------------- Compute Stock Status ----------------
+//         const totalQuantity =
+//             variants.length > 0
+//                 ? variants.reduce((sum, v) => sum + (v.stock || 0), 0)
+//                 : Number(quantity);
+
+//         let status =
+//             totalQuantity === 0
+//                 ? "Out of stock"
+//                 : totalQuantity < Number(rawThresholdValue)
+//                     ? "Low stock"
+//                     : "In-stock";
+
+//         // ---------------- Create Product ----------------
+//         const product = new Product({
+//             name,
+//             variant,
+//             summary,
+//             description,
+//             ingredients,
+//             features,
+//             howToUse,
+//             price: parsedPrice,
+//             buyingPrice: parsedBuyingPrice,
+//             quantity: variants.length > 0 ? undefined : Number(quantity),
+//             thresholdValue: variants.length > 0 ? undefined : Number(rawThresholdValue),
+//             expiryDate,
+//             images: variants.length > 0 ? undefined : images,
+//             brand,
+//             category: resolvedCategories[0],
+//             categories: resolvedCategories,
+//             categoryHierarchy,
+//             status,
+//             productTags,
+//             shadeOptions,
+//             colorOptions,
+//             variants,
+//             isPublished,
+//             scheduledAt: scheduleDate,
+//             seller: seller || null,
+//         });
+
+//         await product.save();
+//         return res.status(201).json({
+//             message: "✅ Product created successfully",
+//             product,
+//         });
+//     } catch (error) {
+//         console.error(
+//             "❌ Product placement error:",
+//             util.inspect(error, { showHidden: false, depth: null })
+//         );
+//         return res.status(500).json({
+//             message: "❌ Product placement failed",
+//             error: error.message,
+//         });
+//     }
+// };
+
+// const updateProductById = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+
+//         // ---------------- Basic Checks ----------------
+//         if (!mongoose.Types.ObjectId.isValid(id))
+//             return res.status(400).json({ message: "❌ Invalid product ID" });
+
+//         const existingProduct = await Product.findById(id);
+//         if (!existingProduct)
+//             return res.status(404).json({ message: "❌ Product not found" });
+
+//         const updateData = { ...req.body };
+
+//         // ---------------- Numeric Fields ----------------
+//         if (req.body.price) updateData.price = Number(req.body.price);
+//         if (req.body.buyingPrice) updateData.buyingPrice = Number(req.body.buyingPrice);
+//         if (isNaN(updateData.price) || isNaN(updateData.buyingPrice))
+//             return res.status(400).json({ message: "❌ Invalid numeric values for price or buyingPrice" });
+
+//         // ---------------- Parse Variants ----------------
+//         let rawVariants = req.body.variants || [];
+//         if (typeof rawVariants === "string") {
+//             try {
+//                 rawVariants = JSON.parse(rawVariants);
+//             } catch {
+//                 rawVariants = [];
+//             }
+//         }
+
+//         // ---------------- Parse Removed Variant SKUs ----------------
+//         let removedVariantSkus = [];
+//         if (req.body.removedVariantSkus) {
+//             try {
+//                 removedVariantSkus = JSON.parse(req.body.removedVariantSkus);
+//             } catch {
+//                 removedVariantSkus = [];
+//             }
+//         }
+
+//         // ---------------- Parse Removed Global Images ----------------
+//         let removedImages = [];
+//         if (req.body.removedImages) {
+//             try {
+//                 removedImages = JSON.parse(req.body.removedImages);
+//             } catch {
+//                 removedImages = [];
+//             }
+//         }
+
+//         // ---------------- Handle Cloudinary Uploads ----------------
+//         const productImages = [];
+//         const variantImagesMap = {}; // {index: [urls]}
+
+//         if (req.files && req.files.length > 0) {
+//             for (const file of req.files) {
+//                 const uploadResult = await cloudinary.uploader.upload(file.path, { folder: "products" });
+
+//                 if (file.fieldname === "images") {
+//                     productImages.push(uploadResult.secure_url);
+//                 } else {
+//                     const match = file.fieldname.match(/variants\[(\d+)\]\[images\]/);
+//                     if (match) {
+//                         const idx = Number(match[1]);
+//                         if (!variantImagesMap[idx]) variantImagesMap[idx] = [];
+//                         variantImagesMap[idx].push(uploadResult.secure_url);
+//                     }
+//                 }
+//             }
+//         }
+
+//         // ---------------- VARIANT PRODUCT LOGIC ----------------
+//         if (existingProduct.variants?.length > 0 || rawVariants.length > 0) {
+//             if (req.body.quantity || req.body.thresholdValue || req.body.images || req.body.imageUrls) {
+//                 return res.status(400).json({
+//                     message: "❌ For variant products, do NOT provide global quantity, thresholdValue, or images. Use variants only."
+//                 });
+//             }
+
+//             // 1️⃣ Map existing variants by SKU
+//             const variantMap = new Map();
+//             for (const oldVar of existingProduct.variants || []) {
+//                 variantMap.set(oldVar.sku, oldVar);
+//             }
+
+//             // 2️⃣ Remove variants that are explicitly deleted
+//             for (const sku of removedVariantSkus) {
+//                 variantMap.delete(sku);
+//             }
+
+//             // 3️⃣ Process incoming variant updates
+//             for (let i = 0; i < rawVariants.length; i++) {
+//                 const v = rawVariants[i];
+
+//                 if (!v.sku) throw new Error(`Variant ${i + 1} missing SKU`);
+//                 if (v.stock === undefined || isNaN(Number(v.stock)))
+//                     throw new Error(`Variant ${v.sku} must have valid stock`);
+//                 if (v.thresholdValue === undefined || isNaN(Number(v.thresholdValue)))
+//                     throw new Error(`Variant ${v.sku} must have valid thresholdValue`);
+
+//                 const oldVariant = variantMap.get(v.sku);
+
+//                 // Handle variant image removals
+//                 let removedVariantImages = [];
+//                 if (v.removedImages) {
+//                     try {
+//                         removedVariantImages = JSON.parse(v.removedImages);
+//                     } catch { }
+//                 }
+
+//                 const uploadedVariantImages = variantImagesMap[i] || [];
+//                 const oldImages = oldVariant?.images || [];
+//                 const retainedImages = oldImages.filter(img => !removedVariantImages.includes(img));
+
+//                 const combinedImages = [
+//                     ...(Array.isArray(v.images) ? v.images : []),
+//                     ...retainedImages,
+//                     ...uploadedVariantImages,
+//                 ].filter(Boolean);
+
+//                 if (combinedImages.length === 0)
+//                     throw new Error(`Variant ${v.sku} must have at least one image`);
+
+//                 const updatedVariant = {
+//                     ...oldVariant?._doc,
+//                     ...v,
+//                     stock: Number(v.stock),
+//                     sales: Number(v.sales) || oldVariant?.sales || 0,
+//                     thresholdValue: Number(v.thresholdValue),
+//                     discountedPrice:
+//                         v.discountedPrice !== undefined
+//                             ? Number(v.discountedPrice)
+//                             : oldVariant?.discountedPrice || null,
+//                     images: [...new Set(combinedImages)],
+//                     isActive: v.isActive !== false,
+//                     updatedAt: new Date(),
+//                 };
+
+//                 variantMap.set(v.sku, updatedVariant);
+//             }
+
+//             // 4️⃣ Final updated variant list (after removal + update + add)
+//             const updatedVariants = Array.from(variantMap.values());
+
+//             // 5️⃣ Prepare other variant-related data
+//             updateData.variants = updatedVariants;
+//             updateData.shadeOptions = updatedVariants.map(v => v.shadeName).filter(Boolean);
+//             updateData.colorOptions = updatedVariants.map(v => v.hex).filter(Boolean);
+//             updateData.quantity = updatedVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
+//             updateData.thresholdValue = undefined;
+//             updateData.images = undefined;
+//         }
+
+//         // ---------------- NON-VARIANT PRODUCT LOGIC ----------------
+//         else {
+//             if (req.body.variants && req.body.variants.length > 0)
+//                 return res.status(400).json({ message: "❌ Non-variant products cannot have variants" });
+
+//             if (
+//                 (req.body.quantity === undefined && existingProduct.quantity === undefined) ||
+//                 isNaN(Number(req.body.quantity ?? existingProduct.quantity))
+//             ) {
+//                 return res.status(400).json({ message: "❌ quantity is required for non-variant products" });
+//             }
+
+//             if (
+//                 (req.body.thresholdValue === undefined && existingProduct.thresholdValue === undefined) ||
+//                 isNaN(Number(req.body.thresholdValue ?? existingProduct.thresholdValue))
+//             ) {
+//                 return res.status(400).json({ message: "❌ thresholdValue is required for non-variant products" });
+//             }
+
+//             let finalImages = [...(existingProduct.images || [])];
+//             if (removedImages.length > 0)
+//                 finalImages = finalImages.filter(img => !removedImages.includes(img));
+//             if (productImages.length > 0)
+//                 finalImages.push(...productImages);
+
+//             finalImages = [...new Set(finalImages)];
+//             if (finalImages.length === 0)
+//                 return res.status(400).json({ message: "❌ Non-variant products must have at least one global image" });
+
+//             updateData.images = finalImages;
+//         }
+
+//         // ---------------- Compute Stock Status ----------------
+//         const totalQuantity =
+//             updateData.variants?.length > 0
+//                 ? updateData.variants.reduce((sum, v) => sum + (v.stock || 0), 0)
+//                 : Number(updateData.quantity || existingProduct.quantity);
+
+//         const threshold =
+//             updateData.variants?.length > 0
+//                 ? Math.min(...updateData.variants.map(v => v.thresholdValue || Infinity))
+//                 : Number(updateData.thresholdValue || existingProduct.thresholdValue);
+
+//         updateData.status =
+//             totalQuantity === 0
+//                 ? "Out of stock"
+//                 : totalQuantity < threshold
+//                     ? "Low stock"
+//                     : "In-stock";
+
+//         // ---------------- Save Update ----------------
+//         const updatedProduct = await Product.findByIdAndUpdate(id, updateData, { new: true });
+
+//         res.status(200).json({
+//             message: "✅ Product updated successfully",
+//             product: updatedProduct
+//         });
+
+//     } catch (error) {
+//         console.error("❌ Product update error:", error);
+//         res.status(400).json({
+//             message: error.message || "❌ Failed to update product",
+//             error: error.message
+//         });
+//     }
+// };
 const addProductController = async (req, res) => {
     try {
         const {
@@ -290,6 +792,11 @@ const addProductController = async (req, res) => {
         });
 
         await product.save();
+
+        // Clear cache for this product (and optionally global product lists)
+        await clearProductCacheForId(product._id);
+        await clearAllProductCaches(); // optional: clears lists/homepage etc. Use if you cache them
+
         return res.status(201).json({
             message: "✅ Product created successfully",
             product,
@@ -511,6 +1018,10 @@ const updateProductById = async (req, res) => {
 
         // ---------------- Save Update ----------------
         const updatedProduct = await Product.findByIdAndUpdate(id, updateData, { new: true });
+
+        // Clear cache for this product id/slug
+        await clearProductCacheForId(updatedProduct._id);
+        await clearAllProductCaches(); // optional
 
         res.status(200).json({
             message: "✅ Product updated successfully",

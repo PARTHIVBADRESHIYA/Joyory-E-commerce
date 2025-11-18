@@ -532,6 +532,11 @@ export const enrichProductsUnified = async (products, promotions = [], options =
                 price,
                 discountPercent,
                 discountAmount: mrp - price,
+                // 🔹 ADD THESE FIELDS
+                description: enriched.description || "",
+                howToUse: enriched.howToUse || "",
+                ingredients: enriched.ingredients || "",
+                features: enriched.features || "",
                 images: normalizeImages(enriched.images || []),
                 variants: normalizedVariants,
                 shadeOptions: enriched.shadeOptions,

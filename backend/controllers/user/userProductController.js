@@ -1091,7 +1091,7 @@ import Category from '../../models/Category.js';
 import { getDescendantCategoryIds } from '../../middlewares/utils/categoryUtils.js';
 import { getRecommendations } from '../../middlewares/utils/recommendationService.js';
 import redis from '../../middlewares/utils/redis.js';
-
+import {PRODUCT_CACHE_VERSION} from '../../middlewares/utils/cacheUtils.js';
 import { enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
 import mongoose from 'mongoose';
 
@@ -1736,11 +1736,152 @@ export const getProductsByCategory = async (req, res) => {
     }
 };
 
+// export const getSingleProduct = async (req, res) => {
+//     try {
+//         const { idOrSlug } = req.params; // works for both slug or id
+//         // 🔥 Redis Key
+//         const redisKey = `prod:${idOrSlug}:${req.query.variant || ""}`;
+
+//         // 🔥 Return cached version
+//         const cached = await redis.get(redisKey);
+//         if (cached) {
+//             return res.status(200).json(JSON.parse(cached));
+//         }
+
+//         const selectedSku = req.query.variant; // optional
+
+//         // Decide query by id vs slug
+//         const query = mongoose.Types.ObjectId.isValid(idOrSlug)
+//             ? { _id: idOrSlug }
+//             : { slug: idOrSlug };
+
+//         // --- SAFE SELECT: includes fields used by response & likely used by enrichProductsUnified
+//         const selectFields = [
+//             "_id", "name", "slug", "mrp", "price", "discountPercent", "discountAmount",
+//             "images", "variants", "shadeOptions", "brand", "category", "categorySlug",
+//             "avgRating", "totalRatings", "inStock", "selectedVariant", "views",
+//             "commentsCount", "productTags", "formulation", "skinTypes", "createdAt",
+//             "discountedPrice", "description", "howToUse", "ingredients", "features"
+//         ].join(" ");
+
+//         // 1) Find product + increment views — using .select() + lean() for performance
+//         const product = await Product.findOneAndUpdate(
+//             { ...query, isPublished: true },
+//             { $inc: { views: 1 } },
+//             { new: true }
+//         )
+//             .select(selectFields)
+//             .lean();
+
+//         if (!product) {
+//             return res.status(404).json({
+//                 message: "❌ Product not found or may have been removed.",
+//             });
+//         }
+
+//         // 2) Fetch active promotions with tiny in-memory cache to reduce DB calls
+//         const now = Date.now();
+//         if (_promoCache.data && (now - _promoCache.ts) < _promoCache.ttl) {
+//             // use cached
+//         } else {
+//             const dbNow = new Date();
+//             const promos = await Promotion.find({
+//                 status: "active",
+//                 startDate: { $lte: dbNow },
+//                 endDate: { $gte: dbNow },
+//             }).lean();
+//             _promoCache = { ts: Date.now(), data: promos, ttl: 5000 };
+//         }
+//         const promotions = _promoCache.data || [];
+
+//         // 3) Enrich product (unchanged behavior) — keep existing helper
+//         const enrichedProduct = await enrichProductsUnified(product, promotions, {
+//             selectedSku,
+//         });
+
+//         // 4) Per-variant stock messages (same logic, optimized loop)
+//         if (Array.isArray(enrichedProduct.variants) && enrichedProduct.variants.length) {
+//             for (const v of enrichedProduct.variants) {
+//                 const vStock = v.stock ?? 0;
+//                 if (vStock <= 0) v.stockMessage = "⛔ Currently out of stock — check back soon!";
+//                 else if (vStock === 1) v.stockMessage = "🔥 Almost gone! Only 1 left in stock.";
+//                 else if (vStock <= 3) v.stockMessage = `⚡ Hurry! Just ${vStock} piece${vStock > 1 ? "s" : ""} remaining.`;
+//                 else if (vStock < 10) v.stockMessage = `💨 Only a few left — ${vStock} available!`;
+//                 else v.stockMessage = null;
+//             }
+//         }
+
+//         // 5) Generate recommendations in parallel (same logic, faster)
+//         const modes = ["moreLikeThis", "boughtTogether", "alsoViewed"];
+//         const recPromises = modes.map(mode =>
+//             getRecommendations({
+//                 mode,
+//                 productId: enrichedProduct._id,
+//                 categorySlug: enrichedProduct.categorySlug,
+//                 userId: req.user?._id,
+//                 limit: 6,
+//             }).then(rec => ({ mode, rec }))
+//         );
+
+//         const recResults = await Promise.all(recPromises);
+//         const recommendations = {};
+//         for (const { mode, rec } of recResults) {
+//             recommendations[mode] = {
+//                 name: rec?.message || mode,
+//                 products: rec?.success ? rec.products : [],
+//             };
+//         }
+
+//         await redis.set(redisKey, JSON.stringify({
+//             _id: enrichedProduct._id,
+//             name: enrichedProduct.name,
+//             slug: enrichedProduct.slug,
+//             brand: enrichedProduct.brand || null,
+//             mrp: enrichedProduct.mrp,
+//             variants: enrichedProduct.variants,
+//             shadeOptions: enrichedProduct.shadeOptions || [],
+//             avgRating: enrichedProduct.avgRating,
+//             totalRatings: enrichedProduct.totalRatings,
+//             selectedVariant: enrichedProduct.selectedVariant,
+//             description: enrichedProduct.description,
+//             howToUse: enrichedProduct.howToUse,
+//             ingredients: enrichedProduct.ingredients,
+//             features: enrichedProduct.features,
+//             recommendations
+//         }), "EX", 30);
+
+//         return res.status(200).json({
+//             _id: enrichedProduct._id,
+//             name: enrichedProduct.name,
+//             slug: enrichedProduct.slug,
+//             brand: enrichedProduct.brand || null,
+//             mrp: enrichedProduct.mrp,
+//             variants: enrichedProduct.variants,
+//             shadeOptions: enrichedProduct.shadeOptions || [],
+//             avgRating: enrichedProduct.avgRating,
+//             totalRatings: enrichedProduct.totalRatings,
+//             selectedVariant: enrichedProduct.selectedVariant,
+//             description: enrichedProduct.description,
+//             howToUse: enrichedProduct.howToUse,
+//             ingredients: enrichedProduct.ingredients,
+//             features: enrichedProduct.features,
+//             recommendations,
+//         });
+
+//     } catch (err) {
+//         console.error("❌ getSingleProduct error:", err);
+//         return res.status(500).json({
+//             message:
+//                 "🚫 Oops! Something went wrong while fetching product details. Please try again shortly.",
+//             error: err.message,
+//         });
+//     }
+// };
 export const getSingleProduct = async (req, res) => {
     try {
         const { idOrSlug } = req.params; // works for both slug or id
         // 🔥 Redis Key
-        const redisKey = `prod:${idOrSlug}:${req.query.variant || ""}`;
+        const redisKey = `prod:${PRODUCT_CACHE_VERSION}:${idOrSlug}:${req.query.variant || ""}`;
 
         // 🔥 Return cached version
         const cached = await redis.get(redisKey);
@@ -1761,7 +1902,7 @@ export const getSingleProduct = async (req, res) => {
             "images", "variants", "shadeOptions", "brand", "category", "categorySlug",
             "avgRating", "totalRatings", "inStock", "selectedVariant", "views",
             "commentsCount", "productTags", "formulation", "skinTypes", "createdAt",
-            "discountedPrice"
+            "discountedPrice", "description", "howToUse", "ingredients", "features"
         ].join(" ");
 
         // 1) Find product + increment views — using .select() + lean() for performance
@@ -1832,7 +1973,6 @@ export const getSingleProduct = async (req, res) => {
             };
         }
 
-        // 🟢 Cache for 30 seconds
         await redis.set(redisKey, JSON.stringify({
             _id: enrichedProduct._id,
             name: enrichedProduct.name,
@@ -1844,11 +1984,13 @@ export const getSingleProduct = async (req, res) => {
             avgRating: enrichedProduct.avgRating,
             totalRatings: enrichedProduct.totalRatings,
             selectedVariant: enrichedProduct.selectedVariant,
+            description: enrichedProduct.description,
+            howToUse: enrichedProduct.howToUse,
+            ingredients: enrichedProduct.ingredients,
+            features: enrichedProduct.features,
             recommendations
         }), "EX", 30);
 
-
-        // 6) Final response (unchanged shape)
         return res.status(200).json({
             _id: enrichedProduct._id,
             name: enrichedProduct.name,
@@ -1860,8 +2002,13 @@ export const getSingleProduct = async (req, res) => {
             avgRating: enrichedProduct.avgRating,
             totalRatings: enrichedProduct.totalRatings,
             selectedVariant: enrichedProduct.selectedVariant,
+            description: enrichedProduct.description,
+            howToUse: enrichedProduct.howToUse,
+            ingredients: enrichedProduct.ingredients,
+            features: enrichedProduct.features,
             recommendations,
         });
+
     } catch (err) {
         console.error("❌ getSingleProduct error:", err);
         return res.status(500).json({
