@@ -300,6 +300,7 @@ const orderSchema = new mongoose.Schema({
     orderType: { type: String, enum: ['COD', 'Online', 'Credit card'], default: null },
     isDraft: { type: Boolean, default: true },
 
+    discount: String,
     discountCode: String,
     affiliate: { type: mongoose.Schema.Types.ObjectId, ref: "Affiliate" },
 

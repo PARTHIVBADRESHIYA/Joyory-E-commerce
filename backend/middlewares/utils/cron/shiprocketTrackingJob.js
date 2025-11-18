@@ -142,13 +142,29 @@
 // }
 
 
-
-
 // middlewares/utils/cron/shiprocketTrackingJob.js
 import cron from "node-cron";
 import axios from "axios";
 import Order from "../../../models/Order.js";
 import { getShiprocketToken } from "../../services/shiprocket.js";
+
+// 🔥 Helper to mark order as cancelled properly
+async function markCancelled(order, location = "Shiprocket") {
+    order.orderStatus = "Cancelled";
+    order.shipment.status = "Cancelled";
+    order.shipment.tracking_url = null;
+    order.shipment.awb_code = null;
+
+    if (!order.trackingHistory) order.trackingHistory = [];
+
+    order.trackingHistory.push({
+        status: "Cancelled",
+        timestamp: new Date(),
+        location
+    });
+
+    await order.save();
+}
 
 async function trackShipments() {
     try {
@@ -165,7 +181,7 @@ async function trackShipments() {
             pendingOrders.map(async (order) => {
                 try {
                     // --------------------------------------------------
-                    // ⭐ NEW FIX: Check Shiprocket Order Details ALSO
+                    // ⭐ NEW FIX: ALSO check Shiprocket Order API
                     // --------------------------------------------------
                     const orderDetailsRes = await axios.get(
                         `https://apiv2.shiprocket.in/v1/external/orders/show/${order.shipment.shiprocket_order_id}`,
@@ -174,29 +190,34 @@ async function trackShipments() {
 
                     const shipOrder = orderDetailsRes.data;
 
+                    // --------------------------------------------------
+                    // 🚨 NEW FIX 1: courier-level cancellation
+                    // --------------------------------------------------
+                    if (
+                        shipOrder?.courier_status &&
+                        String(shipOrder.courier_status).toLowerCase().includes("cancel")
+                    ) {
+                        await markCancelled(order, "Courier Partner (courier_status)");
+                        return;
+                    }
+
+                    // 🚨 NEW FIX 2: courier_status_code = 9 (cancelled)
+                    if (shipOrder?.courier_status_code === 9) {
+                        await markCancelled(order, "Courier Partner (status_code 9)");
+                        return;
+                    }
+
+                    // 🚨 Existing Shiprocket cancellation indicators
                     if (
                         shipOrder?.is_canceled ||
                         String(shipOrder?.status).toLowerCase().includes("cancel")
                     ) {
-                        order.orderStatus = "Cancelled";
-                        order.shipment.status = "Cancelled";
-                        order.shipment.tracking_url = null;
-                        order.shipment.awb_code = null;
-
-                        if (!order.trackingHistory) order.trackingHistory = [];
-
-                        order.trackingHistory.push({
-                            status: "Cancelled",
-                            timestamp: new Date(),
-                            location: "Shiprocket Dashboard"
-                        });
-
-                        await order.save();
-                        return; // STOP further processing
+                        await markCancelled(order, "Shiprocket Dashboard");
+                        return;
                     }
 
                     // --------------------------------------------------
-                    // EXISTING TRACK API CALL (UNCHANGED)
+                    // EXISTING TRACK API CALL
                     // --------------------------------------------------
                     const res = await axios.get(
                         `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${order.shipment.awb_code}`,
@@ -222,29 +243,19 @@ async function trackShipments() {
                     }
 
                     // --------------------------------------------------
-                    // EXISTING CANCEL CHECK (kept same)
+                    // EXISTING CANCEL CHECK
                     // --------------------------------------------------
                     if (currentStatus && String(currentStatus).toLowerCase().includes("cancel")) {
-                        order.orderStatus = "Cancelled";
-                        order.shipment.status = "Cancelled";
-                        order.shipment.tracking_url = null;
-                        order.shipment.awb_code = null;
-
-                        if (!order.trackingHistory) order.trackingHistory = [];
-                        order.trackingHistory.push({
-                            status: "Cancelled",
-                            timestamp: new Date(),
-                            location: trackingData.current_status_location || "Courier Partner"
-                        });
-
-                        await order.save();
+                        await markCancelled(
+                            order,
+                            trackingData.current_status_location || "Courier Partner"
+                        );
                         return;
                     }
 
                     // --------------------------------------------------
-                    // Existing logic continues...
+                    // Status updates
                     // --------------------------------------------------
-
                     if (currentStatus) {
                         order.shipment.status = currentStatus;
                     }
