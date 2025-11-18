@@ -842,6 +842,17 @@ export const createWalletPayment = async (req, res) => {
                 remaining = 0;
             }
 
+            // Calculate reward points used & discount value
+            let pointsUsed = 0;
+            let pointsDiscount = 0;
+
+            if (remaining === 0) {
+                // Means we used reward points to cover some part
+                const originalRewardPoints = rewardPoints;
+                pointsUsed = originalRewardPoints - wallet.rewardPoints;
+                pointsDiscount = pointsUsed * pointsRate;
+            }
+
             // Add transaction
             wallet.transactions.push({
                 type: "PURCHASE",
@@ -850,6 +861,12 @@ export const createWalletPayment = async (req, res) => {
                 description: `Wallet payment for order ${order._id}`,
                 timestamp: new Date(),
             });
+
+            order.pointsDiscount = pointsDiscount;
+            order.pointsUsed = pointsUsed;
+
+            order.giftCardDiscount = 0;
+            order.giftCardApplied = { code: null, amount: 0 };
 
             await wallet.save({ session });
 
@@ -1001,6 +1018,19 @@ export const createGiftCardPayment = async (req, res) => {
                 description: `Payment for order ${order._id}`,
                 timestamp: new Date(),
             });
+
+            // Store Gift Card usage inside order
+            order.giftCardDiscount = Number(order.amount);
+            order.giftCardApplied = {
+                code: giftCardCode,
+                amount: Number(order.amount),
+                templateId: giftCard.templateId
+            };
+
+            order.pointsDiscount = 0;  // Wallet points not used
+            order.pointsUsed = 0;
+
+
             await giftCard.save({ session });
 
             // Stock + finalize order (this updates order inside session)
