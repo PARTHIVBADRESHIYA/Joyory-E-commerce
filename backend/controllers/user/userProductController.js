@@ -1091,7 +1091,7 @@ import Category from '../../models/Category.js';
 import { getDescendantCategoryIds } from '../../middlewares/utils/categoryUtils.js';
 import { getRecommendations } from '../../middlewares/utils/recommendationService.js';
 import redis from '../../middlewares/utils/redis.js';
-import {PRODUCT_CACHE_VERSION} from '../../middlewares/utils/cacheUtils.js';
+import { PRODUCT_CACHE_VERSION } from '../../middlewares/utils/cacheUtils.js';
 import { enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
 import mongoose from 'mongoose';
 
@@ -1881,7 +1881,8 @@ export const getSingleProduct = async (req, res) => {
     try {
         const { idOrSlug } = req.params; // works for both slug or id
         // 🔥 Redis Key
-        const redisKey = `prod:${PRODUCT_CACHE_VERSION}:${idOrSlug}:${req.query.variant || ""}`;
+        const variant = req.query.variant ?? "*"; // explicitly handle undefined
+        const redisKey = `prod:${PRODUCT_CACHE_VERSION}:${idOrSlug}:${variant}`;
 
         // 🔥 Return cached version
         const cached = await redis.get(redisKey);

@@ -795,7 +795,6 @@ const addProductController = async (req, res) => {
 
         // Clear cache for this product (and optionally global product lists)
         await clearProductCacheForId(product._id);
-        await clearAllProductCaches(); // optional: clears lists/homepage etc. Use if you cache them
 
         return res.status(201).json({
             message: "✅ Product created successfully",
@@ -1021,7 +1020,7 @@ const updateProductById = async (req, res) => {
 
         // Clear cache for this product id/slug
         await clearProductCacheForId(updatedProduct._id);
-        await clearAllProductCaches(); // optional
+        await clearProductCacheForId(updatedProduct.slug);   // ❗ ADD THIS
 
         res.status(200).json({
             message: "✅ Product updated successfully",
