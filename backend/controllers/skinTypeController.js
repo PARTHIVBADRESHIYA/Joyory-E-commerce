@@ -106,32 +106,95 @@ export const getSkinTypeById = async (req, res) => {
 };
 
 // PUT /admin/skin-types/:id
+// export const updateSkinType = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const { name, description, isActive } = req.body;
+
+//         const skinType = await SkinType.findOne({ _id: id, isDeleted: false });
+//         if (!skinType) return res.status(404).json({ success: false, message: "Skin type not found" });
+
+//         if (name && name.trim() !== skinType.name) {
+//             const nameExists = await SkinType.findOne({ name: name.trim(), _id: { $ne: toObjectId(id) } });
+//             if (nameExists) {
+//                 return res.status(409).json({ success: false, message: "Another skin type already uses this name" });
+//             }
+//             skinType.name = name.trim();
+//             skinType.slug = await generateUniqueSlug(SkinType, name.trim());
+//         }
+
+//         if (typeof description !== "undefined") skinType.description = description;
+//         if (typeof isActive !== "undefined") skinType.isActive = !!isActive;
+
+//         if (req.files?.image?.[0]) skinType.image = req.files.image[0].path;
+
+//         await skinType.save();
+//         return res.json({ success: true, data: skinType });
+//     } catch (err) {
+//         return res.status(500).json({ success: false, message: err.message });
+//     }
+// };
+// PUT /admin/skin-types/:id
 export const updateSkinType = async (req, res) => {
     try {
         const { id } = req.params;
         const { name, description, isActive } = req.body;
 
         const skinType = await SkinType.findOne({ _id: id, isDeleted: false });
-        if (!skinType) return res.status(404).json({ success: false, message: "Skin type not found" });
-
-        if (name && name.trim() !== skinType.name) {
-            const nameExists = await SkinType.findOne({ name: name.trim(), _id: { $ne: toObjectId(id) } });
-            if (nameExists) {
-                return res.status(409).json({ success: false, message: "Another skin type already uses this name" });
-            }
-            skinType.name = name.trim();
-            skinType.slug = await generateUniqueSlug(SkinType, name.trim());
+        if (!skinType) {
+            return res.status(404).json({ success: false, message: "Skin type not found" });
         }
 
-        if (typeof description !== "undefined") skinType.description = description;
-        if (typeof isActive !== "undefined") skinType.isActive = !!isActive;
+        // ------------------------ UPDATE NAME + SLUG ------------------------
+        if (name && name.trim() !== skinType.name) {
+            const cleanName = name.trim();
 
-        if (req.files?.image?.[0]) skinType.image = req.files.image[0].path;
+            const exists = await SkinType.findOne({
+                name: cleanName,
+                _id: { $ne: id }
+            });
 
+            if (exists) {
+                return res.status(409).json({
+                    success: false,
+                    message: "Another skin type already uses this name"
+                });
+            }
+
+            skinType.name = cleanName;
+            skinType.slug = await generateUniqueSlug(SkinType, cleanName);
+        }
+
+        // ------------------------ UPDATE DESCRIPTION ------------------------
+        if (typeof description !== "undefined") {
+            skinType.description = description;
+        }
+
+        // ------------------------ UPDATE ACTIVE STATUS ------------------------
+        if (typeof isActive !== "undefined") {
+            // converts "true" / "false" / 1 / 0 → proper boolean
+            skinType.isActive = isActive === "true" || isActive === true || isActive === 1;
+        }
+
+        // ------------------------ UPDATE IMAGE ------------------------
+        if (req.files?.image?.[0]) {
+            skinType.image = req.files.image[0].path;
+        }
+
+        // ------------------------ SAVE ------------------------
         await skinType.save();
-        return res.json({ success: true, data: skinType });
+
+        return res.json({
+            success: true,
+            message: "Skin type updated successfully",
+            data: skinType
+        });
+
     } catch (err) {
-        return res.status(500).json({ success: false, message: err.message });
+        return res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 };
 

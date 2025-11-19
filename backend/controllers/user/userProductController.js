@@ -2171,15 +2171,94 @@ export const getTopCategories = async (req, res) => {
     }
 };
 
+// export const getAllSkinTypes = async (req, res) => {
+//     try {
+//         const { q = "", isActive, page = 1, limit = 20 } = req.query;
+
+//         const filters = { isDeleted: false };
+
+//         if (q) filters.name = { $regex: q, $options: "i" };
+//         if (typeof isActive !== "undefined")
+//             filters.isActive = isActive === "true";
+
+//         const pg = Math.max(parseInt(page, 10) || 1, 1);
+//         const lim = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
+
+//         const pipeline = [
+//             { $match: filters },
+
+//             {
+//                 $lookup: {
+//                     from: "products",
+//                     let: { sid: "$_id" },
+//                     pipeline: [
+//                         {
+//                             $match: {
+//                                 $expr: { $in: ["$$sid", { $ifNull: ["$skinTypes", []] }] },
+//                                 isDeleted: { $ne: true }
+//                             }
+//                         },
+//                         { $count: "count" }
+//                     ],
+//                     as: "stats"
+//                 }
+//             },
+
+//             {
+//                 $addFields: {
+//                     productCount: {
+//                         $ifNull: [{ $arrayElemAt: ["$stats.count", 0] }, 0]
+//                     }
+//                 }
+//             },
+
+//             { $project: { stats: 0 } },
+//             { $sort: { name: 1 } },
+//             { $skip: (pg - 1) * lim },
+//             { $limit: lim }
+//         ];
+
+//         const [rows, total] = await Promise.all([
+//             SkinType.aggregate(pipeline),
+//             SkinType.countDocuments(filters)
+//         ]);
+
+//         return res.json({
+//             success: true,
+//             data: rows,
+//             pagination: { page: pg, limit: lim, total }
+//         });
+
+//     } catch (err) {
+//         return res.status(500).json({
+//             success: false,
+//             message: err.message
+//         });
+//     }
+// };
 export const getAllSkinTypes = async (req, res) => {
     try {
         const { q = "", isActive, page = 1, limit = 20 } = req.query;
 
         const filters = { isDeleted: false };
 
+        // -------- NAME SEARCH --------
         if (q) filters.name = { $regex: q, $options: "i" };
-        if (typeof isActive !== "undefined")
-            filters.isActive = isActive === "true";
+
+        // -------- ACTIVE FILTERING --------
+        if (typeof isActive === "undefined") {
+            // default → only active types
+            filters.isActive = true;
+        } else if (isActive === "true") {
+            filters.isActive = true;
+        } else if (isActive === "false") {
+            filters.isActive = false;
+        } else if (isActive === "all") {
+            // no filter → show all active/inactive
+        } else {
+            // any invalid value → fallback to only active
+            filters.isActive = true;
+        }
 
         const pg = Math.max(parseInt(page, 10) || 1, 1);
         const lim = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
@@ -2194,7 +2273,9 @@ export const getAllSkinTypes = async (req, res) => {
                     pipeline: [
                         {
                             $match: {
-                                $expr: { $in: ["$$sid", { $ifNull: ["$skinTypes", []] }] },
+                                $expr: {
+                                    $in: ["$$sid", { $ifNull: ["$skinTypes", []] }]
+                                },
                                 isDeleted: { $ne: true }
                             }
                         },
