@@ -1,9 +1,13 @@
 // controllers/orderController.js
+import mongoose from 'mongoose';
 import Order from '../models/Order.js';
 import Product from '../models/Product.js';
+import Payment from '../models/settings/payments/Payment.js';
 import Affiliate from '../models/Affiliate.js';
 import User from '../models/User.js';
 import { refundQueue } from "../middlewares/services/refundQueue.js";
+import { splitOrderForPersistence } from "../middlewares/services/orderSplit.js"; // ensure this exists and supports session (see notes)
+import { createShiprocketOrder, cancelShiprocketShipment } from "../middlewares/services/shiprocket.js";
 import { sendEmail } from "../middlewares/utils/emailService.js"; // ✅ assume you already have an email service
 
 
@@ -22,173 +26,286 @@ const shiprocketStatusMap = {
 };
 
 
-export const addOrder = async (req, res) => {
+export const adminListOrders = async (req, res) => {
     try {
-        const { products: reqProducts, orderType, status } = req.body;
-        const customerName = req.user.name;
-        const userId = req.user._id;
+        const { page = 1, limit = 20, search } = req.query;
 
-        let totalAmount = 0;
-        const validatedProducts = [];
+        const q = {
+            orderStatus: "Awaiting Admin Confirmation",   // FIXED ✔
+            isDraft: false
+        };
 
-        // ✅ Prevent duplicates
-        const seen = new Set();
-
-        for (const item of reqProducts) {
-            if (seen.has(item.productId)) {
-                return res
-                    .status(400)
-                    .json({ message: `❌ Duplicate product ID in order: ${item.productId}` });
-            }
-            seen.add(item.productId);
-
-            const dbProduct = await Product.findById(item.productId);
-
-            if (!dbProduct) {
-                // Product was deleted by admin → skip it
-                continue;
-            }
-
-            if (dbProduct.quantity < item.quantity) {
-                return res
-                    .status(400)
-                    .json({ message: `❌ Insufficient stock for "${dbProduct.name}"` });
-            }
-
-            const subTotal = dbProduct.price * item.quantity;
-            totalAmount += subTotal;
-
-            // ✅ Update quantity and sales
-            dbProduct.quantity -= item.quantity;
-            dbProduct.sales = (dbProduct.sales || 0) + item.quantity;
-
-            // ✅ Recalculate status using thresholdValue
-            if (dbProduct.quantity <= 0) {
-                dbProduct.status = "Out of stock";
-            } else if (dbProduct.quantity < dbProduct.thresholdValue) {
-                dbProduct.status = "Low stock";
-            } else {
-                dbProduct.status = "In-stock";
-            }
-
-            await dbProduct.save();
-
-            validatedProducts.push({
-                productId: dbProduct._id,
-                quantity: item.quantity,
-                price: dbProduct.price
-            });
+        // 🔍 Search filters
+        if (search) {
+            q.$or = [
+                { "user.name": new RegExp(search, "i") },
+                { orderId: new RegExp(search, "i") },
+                { _id: new RegExp(search, "i") }
+            ];
         }
 
-        // 🚫 No valid products left
-        if (validatedProducts.length === 0) {
-            return res.status(400).json({
-                message:
-                    "All selected products are no longer available. Please refresh your cart."
-            });
-        }
+        // 🟦 Fetch orders
+        const orders = await Order.find(q)
+            .sort({ createdAt: -1 })
+            .skip((page - 1) * limit)
+            .limit(Number(limit))
+            .populate("user")
+            .populate("products.productId", "name");
 
-        // 💰 Discount logic
-        const amount = totalAmount;
-        let discount = req.discount || null;
-        let discountAmount = 0;
+        const total = await Order.countDocuments(q);
 
-        if (discount) {
-            const isUsageValid =
-                !discount.totalLimit || discount.usageCount < discount.totalLimit;
+        // 🟩 Format like getAllOrders
+        const formatted = orders.map(order => ({
+            _id: order._id,
+            orderId: order.orderId,
+            date: order.date?.toDateString() || "N/A",
+            customerName: order.user?.name || order.customerName || "Unknown",
+            status: order.orderStatus,
+            orderType: order.orderType,
+            paid: order.paid,
+            paymentStatus: order.paymentStatus,
+            amount: `₹${order.amount}`,
+            products: order.products.map(p => ({
+                name: p.productId?.name || 'Unknown',
+                quantity: p.quantity,
+                price: `₹${p.price}`
+            }))
+        }));
 
-            if (isUsageValid) {
-                if (discount.type === "Flat") {
-                    discountAmount = discount.value;
-                } else if (discount.type === "Percentage") {
-                    discountAmount = Math.round((discount.value / 100) * amount);
+        res.json({
+            success: true,
+            data: formatted,
+            meta: {
+                page: Number(page),
+                limit: Number(limit),
+                total
+            }
+        });
+
+    } catch (err) {
+        console.error("adminListOrders:", err);
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+export const adminGetOrder = async (req, res) => {
+    try {
+        const order = await Order.findById(req.params.id).populate("user").populate("products.productId");
+        if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+        res.json({ success: true, data: order });
+    } catch (err) {
+        console.error("adminGetOrder:", err);
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+export const adminConfirmOrder = async (req, res) => {
+    const session = await mongoose.startSession();
+    try {
+        const { id: orderId } = req.params;
+        const adminUser = req.user;
+
+        const order = await Order.findById(orderId).populate("user").populate("products.productId");
+        if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+        if (order.adminConfirmed) return res.status(400).json({ success: false, message: "Order already confirmed" });
+        if (order.orderStatus === "Cancelled") return res.status(400).json({ success: false, message: "Cannot confirm cancelled order" });
+
+        await session.withTransaction(async () => {
+            const txOrder = await Order.findById(orderId).session(session).populate("products.productId").populate("user");
+            if (!txOrder) throw new Error("Order disappeared during transaction");
+
+            // Deduct stock for each item
+            for (const item of txOrder.products) {
+                const productId = item.productId._id || item.productId;
+                const qty = Number(item.quantity || 0);
+                if (qty <= 0) continue;
+
+                const product = await Product.findById(productId).session(session);
+                if (!product) throw Object.assign(new Error(`Product not found: ${productId}`), { step: "STOCK" });
+
+                if (item.variant?.sku) {
+                    const variantIndex = product.variants.findIndex(v => v.sku === item.variant.sku);
+                    if (variantIndex === -1) throw Object.assign(new Error(`Variant not found: ${item.variant.sku}`), { step: "STOCK" });
+                    const variant = product.variants[variantIndex];
+                    if ((variant.stock || 0) < qty) throw Object.assign(new Error(`Not enough stock for ${variant.sku}`), { step: "STOCK" });
+
+                    variant.stock -= qty;
+                    variant.sales = (variant.sales || 0) + qty;
+                    product.sales = (product.sales || 0) + qty;
+                    product.quantity = product.variants.reduce((s, v) => s + (Number(v.stock) || 0), 0);
+                } else {
+                    if ((product.quantity || 0) < qty) throw Object.assign(new Error(`Not enough stock for ${product.name}`), { step: "STOCK" });
+                    product.quantity -= qty;
+                    product.sales = (product.sales || 0) + qty;
                 }
+
+                // status
+                if (product.quantity <= 0) product.status = "Out of stock";
+                else if (product.thresholdValue != null && product.quantity < product.thresholdValue) product.status = "Low stock";
+                else product.status = "In-stock";
+
+                await product.save({ session });
+            }
+
+            // Create splitOrders in-session (ensure your util supports session).
+            // If your split utility does not accept session, implement split logic inline.
+            if (typeof splitOrderForPersistence === "function") {
+                // Note: ensure splitOrderForPersistence persists to order and accepts session.
+                await splitOrderForPersistence(txOrder, { session });
+            }
+
+            // If COD and not paid, create a Payment doc
+            if (txOrder.paymentMethod === "COD" && !txOrder.paid) {
+                const [paymentDoc] = await Payment.create([{
+                    order: txOrder._id,
+                    method: "COD",
+                    status: "Pending",
+                    amount: txOrder.amount
+                }], { session });
+                if (paymentDoc) txOrder.paymentId = paymentDoc._id;
+            }
+
+            txOrder.adminConfirmed = true;
+            txOrder.orderStatus = "Processing";
+            txOrder.isDraft = false;
+            txOrder.trackingHistory = txOrder.trackingHistory || [];
+            txOrder.trackingHistory.push({ status: "Admin Confirmed", timestamp: new Date(), location: `Admin:${adminUser?._id || "system"}` });
+
+            // Clear user's cart
+            if (txOrder.user && txOrder.user._id) {
+                await User.updateOne({ _id: txOrder.user._id }, { $set: { cart: [] } }, { session });
+            }
+
+            await txOrder.save({ session });
+        }); // end transaction
+
+        // After commit: create Shiprocket order and update shipment
+        const finalOrder = await Order.findById(orderId).populate("user").populate("products.productId");
+        try {
+            const shiprocketRes = await createShiprocketOrder(finalOrder);
+            if (shiprocketRes?.shipmentDetails) {
+                finalOrder.shipment = shiprocketRes.shipmentDetails;
+                finalOrder.trackingHistory = finalOrder.trackingHistory || [];
+                finalOrder.trackingHistory.push({ status: "Shipment Created", timestamp: new Date(), location: "Shiprocket" });
+                await finalOrder.save();
             } else {
-                console.log("❌ Discount usage limit reached.");
-                discount = null;
+                await Order.updateOne({ _id: finalOrder._id }, { $push: { trackingHistory: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } } });
             }
+        } catch (shipErr) {
+            console.error("Shiprocket post-confirm error:", shipErr);
+            await Order.updateOne({ _id: finalOrder._id }, { $push: { trackingHistory: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } } });
         }
 
-        // 🎯 Promotion logic
-        let promotionUsed = null;
-        if (req.promotion) {
-            promotionUsed = {
-                promotionId: req.promotion._id,
-                campaignName: req.promotion.campaignName
-            };
+        // notify user
+        try {
+            await sendEmail(
+                finalOrder.user.email,
+                "Order Confirmed & Shipped",
+                `<p>Hi ${finalOrder.user.name},</p>
+                 <p>Your order <strong>#${finalOrder._id}</strong> is confirmed and shipment is being created. We'll update you with tracking details shortly.</p>
+                 <p>Regards,<br/>Team Joyory Beauty</p>`
+            );
+        } catch (e) { console.warn("Email error:", e); }
+
+        const refreshed = await Order.findById(orderId).populate("user").populate("products.productId");
+        return res.json({ success: true, message: "Order confirmed and shipment initiated", order: refreshed });
+    } catch (err) {
+        console.error("adminConfirmOrder error:", err);
+        if (err.step === "STOCK") {
+            return res.status(400).json({ success: false, message: err.message || "Insufficient stock" });
         }
+        return res.status(500).json({ success: false, message: err.message || "Internal error" });
+    } finally {
+        try { await session.endSession(); } catch (e) { }
+    }
+};
 
-        const latestOrder = await Order.findOne().sort({ createdAt: -1 });
-        const nextOrderNumber = latestOrder ? latestOrder.orderNumber + 1 : 1001;
+export const adminCancelOrder = async (req, res) => {
+    const session = await mongoose.startSession();
+    try {
+        const orderId = req.params.id;
+        const { reason } = req.body;
+        const adminId = req.user?._id;
 
-        const orderId = `ORDER-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-        const customOrderId = `CUSTOM-${Date.now()}`;
+        const order = await Order.findById(orderId)
+            .populate("products.productId")
+            .populate("user");
 
-        // Affiliate setup
-        let affiliate = null;
-        let buyerDiscountAmount = 0;
-        const refCode = req.query.ref;
+        if (!order)
+            return res.status(404).json({ success: false, message: "Order not found" });
 
-        if (refCode) {
-            affiliate = await Affiliate.findOne({
-                referralCode: refCode,
-                status: "approved"
+        if (order.orderStatus === "Cancelled")
+            return res.status(400).json({ success: false, message: "Order already cancelled" });
+
+        // ❌ Prevent cancelling shipped/delivered orders
+        const nonCancelable = ["Shipped", "Out for Delivery", "Delivered"];
+        if (nonCancelable.includes(order.orderStatus)) {
+            return res.status(400).json({
+                success: false,
+                message: `Order cannot be cancelled once ${order.orderStatus}`,
             });
-            if (affiliate) {
-                buyerDiscountAmount = Math.round(totalAmount * 0.1);
+        }
+
+        await session.withTransaction(async () => {
+            order.orderStatus = "Cancelled";
+
+            // 🚀 Cancel Shiprocket order if exists
+            if (order.shipment?.shiprocket_order_id) {
+                try {
+                    await cancelShiprocketShipment(order.shipment.shiprocket_order_id);
+                    console.log("🚀 Shiprocket order cancelled by admin");
+                } catch (err) {
+                    console.error("❌ Shiprocket cancel failed:", err.response?.data || err.message);
+                }
             }
-        }
 
-        const finalAmount = amount - discountAmount - buyerDiscountAmount;
+            // 🔄 Payment Status
+            order.paymentStatus = order.paid ? "refund_requested" : "cancelled";
 
-        const newOrder = new Order({
-            products: validatedProducts,
-            orderId,
-            orderNumber: nextOrderNumber,
-            customOrderId,
-            user: userId,
-            date: new Date(),
-            customerName,
-            status,
-            orderType,
-            amount: finalAmount,
-            discount: discount ? discount._id : null,
-            discountCode: discount ? discount.code : null,
-            discountAmount,
-            promotionUsed,
-            affiliate: affiliate ? affiliate._id : null,
-            buyerDiscountAmount: buyerDiscountAmount || 0
+            // 📝 Cancellation block
+            order.cancellation = {
+                cancelledBy: adminId,
+                reason: reason || "Cancelled by admin",
+                requestedAt: new Date(),
+                allowed: true
+            };
+
+            // 📜 Add tracking event
+            order.trackingHistory.push({
+                status: "Cancelled",
+                timestamp: new Date(),
+                location: `Admin:${adminId}`
+            });
+
+            await order.save({ session });
         });
 
-        await newOrder.save();
+        // 📧 Notify user
+        try {
+            await sendEmail(
+                order.user.email,
+                "Order Cancelled",
+                `<p>Hi ${order.user.name},</p>
+                 <p>Your order #${order.orderId || order._id} has been cancelled by admin.</p>
+                 <p>Reason: ${reason || "Cancelled by admin"}</p>`
+            );
+        } catch (emailErr) {
+            console.warn("Email sending failed:", emailErr);
+        }
 
-        await User.findByIdAndUpdate(userId, {
-            savedRecommendations: [],
-            lastRecommendationUpdate: new Date()
+        return res.status(200).json({
+            success: true,
+            message: order.paid
+                ? "Order cancelled. Refund has been requested."
+                : "Order cancelled successfully.",
+            order
         });
 
-        // Update discount usage count
-        if (discount) {
-            discount.usageCount = (discount.usageCount || 0) + 1;
-            await discount.save();
-        }
-
-        // Save promotion attribution
-        if (req.promotion) {
-            req.promotion.conversions = (req.promotion.conversions || 0) + 1;
-            req.promotion.orders = req.promotion.orders || [];
-            req.promotion.orders.push(newOrder._id);
-            await req.promotion.save();
-        }
-
-        res
-            .status(201)
-            .json({ message: "✅ Order placed successfully", order: newOrder });
-    } catch (error) {
-        console.error("🔥 Order placement error:", error);
-        res
-            .status(500)
-            .json({ message: "Failed to place order", error: error.message });
+    } catch (err) {
+        console.error("adminCancelOrder:", err);
+        res.status(500).json({ success: false, message: "Admin cancel failed" });
+    } finally {
+        await session.endSession();
     }
 };
 
@@ -1154,36 +1271,36 @@ export const getOrderById = async (req, res) => {
         // 🎁 DISCOUNT
         const discount = order.discount
             ? {
-                  code: order.discount.code,
-                  type: order.discount.type,
-                  value: order.discount.value,
-                  discountAmount: order.discountAmount || 0,
-                  buyerDiscountAmount: order.buyerDiscountAmount || 0,
-              }
+                code: order.discount.code,
+                type: order.discount.type,
+                value: order.discount.value,
+                discountAmount: order.discountAmount || 0,
+                buyerDiscountAmount: order.buyerDiscountAmount || 0,
+            }
             : null;
 
         // 🌐 AFFILIATE
         const affiliate = order.affiliate
             ? {
-                  id: order.affiliate._id,
-                  name: order.affiliate.name,
-                  referralCode: order.affiliate.referralCode,
-              }
+                id: order.affiliate._id,
+                name: order.affiliate.name,
+                referralCode: order.affiliate.referralCode,
+            }
             : null;
 
         // 🛳️ SHIPMENT WITH HUMAN-READABLE STATUS
         const shipment = order.shipment
             ? {
-                  courierName: order.shipment.courier_name || null,
-                  trackingNumber: order.shipment.awb_code || null,
+                courierName: order.shipment.courier_name || null,
+                trackingNumber: order.shipment.awb_code || null,
 
-                  currentStatus:
-                      shiprocketStatusMap[order.shipment.status] ||
-                      order.shipment.status ||
-                      "Created",
+                currentStatus:
+                    shiprocketStatusMap[order.shipment.status] ||
+                    order.shipment.status ||
+                    "Created",
 
-                  assignedAt: order.shipment.assignedAt || null,
-              }
+                assignedAt: order.shipment.assignedAt || null,
+            }
             : null;
 
         // 🧠 TOTALS
@@ -1418,9 +1535,6 @@ export const getAllRefundRequests = async (req, res) => {
         });
     }
 };
-
-
-
 
 export const adminRejectRefund = async (req, res) => {
     try {

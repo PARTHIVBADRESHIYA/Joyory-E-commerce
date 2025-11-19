@@ -30,7 +30,6 @@ export const createSkinType = async (req, res) => {
     }
 };
 
-
 // GET /admin/skin-types  (q, isActive, page, limit)
 export const listSkinTypes = async (req, res) => {
     try {
@@ -94,7 +93,6 @@ export const listSkinTypes = async (req, res) => {
     }
 };
 
-
 // GET /admin/skin-types/:id
 export const getSkinTypeById = async (req, res) => {
     try {
@@ -136,8 +134,6 @@ export const updateSkinType = async (req, res) => {
         return res.status(500).json({ success: false, message: err.message });
     }
 };
-
-
 
 // PATCH /admin/skin-types/:id/toggle
 export const toggleSkinType = async (req, res) => {

@@ -299,6 +299,7 @@ const orderSchema = new mongoose.Schema({
 
     orderType: { type: String, enum: ['COD', 'Online', 'Credit card'], default: null },
     isDraft: { type: Boolean, default: true },
+    adminConfirmed: { type: Boolean, default: false },
 
     discount: String,
     discountCode: String,
@@ -334,6 +335,7 @@ const orderSchema = new mongoose.Schema({
         type: String,
         enum: [
             "Pending",
+            "Awaiting Admin Confirmation",
             "Awaiting Payment",
             "Paid",
             "Processing",
