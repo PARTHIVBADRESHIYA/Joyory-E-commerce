@@ -11,12 +11,10 @@ const mediaSchema = new mongoose.Schema(
         // ⭐ NEW SEPARATE FIELDS
         title: { type: String, default: null },
 
-        descriptionMobile: { type: String, default: null },
-        descriptionDesktop: { type: String, default: null },
+        description: { type: String, default: null },
 
         // ⭐ Dynamic button (Shop Now, Learn More, Buy Now...)
         buttonText: { type: String, default: null },
-        buttonLink: { type: String, default: null }
     },
     { timestamps: true }
 );

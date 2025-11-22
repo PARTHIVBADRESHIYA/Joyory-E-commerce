@@ -243,6 +243,41 @@ const CancellationSchema = new mongoose.Schema({
     allowed: { type: Boolean, default: true }
 }, { _id: false });
 
+const ShipmentSchema = new mongoose.Schema({
+    warehouseCode: String,              // NEW
+    pickup_location: String,            // NEW
+    pickup_address_id: String,          // NEW
+    shiprocket_order_id: String,        // NEW
+
+    shipment_id: String,
+    awb_code: String,
+    courier_company_id: String,
+    courier_name: String,
+    tracking_url: String,
+    status: { type: String, default: "Created" },
+    assignedAt: Date,
+    deliveredAt: Date,
+    expected_delivery: Date,
+
+    products: [
+        {
+            productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
+            quantity: Number,
+            price: Number,
+            variant: Object
+        }
+    ],
+
+    trackingHistory: [
+        {
+            status: String,
+            timestamp: { type: Date, default: Date.now },
+            location: String,
+            description: String
+        }
+    ]
+});
+
 const orderSchema = new mongoose.Schema({
 
     products: [
@@ -387,18 +422,9 @@ const orderSchema = new mongoose.Schema({
         promotionId: { type: mongoose.Schema.Types.ObjectId, ref: "Promotion" },
         campaignName: String
     },
-
-    shipment: {
-        shiprocket_order_id: String,
-        shipment_id: String,
-        awb_code: String,
-        courier_company_id: String,
-        courier_name: String,
-        tracking_url: String,
-        status: { type: String, default: "Created" },
-        assignedAt: Date,
-        deliveredAt: Date
-    }
+    // Replace the single shipment field with:
+    shipments: [ShipmentSchema],
+    primary_shipment: { type: mongoose.Schema.Types.ObjectId } // reference to main shipment
 
 }, { timestamps: true });
 

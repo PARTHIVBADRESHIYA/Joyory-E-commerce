@@ -1928,108 +1928,6 @@ export const setPaymentMethod = async (req, res) => {
     }
 };
 
-// export const createRazorpayOrder = async (req, res) => {
-//     try {
-//         const { orderId } = req.body;
-
-//         if (!orderId) {
-//             return res.status(400).json({ success: false, message: "❌ orderId is required" });
-//         }
-
-//         const order = await Order.findById(orderId).populate("user");
-//         if (!order) {
-//             return res.status(404).json({ success: false, message: "❌ Order not found" });
-//         }
-
-//         if (order.paid) {
-//             return res.status(400).json({ success: false, message: "⚠️ This order is already paid." });
-//         }
-
-//         if (order.razorpayOrderId) {
-//             return res.status(200).json({
-//                 success: true,
-//                 message: "🟡 Razorpay order already exists.",
-//                 razorpayOrderId: order.razorpayOrderId,
-//                 amount: order.amount,
-//                 currency: "INR",
-//                 orderId: order._id,
-//             });
-//         }
-
-//         if (!order.amount || order.amount <= 0) {
-//             return res.status(400).json({ success: false, message: "❌ Invalid order amount" });
-//         }
-
-//         if (order.orderType !== "Online") {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: "Payment method must be ONLINE before creating Razorpay order",
-//             });
-//         }
-
-
-//         const amountInPaise = Math.round(order.amount * 100);
-
-//         // ✅ Create Razorpay order
-//         const razorpayOrder = await razorpay.orders.create({
-//             amount: amountInPaise,
-//             currency: "INR",
-//             receipt: order._id.toString(),
-//             payment_capture: 1,
-//             notes: {
-//                 orderId: order._id.toString(),
-//                 customer: order.user?.name || "Guest",
-//             },
-//         });
-
-//         // 🧾 Split orders (seller wise)
-//         await splitOrderForPersistence(order);
-
-//         // 🪄 Backfill seller data if missing
-//         for (const p of order.products) {
-//             if (!p.seller) {
-//                 const prod = await Product.findById(p.productId).select("seller");
-//                 if (prod?.seller) p.seller = prod.seller;
-//             }
-//         }
-
-//         order.razorpayOrderId = razorpayOrder.id;
-//         order.paymentStatus = "pending";
-//         order.orderStatus = "Awaiting Payment";
-
-//         if (!order.trackingHistory || order.trackingHistory.length === 0) {
-//             order.trackingHistory = [
-//                 { status: "Order Placed", timestamp: new Date(), location: "Store" },
-//                 { status: "Awaiting Payment", timestamp: new Date() },
-//             ];
-//         } else {
-//             order.trackingHistory.push({
-//                 status: "Awaiting Payment",
-//                 timestamp: new Date(),
-//             });
-//         }
-
-//         await order.save();
-
-//         res.status(200).json({
-//             success: true,
-//             message: "✅ Razorpay order created successfully.",
-//             razorpayOrderId: razorpayOrder.id,
-//             amount: order.amount,
-//             currency: "INR",
-//             orderId: order._id,
-//         });
-//     } catch (err) {
-//         console.error("🔥 createRazorpayOrder Error:", err);
-//         res.status(500).json({
-//             success: false,
-//             message: "❌ Failed to create Razorpay order",
-//             error: err.message,
-//         });
-//     }
-// };
-
-
 export const createRazorpayOrder = async (req, res) => {
     try {
         const { orderId } = req.body;
@@ -2201,249 +2099,6 @@ export const verifyRazorpayPayment = async (req, res) => {
     }
 };
 
-// export const verifyRazorpayPayment = async (req, res) => {
-//     const session = await mongoose.startSession();
-//     try {
-//         const { orderId, razorpay_order_id, razorpay_payment_id, razorpay_signature, shippingAddress } = req.body;
-
-//         if (!orderId || !razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-//             return res.status(400).json({ step: "VALIDATION", success: false, message: "❌ Missing required fields" });
-//         }
-
-//         // initial fetch (read-only)
-//         const order = await Order.findById(orderId).populate("user").populate("products.productId");
-//         if (!order) return res.status(404).json({ step: "ORDER_FETCH", success: false, message: "Order not found" });
-//         if (order.paid) return res.status(200).json({ step: "IDEMPOTENT", success: true, message: "✅ Order already paid", order });
-
-//         // verify signature
-//         const expectedSignature = crypto.createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-//             .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-//             .digest("hex");
-
-//         if (expectedSignature !== razorpay_signature) {
-//             return res.status(400).json({ step: "SIGNATURE", success: false, message: "❌ Invalid signature" });
-//         }
-
-//         // fetch payment from Razorpay
-//         const rpPayment = await razorpay.payments.fetch(razorpay_payment_id);
-//         if (rpPayment.status !== "captured") {
-//             return res.status(400).json({ step: "PAYMENT_STATUS", success: false, message: `Payment not captured (status: ${rpPayment.status})` });
-//         }
-//         if ((rpPayment.amount / 100) !== Number(order.amount)) {
-//             return res.status(400).json({ step: "AMOUNT_CHECK", success: false, message: "❌ Amount mismatch" });
-//         }
-
-//         console.log("🔹 Starting DB transaction for stock deduction & order persistence...");
-
-//         const productIdsToRecalc = new Set();
-
-//         // transaction block
-//         await session.withTransaction(async () => {
-//             // re-fetch order inside session to ensure consistency
-//             const sessionOrder = await Order.findById(orderId).session(session).populate("user").populate("products.productId");
-//             if (!sessionOrder) throw new Error("Order vanished during transaction");
-
-//             // iterate items and perform atomic updates
-//             for (const item of sessionOrder.products) {
-//                 const productId = item.productId._id || item.productId;
-//                 const qty = Number(item.quantity || 0);
-//                 if (qty <= 0) continue;
-
-//                 productIdsToRecalc.add(String(productId));
-
-//                 // 🧠 If product has variant SKU
-//                 if (item.variant?.sku) {
-//                     const sku = item.variant.sku;
-
-//                     const product = await Product.findById(productId).session(session);
-//                     if (!product) throw new Error(`Product not found: ${productId}`);
-
-//                     const variantIndex = product.variants.findIndex(v => v.sku === sku);
-//                     if (variantIndex === -1) throw new Error(`Variant not found for SKU: ${sku}`);
-
-//                     const variant = product.variants[variantIndex];
-//                     if (variant.stock < qty) throw new Error(`Not enough stock for ${variant.sku}`);
-
-//                     // update variant stock and sales
-//                     variant.stock -= qty;
-//                     variant.sales = (variant.sales || 0) + qty;
-
-//                     // update product-level stock and sales
-//                     product.sales = (product.sales || 0) + qty;
-
-//                     // recalc total stock (sum of all variants)
-//                     const totalQty = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
-//                     product.quantity = totalQty;
-
-//                     // status update
-//                     if (totalQty <= 0) product.status = "Out of stock";
-//                     else if (product.thresholdValue && totalQty < product.thresholdValue)
-//                         product.status = "Low stock";
-//                     else product.status = "In-stock";
-
-//                     await product.save({ session });
-
-//                 } else {
-//                     // 🧠 Non-variant product
-//                     const product = await Product.findById(productId).session(session);
-//                     if (!product) throw new Error(`Product not found: ${productId}`);
-//                     if (product.quantity < qty) throw new Error(`Not enough stock for ${product.name}`);
-
-//                     product.quantity -= qty;
-//                     product.sales = (product.sales || 0) + qty;
-
-//                     if (product.quantity <= 0) product.status = "Out of stock";
-//                     else if (product.thresholdValue && product.quantity < product.thresholdValue)
-//                         product.status = "Low stock";
-//                     else product.status = "In-stock";
-
-//                     await product.save({ session });
-//                 }
-//             }
-
-
-//             // ---- update order fields inside transaction ----
-//             sessionOrder.paid = true;
-//             sessionOrder.paymentStatus = "success";
-//             sessionOrder.paymentMethod = rpPayment.method || "Razorpay";
-//             sessionOrder.transactionId = razorpay_payment_id;
-//             sessionOrder.orderStatus = "Processing";
-//             if (shippingAddress) sessionOrder.shippingAddress = shippingAddress;
-
-//             sessionOrder.isDraft = false;
-
-
-//             // create Payment record in same transaction
-//             await Payment.create([{
-//                 order: sessionOrder._id,
-//                 method: rpPayment.method,
-//                 status: "Completed",
-//                 transactionId: razorpay_payment_id,
-//                 amount: sessionOrder.amount,
-//                 cardHolderName: rpPayment.card?.name,
-//                 cardNumber: rpPayment.card?.last4,
-//                 expiryDate: rpPayment.card ? `${rpPayment.card.expiry_month}/${rpPayment.card.expiry_year}` : undefined,
-//                 isActive: true,
-//             }], { session });
-
-//             // clear user's cart inside tx
-//             if (sessionOrder.user && sessionOrder.user._id) {
-//                 await User.updateOne({ _id: sessionOrder.user._id }, { $set: { cart: [] } }, { session });
-//             }
-
-//             // save the order inside tx
-//             await sessionOrder.save({ session });
-
-//             // ---- recalc total quantity and status for affected products ----
-//             if (productIdsToRecalc.size > 0) {
-//                 const changedProductIds = Array.from(productIdsToRecalc).map(id => new mongoose.Types.ObjectId(id));
-//                 const products = await Product.find({ _id: { $in: changedProductIds } }).session(session);
-
-//                 const bulkOps = products.map(prod => {
-//                     // totalQty derived from variants if available; otherwise use product.quantity
-//                     let totalQty = 0;
-//                     if (Array.isArray(prod.variants) && prod.variants.length > 0) {
-//                         totalQty = prod.variants.reduce((s, v) => s + (Number(v.stock) || 0), 0);
-//                     } else {
-//                         totalQty = Number(prod.quantity || 0);
-//                     }
-
-//                     // compute status
-//                     let newStatus = "In-stock";
-//                     if (totalQty <= 0) newStatus = "Out of stock";
-//                     else if (prod.thresholdValue != null && totalQty < prod.thresholdValue) newStatus = "Low stock";
-
-//                     // defensive clamp variants' stock to >=0
-//                     if (Array.isArray(prod.variants)) {
-//                         prod.variants = prod.variants.map(v => {
-//                             if ((v.stock ?? 0) < 0) v.stock = 0;
-//                             return v;
-//                         });
-//                     }
-
-//                     return {
-//                         updateOne: {
-//                             filter: { _id: prod._id },
-//                             update: {
-//                                 $set: {
-//                                     status: newStatus,
-//                                     quantity: totalQty,
-//                                     variants: prod.variants
-//                                 }
-//                             }
-//                         }
-//                     };
-//                 });
-
-//                 if (bulkOps.length) {
-//                     const bwRes = await Product.bulkWrite(bulkOps, { session });
-//                     console.log("BulkWrite result:", bwRes);
-//                 }
-//             }
-
-//             // finishing transaction block (commit attempted automatically after success)
-//         }); // end withTransaction
-
-//         console.log("🔹 DB transaction committed successfully.");
-
-//         // ---- post-commit: external shipment (do not include external calls inside tx) ----
-//         const finalOrder = await Order.findById(orderId).populate("user").populate("products.productId");
-//         try {
-//             const shiprocketRes = await createShiprocketOrder(finalOrder);
-//             if (shiprocketRes?.shipmentDetails) {
-//                 finalOrder.shipment = shiprocketRes.shipmentDetails;
-//                 finalOrder.trackingHistory.push({ status: "Shipment Created", timestamp: new Date(), location: "Shiprocket" });
-//                 await finalOrder.save();
-//             } else {
-//                 console.warn("⚠️ Shiprocket responded without shipmentDetails", shiprocketRes);
-//             }
-//         } catch (shipErr) {
-//             console.error("⚠️ Shiprocket Error (post-commit):", shipErr?.message || shipErr);
-//             // record failure note
-//             try {
-//                 await Order.updateOne({ _id: finalOrder._id }, {
-//                     $push: { trackingHistory: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } }
-//                 });
-//             } catch (err) {
-//                 console.error("⚠️ Failed to record shipment failure:", err);
-//             }
-//         }
-
-//         // push payment/tracking history
-//         try {
-//             await Order.updateOne({ _id: finalOrder._id }, {
-//                 $push: {
-//                     trackingHistory: [
-//                         { status: "Payment Successful", timestamp: new Date(), location: "Online - Razorpay" },
-//                         { status: "Processing", timestamp: new Date(), location: "Store" }
-//                     ]
-//                 }
-//             });
-//         } catch (err) {
-//             console.error("⚠️ Failed to push tracking history after commit:", err);
-//         }
-
-//         // return final order
-//         const refreshedOrder = await Order.findById(orderId).populate("user").populate("products.productId");
-//         return res.status(200).json({ step: "COMPLETE", success: true, message: "✅ Payment verified & order processed", order: refreshedOrder });
-
-//     } catch (err) {
-//         // If we threw our stock error object, send friendly message
-//         if (err && err.step === "STOCK") {
-//             console.error("🔴 Stock error during payment verification:", err.message || err);
-//             await session.endSession();
-//             return res.status(400).json({ step: "STOCK", success: false, message: err.message || "Insufficient stock for one or more items" });
-//         }
-
-//         console.error("🔥 verifyRazorpayPayment Error:", err);
-//         await session.endSession();
-//         return res.status(500).json({ step: "FATAL", success: false, message: "Unexpected server error during payment verification", error: (err && err.message) || err });
-//     } finally {
-//         // ensure session is ended in all cases
-//         try { await session.endSession(); } catch (e) { /* ignore */ }
-//     }
-// };
-
 export const createCodOrder = async (req, res) => {
     try {
         const { orderId } = req.body;
@@ -2498,96 +2153,6 @@ export const createCodOrder = async (req, res) => {
     }
 };
 
-// export const confirmCodOrder = async (req, res) => {
-//     const session = await mongoose.startSession();
-//     try {
-//         const { orderId, shippingAddress } = req.body;
-//         const userId = req.user?._id;
-
-//         if (!orderId || !userId)
-//             return res.status(400).json({ success: false, message: "Invalid request" });
-
-//         const order = await Order.findById(orderId).populate("user").populate("products.productId");
-//         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-
-//         if (order.paid || order.orderStatus === "Cancelled")
-//             return res.status(400).json({ success: false, message: "Order cannot be confirmed" });
-
-//         // Final fraud check (e.g., between step 1 and confirm, user might change info)
-//         const fraudCheck = await isFraudulentCodOrder(order, order.user, req.body.shippingAddress);
-//         if (fraudCheck.isFraud) {
-//             await sendEmail(
-//                 order.user.email,
-//                 "⚠️ COD Order Blocked (Fraud Risk)",
-//                 `<p>Hi ${order.user.name},</p>
-//                 <p>Unfortunately we could not proceed with your order <strong>#${order._id}</strong> due to:</p>
-//                 <p><em>${fraudCheck.reason}</em>.</p>
-//                 <p>Please try prepaid payment to confirm delivery.</p>
-//                 <p>Regards,<br/>Team Joyory Beauty</p>`
-//             );
-//             return res.status(400).json({ success: false, message: "COD denied: " + fraudCheck.reason });
-//         }
-
-//         // COD eligibility check based on pincode or amount
-//         const deliveryPincode = shippingAddress?.pincode || order.shippingAddress?.pincode;
-//         if (!isCodAllowed({ pincode: deliveryPincode, amount: order.amount })) {
-//             return res.status(400).json({ success: false, message: "COD not available for this location/amount" });
-//         }
-
-
-//         // ✅ Post Transaction – Create Shiprocket Order (not in transaction)
-//         const finalOrder = await Order.findById(orderId).populate("user").populate("products.productId");
-//         try {
-//             const shiprocketRes = await createShiprocketOrder(finalOrder);
-//             if (shiprocketRes?.shipmentDetails) {
-//                 finalOrder.shipment = shiprocketRes.shipmentDetails;
-//                 finalOrder.trackingHistory.push({
-//                     status: "Shipment Created",
-//                     timestamp: new Date(),
-//                     location: "Shiprocket",
-//                 });
-//                 await finalOrder.save();
-//             } else {
-//                 console.warn("⚠️ Shiprocket responded without shipmentDetails", shiprocketRes);
-//             }
-//         } catch (shipErr) {
-//             console.error("⚠️ Shiprocket Error for COD:", shipErr?.message || shipErr);
-//             await Order.updateOne(
-//                 { _id: finalOrder._id },
-//                 {
-//                     $push: {
-//                         trackingHistory: {
-//                             status: "Shipment Creation Failed",
-//                             timestamp: new Date(),
-//                             location: "Shiprocket",
-//                         },
-//                     },
-//                 }
-//             );
-//         }
-
-//         // ✅ Send COD confirmation email
-//         await sendEmail(
-//             order.user.email,
-//             "🎉 Your COD Order is Confirmed!",
-//             `<p>Hi ${order.user.name},</p>
-//             <p>Your COD order <strong>#${order._id}</strong> has been confirmed and is now being processed.</p>
-//             <p>We’ll notify you once it’s shipped.</p>
-//             <p>Regards,<br/>Team Joyory Beauty</p>`
-//         );
-
-//         return res.status(200).json({
-//             success: true,
-//             message: "✅ COD order confirmed & queued for shipment",
-//             order: finalOrder,
-//         });
-//     } catch (err) {
-//         console.error("confirmCodOrder Error:", err);
-//         return res.status(500).json({ success: false, message: err.message });
-//     } finally {
-//         await session.endSession();
-//     }
-// };
 export const confirmCodOrder = async (req, res) => {
     try {
         const { orderId, shippingAddress } = req.body;
@@ -2660,216 +2225,6 @@ export const confirmCodOrder = async (req, res) => {
     }
 };
 
-// export const createWalletPayment = async (req, res) => {
-//     const session = await mongoose.startSession();
-//     try {
-//         const { orderId, shippingAddress } = req.body;
-
-//         if (!orderId || !shippingAddress) {
-//             return res.status(400).json({ success: false, message: "orderId and shippingAddress are required" });
-//         }
-
-//         const required = ["name", "phone", "addressLine1", "city", "state", "pincode"];
-//         for (const field of required) {
-//             if (!shippingAddress[field]) {
-//                 return res.status(400).json({ success: false, message: `Shipping address missing: ${field}` });
-//             }
-//         }
-
-//         await session.withTransaction(async () => {
-
-//             const order = await Order.findById(orderId)
-//                 .session(session)
-//                 .populate("user")
-//                 .populate("products.productId");
-
-//             if (!order) throw new Error("Order not found");
-//             if (order.paid) throw new Error("Already paid");
-
-//             // Save shipping address
-//             order.shippingAddress = {
-//                 name: shippingAddress.name,
-//                 email: shippingAddress.email || order.user.email,
-//                 phone: shippingAddress.phone,
-//                 addressLine1: shippingAddress.addressLine1,
-//                 addressLine2: shippingAddress.addressLine2 || "",
-//                 city: shippingAddress.city,
-//                 state: shippingAddress.state,
-//                 pincode: shippingAddress.pincode,
-//                 country: shippingAddress.country || "India",
-//             };
-//             await order.save({ session });
-
-//             // Payment fields
-//             order.orderType = "Online";
-//             order.paymentMethod = "Wallet";
-
-//             const Wallet = mongoose.model("Wallet");
-//             let wallet = await Wallet.findOne({ user: order.user._id }).session(session);
-
-//             if (!wallet) {
-//                 wallet = await Wallet.create([{
-//                     user: order.user._id,
-//                     joyoryCash: 0,
-//                     rewardPoints: 0,
-//                     transactions: []
-//                 }], { session }).then(docs => docs[0]);
-//             }
-
-//             // Load config for points conversion
-//             const config = await WalletConfig.findOne().session(session);
-//             const pointsRate = config?.pointsToCurrencyRate ?? 0.1;
-
-//             // Calculate real wallet balance
-//             const joyoryCash = Number(wallet.joyoryCash) || 0;
-//             const rewardPoints = Number(wallet.rewardPoints) || 0;
-//             const pointsValue = rewardPoints * pointsRate;
-
-//             const walletBalance = joyoryCash + pointsValue;
-//             const orderAmount = Number(order.amount);
-
-//             if (walletBalance < orderAmount) {
-//                 throw new Error(`Not enough wallet balance. Available: ${walletBalance}, Required: ${orderAmount}`);
-//             }
-
-//             // Deduction logic
-//             let remaining = orderAmount;
-
-//             // 1. Deduct from joyoryCash
-//             if (joyoryCash >= remaining) {
-//                 wallet.joyoryCash = joyoryCash - remaining;
-//                 remaining = 0;
-//             } else {
-//                 remaining -= joyoryCash;
-//                 wallet.joyoryCash = 0;
-//             }
-
-//             // 2. Deduct from rewardPoints (convert amount to points)
-//             if (remaining > 0) {
-//                 const pointsNeeded = remaining / pointsRate;
-//                 wallet.rewardPoints = rewardPoints - pointsNeeded;
-//                 remaining = 0;
-//             }
-
-//             // Calculate reward points used & discount value
-//             let pointsUsed = 0;
-//             let pointsDiscount = 0;
-
-//             if (remaining === 0) {
-//                 // Means we used reward points to cover some part
-//                 const originalRewardPoints = rewardPoints;
-//                 pointsUsed = originalRewardPoints - wallet.rewardPoints;
-//                 pointsDiscount = pointsUsed * pointsRate;
-//             }
-
-//             // Add transaction
-//             wallet.transactions.push({
-//                 type: "PURCHASE",
-//                 amount: orderAmount,
-//                 mode: "ONLINE",
-//                 description: `Wallet payment for order ${order._id}`,
-//                 timestamp: new Date(),
-//             });
-
-//             order.pointsDiscount = pointsDiscount;
-//             order.pointsUsed = pointsUsed;
-
-//             order.giftCardDiscount = 0;
-//             order.giftCardApplied = { code: null, amount: 0 };
-
-//             await wallet.save({ session });
-
-//             // Finalize order + stock
-//             const txOrder = await processOrderStockAndFinalize(orderId, session, order.shippingAddress);
-
-//             txOrder.paid = true;
-//             txOrder.paymentStatus = "success";
-//             txOrder.paymentMethod = "Wallet";
-//             txOrder.transactionId = `WALLET-${Date.now()}`;
-//             txOrder.orderType = "Online";
-//             txOrder.orderStatus = "Processing";
-//             txOrder.isDraft = false;
-
-//             txOrder.trackingHistory.push(
-//                 { status: "Payment Successful", timestamp: new Date(), location: "Wallet" },
-//                 { status: "Processing", timestamp: new Date(), location: "Store" }
-//             );
-
-//             // Payment document
-//             const [paymentDoc] = await Payment.create([{
-//                 order: txOrder._id,
-//                 method: "Wallet",
-//                 status: "Completed",
-//                 transactionId: txOrder.transactionId,
-//                 amount: txOrder.amount,
-//                 isActive: true,
-//             }], { session });
-
-//             if (paymentDoc) txOrder.paymentId = paymentDoc._id;
-
-//             // Clear cart
-//             await User.updateOne(
-//                 { _id: txOrder.user._id },
-//                 { $set: { cart: [] } },
-//                 { session }
-//             );
-
-//             await txOrder.save({ session });
-//         });
-
-//         // SHIPROCKET (after commit)
-//         const finalOrder = await Order.findById(orderId).populate("user").populate("products.productId");
-
-//         try {
-//             const shiprocketRes = await createShiprocketOrder(finalOrder);
-
-//             if (shiprocketRes?.shipmentDetails) {
-//                 finalOrder.shipment = shiprocketRes.shipmentDetails;
-//                 finalOrder.trackingHistory.push({
-//                     status: "Shipment Created",
-//                     timestamp: new Date(),
-//                     location: "Shiprocket"
-//                 });
-//                 await finalOrder.save();
-//             } else {
-//                 await Order.updateOne(
-//                     { _id: finalOrder._id },
-//                     {
-//                         $push: {
-//                             trackingHistory: {
-//                                 status: "Shipment Creation Failed",
-//                                 timestamp: new Date(),
-//                                 location: "Shiprocket"
-//                             }
-//                         }
-//                     }
-//                 );
-//             }
-//         } catch (err) {
-//             await Order.updateOne(
-//                 { _id: orderId },
-//                 {
-//                     $push: {
-//                         trackingHistory: {
-//                             status: "Shipment Creation Failed",
-//                             timestamp: new Date(),
-//                             location: "Shiprocket"
-//                         }
-//                     }
-//                 }
-//             );
-//         }
-
-//         const updated = await Order.findById(orderId).populate("user").populate("products.productId");
-
-//         return res.json({ success: true, message: "Wallet payment successful", order: updated });
-
-//     } catch (err) {
-//         return res.status(500).json({ success: false, message: err.message || "Internal error" });
-//     } finally {
-//         try { await session.endSession(); } catch { }
-//     }
-// };
 export const createWalletPayment = async (req, res) => {
     const session = await mongoose.startSession();
     try {
@@ -3006,155 +2361,6 @@ export const createWalletPayment = async (req, res) => {
     }
 };
 
-// export const createGiftCardPayment = async (req, res) => {
-//     const session = await mongoose.startSession();
-//     try {
-//         const { orderId, giftCardCode, giftCardPin, shippingAddress } = req.body;
-//         if (!orderId || !giftCardCode || !giftCardPin || !shippingAddress) {
-//             return res.status(400).json({ success: false, message: "orderId, giftCardCode, giftCardPin and shippingAddress required" });
-//         }
-
-//         // Validate minimum fields Shiprocket needs
-//         const required = ["name", "phone", "addressLine1", "city", "state", "pincode"];
-//         for (const field of required) {
-//             if (!shippingAddress[field]) {
-//                 return res.status(400).json({ success: false, message: `Shipping address missing: ${field}` });
-//             }
-//         }
-
-//         await session.withTransaction(async () => {
-//             const order = await Order.findById(orderId).session(session)
-//                 .populate("user")
-//                 .populate("products.productId");
-
-//             if (!order) throw new Error("Order not found");
-//             if (order.paid) throw new Error("Already paid");
-
-//             // Normalize order payment fields
-//             order.orderType = "Online";
-//             order.paymentMethod = "GiftCard";
-
-//             // Save corrected shipping address into order (in-session)
-//             order.shippingAddress = {
-//                 name: shippingAddress.name,
-//                 email: shippingAddress.email || order.user.email,
-//                 phone: shippingAddress.phone,
-//                 addressLine1: shippingAddress.addressLine1,
-//                 addressLine2: shippingAddress.addressLine2 || "",
-//                 city: shippingAddress.city,
-//                 state: shippingAddress.state,
-//                 pincode: shippingAddress.pincode,
-//                 country: shippingAddress.country || "India"
-//             };
-//             await order.save({ session });
-
-//             // Fetch gift card in-session
-//             const giftCard = await GiftCard.findOne({ code: giftCardCode, pin: giftCardPin }).session(session);
-//             if (!giftCard) throw new Error("Invalid gift card");
-//             if (Number(giftCard.balance) < Number(order.amount)) throw new Error("Insufficient gift card balance");
-
-//             // Deduct balance
-//             giftCard.balance = Number(giftCard.balance) - Number(order.amount);
-//             giftCard.transactions = giftCard.transactions || [];
-//             giftCard.transactions.push({
-//                 type: "debit",
-//                 amount: order.amount,
-//                 description: `Payment for order ${order._id}`,
-//                 timestamp: new Date(),
-//             });
-
-//             // Store Gift Card usage inside order
-//             order.giftCardDiscount = Number(order.amount);
-//             order.giftCardApplied = {
-//                 code: giftCardCode,
-//                 amount: Number(order.amount),
-//                 templateId: giftCard.templateId
-//             };
-
-//             order.pointsDiscount = 0;  // Wallet points not used
-//             order.pointsUsed = 0;
-
-
-//             await giftCard.save({ session });
-
-//             // Stock + finalize order (this updates order inside session)
-//             const txOrder = await processOrderStockAndFinalize(orderId, session, order.shippingAddress);
-
-//             // Mark order paid & set fields (in-session)
-//             txOrder.paid = true;
-//             txOrder.paymentStatus = "success";
-//             txOrder.paymentMethod = "GiftCard";
-//             txOrder.transactionId = `GIFTCARD-${Date.now()}`;
-//             txOrder.orderType = "Online";
-//             txOrder.orderStatus = "Processing";
-//             txOrder.isDraft = false;
-
-
-//             txOrder.trackingHistory = txOrder.trackingHistory || [];
-//             txOrder.trackingHistory.push(
-//                 { status: "Payment Successful", timestamp: new Date(), location: "GiftCard" },
-//                 { status: "Processing", timestamp: new Date(), location: "Store" }
-//             );
-
-//             // Create Payment doc inside transaction
-//             const [paymentDoc] = await Payment.create([{
-//                 order: txOrder._id,
-//                 method: "GiftCard",
-//                 status: "Completed",
-//                 transactionId: txOrder.transactionId,
-//                 amount: txOrder.amount,
-//                 isActive: true,
-//             }], { session });
-
-//             if (paymentDoc) txOrder.paymentId = paymentDoc._id;
-
-//             // Clear cart
-//             if (txOrder.user && txOrder.user._id) {
-//                 await User.updateOne({ _id: txOrder.user._id }, { $set: { cart: [] } }, { session });
-//             }
-
-//             await txOrder.save({ session });
-//         }); // end transaction
-
-//         // POST-COMMIT: Shiprocket
-//         const finalOrder = await Order.findById(orderId).populate("user").populate("products.productId");
-//         try {
-//             const shiprocketRes = await createShiprocketOrder(finalOrder);
-
-//             if (shiprocketRes?.shipmentDetails) {
-//                 finalOrder.shipment = shiprocketRes.shipmentDetails;
-//                 finalOrder.trackingHistory = finalOrder.trackingHistory || [];
-//                 finalOrder.trackingHistory.push({
-//                     status: "Shipment Created",
-//                     timestamp: new Date(),
-//                     location: "Shiprocket"
-//                 });
-//                 await finalOrder.save();
-//             } else {
-//                 await Order.updateOne(
-//                     { _id: finalOrder._id },
-//                     { $push: { trackingHistory: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } } }
-//                 );
-//             }
-//         } catch (shipErr) {
-//             console.error("⚠️ Shiprocket Error (GiftCard):", shipErr?.message || shipErr);
-//             await Order.updateOne(
-//                 { _id: finalOrder._id },
-//                 { $push: { trackingHistory: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } } }
-//             );
-//         }
-
-//         const updated = await Order.findById(orderId).populate("user").populate("products.productId");
-//         return res.json({ success: true, message: "Gift card payment successful", order: updated });
-
-//     } catch (err) {
-//         console.error("createGiftCardPayment Error:", err);
-//         return res.status(500).json({ success: false, message: err.message || "Internal error" });
-//     } finally {
-//         await session.endSession().catch(() => { });
-//     }
-// };
-
 export const createGiftCardPayment = async (req, res) => {
     const session = await mongoose.startSession();
     try {
@@ -3258,113 +2464,6 @@ export const createGiftCardPayment = async (req, res) => {
     }
 };
 
-// export const cancelOrder = async (req, res) => {
-//     const session = await mongoose.startSession();
-//     try {
-//         const { orderId, reason } = req.body;
-//         const userId = req.user?._id;
-
-//         if (!orderId) return res.status(400).json({ success: false, message: "orderId is required" });
-
-//         const order = await Order.findById(orderId)
-//             .populate("products.productId")
-//             .populate("user");
-
-//         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-
-//         // ✅ Ensure only order owner or admin can cancel
-//         if (String(order.user._id) !== String(userId) && !req.user?.isAdmin)
-//             return res.status(403).json({ success: false, message: "Unauthorized" });
-
-//         // ✅ Prevent cancelling shipped or delivered orders
-//         const nonCancelableStatuses = ["Shipped", "Out for Delivery", "Delivered"];
-//         if (nonCancelableStatuses.includes(order.orderStatus))
-//             return res.status(400).json({ success: false, message: `Order cannot be cancelled once ${order.orderStatus}` });
-
-//         await session.withTransaction(async () => {
-//             order.orderStatus = "Cancelled";
-//             order.paymentStatus = order.paid ? "refund_requested" : "cancelled";
-
-//             order.cancellation = {
-//                 cancelledBy: userId,
-//                 reason,
-//                 requestedAt: new Date(),
-//                 allowed: true
-//             };
-
-//             if (order.paid) {
-//                 order.refund = {
-//                     amount: order.amount,
-//                     method: null,
-//                     status: "requested",
-//                     reason,
-//                     requestedBy: userId,
-//                     refundAudit: [
-//                         {
-//                             status: "requested",
-//                             changedBy: userId,
-//                             changedByModel: "User",
-//                             note: "Refund requested automatically after order cancellation"
-//                         }
-//                     ]
-//                 };
-//             }
-
-
-//             await order.save({ session });
-//         });
-
-//         // ✅ Available refund options if payment was made
-//         const refundMethodsAvailable = order.paid
-//             ? [
-//                 { method: "razorpay", label: "Original Payment Method (Razorpay)" },
-//                 { method: "wallet", label: "Add to Wallet" }
-//             ]
-//             : [];
-
-//         // ✅ Send email confirmation to user
-//         await sendEmail(
-//             order.user.email,
-//             "🛒 Order Cancellation Confirmation",
-//             `
-//             <p>Hi ${order.user.name},</p>
-//             <p>We have successfully received your cancellation request for Order <strong>#${order._id}</strong>.</p>
-//             <p><strong>Reason:</strong> ${reason || "No reason provided"}</p>
-
-//             ${order.paid
-//                 ? `
-//                     <p>Your payment was already completed, so a refund request has been initiated automatically.</p>
-//                     <p><strong>Next Step:</strong> Please select your preferred refund method:</p>
-//                     <ul>
-//                         <li>💳 <strong>Original Payment Method (Razorpay)</strong></li>
-//                         <li>💰 <strong>Joyory Wallet</strong></li>
-//                     </ul>
-//                     <p>Once you choose a refund method, our team will process it within a few business days.</p>
-//                     `
-//                 : `<p>Since your payment wasn’t completed, no refund is needed.</p>`
-//             }
-
-//             <p>Thank you for shopping with us. We hope to serve you again soon!</p>
-//             <p>Regards,<br/>Team Joyory Beauty</p>
-//             `
-//         );
-
-//         // ✅ Send response to user
-//         res.status(200).json({
-//             success: true,
-//             message: order.paid
-//                 ? "Order cancelled successfully. Refund initiated — please select your preferred refund method."
-//                 : "Order cancelled successfully.",
-//             refundMethodsAvailable
-//         });
-
-//     } catch (err) {
-//         console.error("❌ Cancel order error:", err);
-//         res.status(500).json({ success: false, message: "Cancel order failed" });
-//     } finally {
-//         await session.endSession();
-//     }
-// };
 export const cancelOrder = async (req, res) => {
     const session = await mongoose.startSession();
     try {
@@ -3381,50 +2480,96 @@ export const cancelOrder = async (req, res) => {
         if (!order)
             return res.status(404).json({ success: false, message: "Order not found" });
 
-        // 🔐 Ensure user owns order or admin
+        // ensure owner
         if (String(order.user._id) !== String(userId) && !req.user?.isAdmin)
             return res.status(403).json({ success: false, message: "Unauthorized" });
 
-        // 🚫 Prevent double cancellation
+        // prevent duplicate cancellation
         if (order.orderStatus === "Cancelled")
-            return res.status(400).json({ success: false, message: "Order is already cancelled" });
+            return res.status(400).json({ success: false, message: "Order already cancelled" });
 
-        // 🚫 Prevent cancelling after shipping
+        // cannot cancel after shipping
         const nonCancelableStatuses = ["Shipped", "Out for Delivery", "Delivered"];
         if (nonCancelableStatuses.includes(order.orderStatus))
             return res.status(400).json({
                 success: false,
-                message: `Order cannot be cancelled once ${order.orderStatus}`,
+                message: `Order cannot be cancelled once ${order.orderStatus}`
             });
 
         await session.withTransaction(async () => {
-            order.orderStatus = "Cancelled";
+            const txOrder = await Order.findById(orderId)
+                .session(session)
+                .populate("products.productId");
 
-            // 🚀 Cancel in Shiprocket (only if order exists there)
-            if (order.shipment?.shiprocket_order_id) {
-                try {
-                    await cancelShiprocketShipment(order.shipment.shiprocket_order_id);
-                    console.log("🚀 Shiprocket order cancelled");
-                } catch (err) {
-                    console.error("❌ Shiprocket cancel failed:", err.response?.data || err.message);
+            if (!txOrder) throw new Error("Order disappeared during transaction");
+
+            // ⭐⭐⭐ REVERSE STOCK & SALES — only if admin confirmed ⭐⭐⭐
+            if (txOrder.adminConfirmed) {
+                for (const item of txOrder.products) {
+                    const product = await Product.findById(item.productId._id).session(session);
+                    if (!product) continue;
+
+                    const qty = Number(item.quantity || 0);
+
+                    if (item.variant?.sku) {
+                        const variantIndex = product.variants.findIndex(v => v.sku === item.variant.sku);
+                        if (variantIndex !== -1) {
+                            const variant = product.variants[variantIndex];
+
+                            // restore stock
+                            variant.stock += qty;
+
+                            // reduce sales
+                            variant.sales = Math.max(0, (variant.sales || 0) - qty);
+                        }
+                    } else {
+                        product.quantity += qty;
+                    }
+
+                    // restore product-wide sales
+                    product.sales = Math.max(0, (product.sales || 0) - qty);
+
+                    // update total stock if variants exist
+                    if (product.variants?.length > 0) {
+                        product.quantity = product.variants.reduce(
+                            (s, v) => s + (Number(v.stock) || 0),
+                            0
+                        );
+                    }
+
+                    // status update
+                    if (product.quantity <= 0) product.status = "Out of stock";
+                    else if (product.thresholdValue != null && product.quantity < product.thresholdValue)
+                        product.status = "Low stock";
+                    else product.status = "In-stock";
+
+                    await product.save({ session });
                 }
             }
 
-            // 📌 Payment status
-            order.paymentStatus = order.paid ? "refund_requested" : "cancelled";
+            // cancel in shiprocket
+            if (txOrder.shipment?.shiprocket_order_id) {
+                try {
+                    await cancelShiprocketShipment(txOrder.shipment.shiprocket_order_id);
+                } catch (err) {
+                    console.error("Shiprocket cancel failed:", err?.response?.data || err.message);
+                }
+            }
 
-            // 📝 Cancellation logs
-            order.cancellation = {
+            txOrder.orderStatus = "Cancelled";
+            txOrder.paymentStatus = txOrder.paid ? "refund_requested" : "cancelled";
+
+            txOrder.cancellation = {
                 cancelledBy: userId,
                 reason,
                 requestedAt: new Date(),
                 allowed: true,
             };
 
-            // 💰 Refund setup
-            if (order.paid) {
-                order.refund = {
-                    amount: order.amount,
+            // refund setup
+            if (txOrder.paid) {
+                txOrder.refund = {
+                    amount: txOrder.amount,
                     method: null,
                     status: "requested",
                     reason,
@@ -3440,7 +2585,7 @@ export const cancelOrder = async (req, res) => {
                 };
             }
 
-            await order.save({ session });
+            await txOrder.save({ session });
         });
 
         const refundMethodsAvailable = order.paid
@@ -3464,6 +2609,7 @@ export const cancelOrder = async (req, res) => {
         await session.endSession();
     }
 };
+
 
 export const setRefundMethod = async (req, res) => {
     const { orderId, method } = req.body;

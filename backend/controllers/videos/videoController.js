@@ -36,65 +36,6 @@ export async function getTrendingVideos(req, res) {
     }
 }
 
-// ---------- Create Video ----------
-// export async function createVideo(req, res) {
-//     try {
-//         const {
-//             title,
-//             description,
-//             category,
-//             tags,
-//             sourceUrl,
-//             status,
-//             isPopular,
-//             order,
-//             publishedAt,
-//         } = req.body;
-
-//         let parsed = {};
-
-//         // If file uploaded (local video)
-//         if (req.file) {
-//             const result = await cloudinary.uploader.upload(req.file.path, {
-//                 resource_type: "video",
-//                 folder: "videos",
-//             });
-//             parsed = { provider: "mp4", videoUrl: result.secure_url, cloudPublicId: result.public_id };
-//         }
-
-//         // Else if YouTube/Vimeo link
-//         else if (sourceUrl) {
-//             parsed = parseVideoSource(sourceUrl);
-//         } else {
-//             return res.status(400).json({ message: "Please upload a video or provide a video URL" });
-//         }
-
-//         let slug = slugify(title, { lower: true, strict: true });
-//         let base = slug,
-//             i = 1;
-//         while (await Video.findOne({ slug })) slug = `${base}-${i++}`;
-
-//         const video = await Video.create({
-//             title,
-//             slug,
-//             description,
-//             category,
-//             tags,
-//             ...parsed,
-//             status,
-//             isPopular,
-//             order,
-//             publishedAt: status === "published" ? publishedAt || new Date() : null,
-//             createdBy: req.user?._id,
-//         });
-
-//         res.status(201).json(video);
-//     } catch (err) {
-//         console.error("Create Video Error:", err);
-//         res.status(400).json({ message: err.message });
-//     }
-// }
-
 // ---------- Get All Videos ----------
 export async function getAllVideos(req, res) {
     try {
@@ -120,7 +61,6 @@ export async function getAllVideos(req, res) {
         res.status(500).json({ message: "Internal server error" });
     }
 }
-
 
 // ---------- Create Video ----------
 export async function createVideo(req, res) {
@@ -196,53 +136,6 @@ export async function createVideo(req, res) {
     }
 }
 
-// ---------- Update Video ----------
-// export async function updateVideo(req, res) {
-//     try {
-//         const { id } = req.params;
-//         const updates = { ...req.body, updatedBy: req.user?._id };
-
-//         const existing = await Video.findById(id);
-//         if (!existing) return res.status(404).json({ message: "Video not found" });
-
-//         // Handle local file re-upload (replace existing)
-//         if (req.file) {
-//             if (existing.cloudPublicId) {
-//                 try {
-//                     await cloudinary.uploader.destroy(existing.cloudPublicId, { resource_type: "video" });
-//                 } catch (err) {
-//                     console.warn("Cloudinary delete failed:", err.message);
-//                 }
-//             }
-//             const result = await cloudinary.uploader.upload(req.file.path, {
-//                 resource_type: "video",
-//                 folder: "videos",
-//             });
-//             fs.unlinkSync(req.file.path);
-//             updates.provider = "mp4";
-//             updates.videoUrl = result.secure_url;
-//             updates.cloudPublicId = result.public_id;
-//         } else if (updates.sourceUrl) {
-//             Object.assign(updates, parseVideoSource(updates.sourceUrl));
-//         }
-
-//         if (updates.title) {
-//             const slug = slugify(updates.title, { lower: true, strict: true });
-//             const exists = await Video.findOne({ slug, _id: { $ne: id } });
-//             updates.slug = exists ? `${slug}-${Date.now()}` : slug;
-//         }
-
-//         if (updates.status === "published" && !updates.publishedAt) {
-//             updates.publishedAt = new Date();
-//         }
-
-//         const video = await Video.findByIdAndUpdate(id, updates, { new: true });
-//         res.json(video);
-//     } catch (err) {
-//         console.error("Update Video Error:", err);
-//         res.status(400).json({ message: err.message });
-//     }
-// }
 // ---------- Update Video ----------
 export async function updateVideo(req, res) {
     try {

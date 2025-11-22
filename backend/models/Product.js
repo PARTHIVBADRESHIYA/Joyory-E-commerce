@@ -112,6 +112,12 @@ const variantSchema = new mongoose.Schema({
     hex: { type: String },
     images: [{ type: String }],
     stock: { type: Number, default: 0 },
+    stockByWarehouse: [
+        {
+            warehouseCode: String, // e.g. "LAKME_WH_1"
+            stock: { type: Number, default: 0 }
+        }
+    ],
     sales: { type: Number, default: 0 },
     thresholdValue: { type: Number, default: 0 },
     isActive: { type: Boolean, default: true },

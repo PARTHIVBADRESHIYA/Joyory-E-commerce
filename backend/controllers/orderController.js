@@ -9,7 +9,7 @@ import { refundQueue } from "../middlewares/services/refundQueue.js";
 import { splitOrderForPersistence } from "../middlewares/services/orderSplit.js"; // ensure this exists and supports session (see notes)
 import { createShiprocketOrder, cancelShiprocketShipment } from "../middlewares/services/shiprocket.js";
 import { sendEmail } from "../middlewares/utils/emailService.js"; // ✅ assume you already have an email service
-
+import { allocateWarehousesForOrder } from "../middlewares/utils/warehouseAllocator.js";
 
 const shiprocketStatusMap = {
     0: "Not Picked",
@@ -88,16 +88,349 @@ export const adminListOrders = async (req, res) => {
     }
 };
 
-export const adminGetOrder = async (req, res) => {
-    try {
-        const order = await Order.findById(req.params.id).populate("user").populate("products.productId");
-        if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-        res.json({ success: true, data: order });
-    } catch (err) {
-        console.error("adminGetOrder:", err);
-        res.status(500).json({ success: false, message: err.message });
-    }
-};
+// export const adminConfirmOrder = async (req, res) => {
+//     const session = await mongoose.startSession();
+//     try {
+//         const { id: orderId } = req.params;
+//         const adminUser = req.user;
+
+//         const order = await Order.findById(orderId).populate("user").populate("products.productId");
+//         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+//         if (order.adminConfirmed) return res.status(400).json({ success: false, message: "Order already confirmed" });
+//         if (order.orderStatus === "Cancelled") return res.status(400).json({ success: false, message: "Cannot confirm cancelled order" });
+
+//         await session.withTransaction(async () => {
+//             const txOrder = await Order.findById(orderId).session(session).populate("products.productId").populate("user");
+//             if (!txOrder) throw new Error("Order disappeared during transaction");
+
+//             // Deduct stock for each item
+//             for (const item of txOrder.products) {
+//                 const productId = item.productId._id || item.productId;
+//                 const qty = Number(item.quantity || 0);
+//                 if (qty <= 0) continue;
+
+//                 const product = await Product.findById(productId).session(session);
+//                 if (!product) throw Object.assign(new Error(`Product not found: ${productId}`), { step: "STOCK" });
+
+//                 if (item.variant?.sku) {
+//                     const variantIndex = product.variants.findIndex(v => v.sku === item.variant.sku);
+//                     if (variantIndex === -1) throw Object.assign(new Error(`Variant not found: ${item.variant.sku}`), { step: "STOCK" });
+//                     const variant = product.variants[variantIndex];
+//                     if ((variant.stock || 0) < qty) throw Object.assign(new Error(`Not enough stock for ${variant.sku}`), { step: "STOCK" });
+
+//                     variant.stock -= qty;
+//                     variant.sales = (variant.sales || 0) + qty;
+//                     product.sales = (product.sales || 0) + qty;
+//                     product.quantity = product.variants.reduce((s, v) => s + (Number(v.stock) || 0), 0);
+//                 } else {
+//                     if ((product.quantity || 0) < qty) throw Object.assign(new Error(`Not enough stock for ${product.name}`), { step: "STOCK" });
+//                     product.quantity -= qty;
+//                     product.sales = (product.sales || 0) + qty;
+//                 }
+
+//                 // status
+//                 if (product.quantity <= 0) product.status = "Out of stock";
+//                 else if (product.thresholdValue != null && product.quantity < product.thresholdValue) product.status = "Low stock";
+//                 else product.status = "In-stock";
+
+//                 await product.save({ session });
+//             }
+
+//             // Create splitOrders in-session (ensure your util supports session).
+//             // If your split utility does not accept session, implement split logic inline.
+//             if (typeof splitOrderForPersistence === "function") {
+//                 // Note: ensure splitOrderForPersistence persists to order and accepts session.
+//                 await splitOrderForPersistence(txOrder, { session });
+//             }
+
+//             // If COD and not paid, create a Payment doc
+//             if (txOrder.paymentMethod === "COD" && !txOrder.paid) {
+//                 const [paymentDoc] = await Payment.create([{
+//                     order: txOrder._id,
+//                     method: "COD",
+//                     status: "Pending",
+//                     amount: txOrder.amount
+//                 }], { session });
+//                 if (paymentDoc) txOrder.paymentId = paymentDoc._id;
+//             }
+
+//             txOrder.adminConfirmed = true;
+//             txOrder.orderStatus = "Processing";
+//             txOrder.isDraft = false;
+//             txOrder.trackingHistory = txOrder.trackingHistory || [];
+//             txOrder.trackingHistory.push({ status: "Admin Confirmed", timestamp: new Date(), location: `Admin:${adminUser?._id || "system"}` });
+
+//             // Clear user's cart
+//             if (txOrder.user && txOrder.user._id) {
+//                 await User.updateOne({ _id: txOrder.user._id }, { $set: { cart: [] } }, { session });
+//             }
+
+//             await txOrder.save({ session });
+//         }); // end transaction
+
+//         // After commit: create Shiprocket order and update shipment
+//         const finalOrder = await Order.findById(orderId).populate("user").populate("products.productId");
+//         try {
+//             const shiprocketRes = await createShiprocketOrder(finalOrder);
+//             if (shiprocketRes?.shipmentDetails) {
+//                 finalOrder.shipment = shiprocketRes.shipmentDetails;
+//                 finalOrder.trackingHistory = finalOrder.trackingHistory || [];
+//                 finalOrder.trackingHistory.push({ status: "Shipment Created", timestamp: new Date(), location: "Shiprocket" });
+//                 await finalOrder.save();
+//             } else {
+//                 await Order.updateOne({ _id: finalOrder._id }, { $push: { trackingHistory: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } } });
+//             }
+//         } catch (shipErr) {
+//             console.error("Shiprocket post-confirm error:", shipErr);
+//             await Order.updateOne({ _id: finalOrder._id }, { $push: { trackingHistory: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } } });
+//         }
+
+//         // notify user
+//         try {
+//             await sendEmail(
+//                 finalOrder.user.email,
+//                 "Order Confirmed & Shipped",
+//                 `<p>Hi ${finalOrder.user.name},</p>
+//                  <p>Your order <strong>#${finalOrder._id}</strong> is confirmed and shipment is being created. We'll update you with tracking details shortly.</p>
+//                  <p>Regards,<br/>Team Joyory Beauty</p>`
+//             );
+//         } catch (e) { console.warn("Email error:", e); }
+
+//         const refreshed = await Order.findById(orderId).populate("user").populate("products.productId");
+//         return res.json({ success: true, message: "Order confirmed and shipment initiated", order: refreshed });
+//     } catch (err) {
+//         console.error("adminConfirmOrder error:", err);
+//         if (err.step === "STOCK") {
+//             return res.status(400).json({ success: false, message: err.message || "Insufficient stock" });
+//         }
+//         return res.status(500).json({ success: false, message: err.message || "Internal error" });
+//     } finally {
+//         try { await session.endSession(); } catch (e) { }
+//     }
+// };
+
+// export const adminCancelOrder = async (req, res) => {
+//     const session = await mongoose.startSession();
+//     try {
+//         const orderId = req.params.id;
+//         const { reason } = req.body;
+//         const adminId = req.user?._id;
+
+//         const order = await Order.findById(orderId)
+//             .populate("products.productId")
+//             .populate("user");
+
+//         if (!order)
+//             return res.status(404).json({ success: false, message: "Order not found" });
+
+//         if (order.orderStatus === "Cancelled")
+//             return res.status(400).json({ success: false, message: "Order already cancelled" });
+
+//         // ❌ Prevent cancelling shipped/delivered orders
+//         const nonCancelable = ["Shipped", "Out for Delivery", "Delivered"];
+//         if (nonCancelable.includes(order.orderStatus)) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: `Order cannot be cancelled once ${order.orderStatus}`,
+//             });
+//         }
+
+//         await session.withTransaction(async () => {
+//             order.orderStatus = "Cancelled";
+
+//             // 🚀 Cancel Shiprocket order if exists
+//             if (order.shipment?.shiprocket_order_id) {
+//                 try {
+//                     await cancelShiprocketShipment(order.shipment.shiprocket_order_id);
+//                     console.log("🚀 Shiprocket order cancelled by admin");
+//                 } catch (err) {
+//                     console.error("❌ Shiprocket cancel failed:", err.response?.data || err.message);
+//                 }
+//             }
+
+//             // 🔄 Payment Status
+//             order.paymentStatus = order.paid ? "refund_requested" : "cancelled";
+
+//             // 📝 Cancellation block
+//             order.cancellation = {
+//                 cancelledBy: adminId,
+//                 reason: reason || "Cancelled by admin",
+//                 requestedAt: new Date(),
+//                 allowed: true
+//             };
+
+//             // 📜 Add tracking event
+//             order.trackingHistory.push({
+//                 status: "Cancelled",
+//                 timestamp: new Date(),
+//                 location: `Admin:${adminId}`
+//             });
+
+//             await order.save({ session });
+//         });
+
+//         // 📧 Notify user
+//         try {
+//             await sendEmail(
+//                 order.user.email,
+//                 "Order Cancelled",
+//                 `<p>Hi ${order.user.name},</p>
+//                  <p>Your order #${order.orderId || order._id} has been cancelled by admin.</p>
+//                  <p>Reason: ${reason || "Cancelled by admin"}</p>`
+//             );
+//         } catch (emailErr) {
+//             console.warn("Email sending failed:", emailErr);
+//         }
+
+//         return res.status(200).json({
+//             success: true,
+//             message: order.paid
+//                 ? "Order cancelled. Refund has been requested."
+//                 : "Order cancelled successfully.",
+//             order
+//         });
+
+//     } catch (err) {
+//         console.error("adminCancelOrder:", err);
+//         res.status(500).json({ success: false, message: "Admin cancel failed" });
+//     } finally {
+//         await session.endSession();
+//     }
+// };
+// export const adminCancelOrder = async (req, res) => {
+//     const session = await mongoose.startSession();
+//     try {
+//         const orderId = req.params.id;
+//         const { reason } = req.body;
+//         const adminId = req.user?._id;
+
+//         const order = await Order.findById(orderId)
+//             .populate("products.productId")
+//             .populate("user");
+
+//         if (!order)
+//             return res.status(404).json({ success: false, message: "Order not found" });
+
+//         if (order.orderStatus === "Cancelled")
+//             return res.status(400).json({ success: false, message: "Order already cancelled" });
+
+//         // Cannot cancel after shipped
+//         const nonCancelable = ["Shipped", "Out for Delivery", "Delivered"];
+//         if (nonCancelable.includes(order.orderStatus)) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: `Order cannot be cancelled once ${order.orderStatus}`,
+//             });
+//         }
+
+//         await session.withTransaction(async () => {
+//             const txOrder = await Order.findById(orderId)
+//                 .session(session)
+//                 .populate("products.productId");
+
+//             if (!txOrder) throw new Error("Order disappeared during transaction");
+
+//             // ⭐ REVERSE STOCK + SALES ONLY IF ADMIN CONFIRMED
+//             if (txOrder.adminConfirmed) {
+//                 for (const item of txOrder.products) {
+//                     const product = await Product.findById(item.productId._id).session(session);
+//                     if (!product) continue;
+
+//                     const qty = Number(item.quantity || 0);
+
+//                     if (item.variant?.sku) {
+//                         const variantIndex = product.variants.findIndex(v => v.sku === item.variant.sku);
+//                         if (variantIndex !== -1) {
+//                             const variant = product.variants[variantIndex];
+
+//                             // Restore stock
+//                             variant.stock += qty;
+
+//                             // Decrease sales count
+//                             variant.sales = Math.max(0, (variant.sales || 0) - qty);
+//                         }
+//                     } else {
+//                         product.quantity += qty;
+//                     }
+
+//                     // Product-wide sales rollback
+//                     product.sales = Math.max(0, (product.sales || 0) - qty);
+
+//                     // Update product.quantity (if variants exist)
+//                     if (product.variants?.length > 0) {
+//                         product.quantity = product.variants.reduce((s, v) => s + (v.stock || 0), 0);
+//                     }
+
+//                     // Update status
+//                     if (product.quantity <= 0) product.status = "Out of stock";
+//                     else if (product.thresholdValue != null && product.quantity < product.thresholdValue)
+//                         product.status = "Low stock";
+//                     else product.status = "In-stock";
+
+//                     await product.save({ session });
+//                 }
+//             }
+
+//             // ❌ Cancel Shiprocket
+//             if (txOrder.shipment?.shiprocket_order_id) {
+//                 try {
+//                     await cancelShiprocketShipment(txOrder.shipment.shiprocket_order_id);
+//                 } catch (err) {
+//                     console.error("Shiprocket cancel failed:", err.response?.data || err.message);
+//                 }
+//             }
+
+//             // Payment status
+//             txOrder.paymentStatus = txOrder.paid ? "refund_requested" : "cancelled";
+
+//             // Mark cancelled
+//             txOrder.orderStatus = "Cancelled";
+//             txOrder.cancellation = {
+//                 cancelledBy: adminId,
+//                 reason: reason || "Cancelled by admin",
+//                 requestedAt: new Date(),
+//                 allowed: true
+//             };
+
+//             // Tracking
+//             txOrder.trackingHistory.push({
+//                 status: "Cancelled",
+//                 timestamp: new Date(),
+//                 location: `Admin:${adminId}`
+//             });
+
+//             await txOrder.save({ session });
+//         });
+
+//         // Email notify
+//         try {
+//             await sendEmail(
+//                 order.user.email,
+//                 "Order Cancelled",
+//                 `<p>Hi ${order.user.name},</p>
+//                  <p>Your order #${order.orderId || order._id} has been cancelled by admin.</p>
+//                  <p>Reason: ${reason || "Cancelled by admin"}</p>`
+//             );
+//         } catch (emailErr) {
+//             console.warn("Email sending failed:", emailErr);
+//         }
+
+//         return res.status(200).json({
+//             success: true,
+//             message: order.paid
+//                 ? "Order cancelled. Refund has been requested."
+//                 : "Order cancelled successfully.",
+//             order
+//         });
+
+//     } catch (err) {
+//         console.error("adminCancelOrder:", err);
+//         res.status(500).json({ success: false, message: "Admin cancel failed" });
+//     } finally {
+//         await session.endSession();
+//     }
+// };
+
 
 export const adminConfirmOrder = async (req, res) => {
     const session = await mongoose.startSession();
@@ -113,44 +446,65 @@ export const adminConfirmOrder = async (req, res) => {
         await session.withTransaction(async () => {
             const txOrder = await Order.findById(orderId).session(session).populate("products.productId").populate("user");
             if (!txOrder) throw new Error("Order disappeared during transaction");
+            // ⭐ GET ALLOCATION MAP (warehouse wise)
+            const allocationMap = await allocateWarehousesForOrder(txOrder);
 
-            // Deduct stock for each item
-            for (const item of txOrder.products) {
+            // ⭐ DEDUCT STOCK PER WAREHOUSE
+            for (let i = 0; i < txOrder.products.length; i++) {
+                const item = txOrder.products[i];
                 const productId = item.productId._id || item.productId;
-                const qty = Number(item.quantity || 0);
-                if (qty <= 0) continue;
+                const allocations = allocationMap[i]; // [{ warehouseCode, qty }]
 
                 const product = await Product.findById(productId).session(session);
-                if (!product) throw Object.assign(new Error(`Product not found: ${productId}`), { step: "STOCK" });
+                if (!product) throw new Error(`Product not found: ${productId}`);
 
+                // find variant
+                let variant = null;
                 if (item.variant?.sku) {
-                    const variantIndex = product.variants.findIndex(v => v.sku === item.variant.sku);
-                    if (variantIndex === -1) throw Object.assign(new Error(`Variant not found: ${item.variant.sku}`), { step: "STOCK" });
-                    const variant = product.variants[variantIndex];
-                    if ((variant.stock || 0) < qty) throw Object.assign(new Error(`Not enough stock for ${variant.sku}`), { step: "STOCK" });
+                    variant = product.variants.find(v => v.sku === item.variant.sku);
+                }
+                if (!variant) variant = product.variants?.[0];
+                if (!variant) throw new Error(`Variant missing for: ${productId}`);
 
-                    variant.stock -= qty;
-                    variant.sales = (variant.sales || 0) + qty;
-                    product.sales = (product.sales || 0) + qty;
-                    product.quantity = product.variants.reduce((s, v) => s + (Number(v.stock) || 0), 0);
-                } else {
-                    if ((product.quantity || 0) < qty) throw Object.assign(new Error(`Not enough stock for ${product.name}`), { step: "STOCK" });
-                    product.quantity -= qty;
-                    product.sales = (product.sales || 0) + qty;
+                // deduct from each warehouse
+                for (const alloc of allocations) {
+                    const { warehouseCode, qty } = alloc;
+
+                    const wh = variant.stockByWarehouse.find(w => w.warehouseCode === warehouseCode);
+
+                    if (!wh || wh.stock < qty) {
+                        throw Object.assign(
+                            new Error(`Insufficient stock in warehouse ${warehouseCode} for SKU ${variant.sku}`),
+                            { step: "STOCK" }
+                        );
+                    }
+
+                    // deduct
+                    wh.stock -= qty;
                 }
 
-                // status
+                // update global stock = sum of warehouse stock
+                variant.stock = variant.stockByWarehouse.reduce((s, w) => s + Number(w.stock || 0), 0);
+
+                // update product quantity
+                product.quantity = product.variants.reduce((s, v) => s + (Number(v.stock) || 0), 0);
+
+                // sales count
+                const totalQty = allocations.reduce((s, a) => s + a.qty, 0);
+                variant.sales = (variant.sales || 0) + totalQty;
+                product.sales = (product.sales || 0) + totalQty;
+
+                // status update
                 if (product.quantity <= 0) product.status = "Out of stock";
-                else if (product.thresholdValue != null && product.quantity < product.thresholdValue) product.status = "Low stock";
+                else if (product.thresholdValue && product.quantity < product.thresholdValue)
+                    product.status = "Low stock";
                 else product.status = "In-stock";
 
                 await product.save({ session });
             }
 
             // Create splitOrders in-session (ensure your util supports session).
-            // If your split utility does not accept session, implement split logic inline.
             if (typeof splitOrderForPersistence === "function") {
-                // Note: ensure splitOrderForPersistence persists to order and accepts session.
                 await splitOrderForPersistence(txOrder, { session });
             }
 
@@ -179,22 +533,93 @@ export const adminConfirmOrder = async (req, res) => {
             await txOrder.save({ session });
         }); // end transaction
 
-        // After commit: create Shiprocket order and update shipment
+        // After commit: create Shiprocket orders (your service will update Order.shipments itself)
         const finalOrder = await Order.findById(orderId).populate("user").populate("products.productId");
+
         try {
             const shiprocketRes = await createShiprocketOrder(finalOrder);
-            if (shiprocketRes?.shipmentDetails) {
-                finalOrder.shipment = shiprocketRes.shipmentDetails;
-                finalOrder.trackingHistory = finalOrder.trackingHistory || [];
-                finalOrder.trackingHistory.push({ status: "Shipment Created", timestamp: new Date(), location: "Shiprocket" });
-                await finalOrder.save();
-            } else {
-                await Order.updateOne({ _id: finalOrder._id }, { $push: { trackingHistory: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } } });
+
+            // ❗ If Shiprocket failed any shipment
+            if (shiprocketRes.failed && shiprocketRes.failed.length > 0) {
+                console.error("Shiprocket API failed for order:", finalOrder._id, shiprocketRes.failed);
+                throw new Error("Shiprocket shipment creation failed. Order not confirmed.");
             }
+
+            // ✔ SUCCESS case
+            if (Array.isArray(shiprocketRes?.shipments) && shiprocketRes.shipments.length > 0) {
+                await Order.updateOne(
+                    { _id: finalOrder._id },
+                    {
+                        $push: {
+                            trackingHistory: {
+                                status: "Shipment Created",
+                                timestamp: new Date(),
+                                location: "Shiprocket"
+                            }
+                        },
+                        $set: { orderStatus: "Processing" }
+                    },
+                    { timestamps: false }
+                );
+
+            }
+
+            // ❌ PARTIAL FAILURE
+            else if (shiprocketRes?.failed?.length) {
+                await Order.updateOne(
+                    { _id: finalOrder._id },
+                    {
+                        $push: {
+                            trackingHistory: {
+                                status: "Shipment Creation Failed",
+                                timestamp: new Date(),
+                                location: "Shiprocket"
+                            }
+                        }
+                    },
+                    { timestamps: false }
+                );
+            }
+
+            // ⚠️ NO SHIPMENTS CREATED
+            else {
+                await Order.updateOne(
+                    { _id: finalOrder._id },
+                    {
+                        $push: {
+                            trackingHistory: {
+                                status: "Shipment Creation Skipped",
+                                timestamp: new Date(),
+                                location: "System"
+                            }
+                        }
+                    },
+                    { timestamps: false }
+                );
+
+
+            }
+
         } catch (shipErr) {
             console.error("Shiprocket post-confirm error:", shipErr);
-            await Order.updateOne({ _id: finalOrder._id }, { $push: { trackingHistory: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } } });
+
+            await Order.updateOne(
+                { _id: finalOrder._id },
+                {
+                    $push: {
+                        trackingHistory: {
+                            status: "Shipment Creation Failed",
+                            timestamp: new Date(),
+                            location: "Shiprocket"
+                        }
+                    }
+                },
+                { timestamps: false } // 🚀 PREVENTS UPDATEDAT FROM BEING TOUCHED
+            );
+
         }
+
+
 
         // notify user
         try {
@@ -207,7 +632,7 @@ export const adminConfirmOrder = async (req, res) => {
             );
         } catch (e) { console.warn("Email error:", e); }
 
-        const refreshed = await Order.findById(orderId).populate("user").populate("products.productId");
+        const refreshed = await Order.findById(orderId).populate("user").populate("products.productId").populate("shipments.products.productId");
         return res.json({ success: true, message: "Order confirmed and shipment initiated", order: refreshed });
     } catch (err) {
         console.error("adminConfirmOrder error:", err);
@@ -224,7 +649,7 @@ export const adminCancelOrder = async (req, res) => {
     const session = await mongoose.startSession();
     try {
         const orderId = req.params.id;
-        const { reason } = req.body;
+        const { reason } = req.body;    
         const adminId = req.user?._id;
 
         const order = await Order.findById(orderId)
@@ -237,7 +662,7 @@ export const adminCancelOrder = async (req, res) => {
         if (order.orderStatus === "Cancelled")
             return res.status(400).json({ success: false, message: "Order already cancelled" });
 
-        // ❌ Prevent cancelling shipped/delivered orders
+        // Cannot cancel after shipped
         const nonCancelable = ["Shipped", "Out for Delivery", "Delivered"];
         if (nonCancelable.includes(order.orderStatus)) {
             return res.status(400).json({
@@ -247,40 +672,112 @@ export const adminCancelOrder = async (req, res) => {
         }
 
         await session.withTransaction(async () => {
-            order.orderStatus = "Cancelled";
+            const txOrder = await Order.findById(orderId)
+                .session(session)
+                .populate("products.productId");
 
-            // 🚀 Cancel Shiprocket order if exists
-            if (order.shipment?.shiprocket_order_id) {
-                try {
-                    await cancelShiprocketShipment(order.shipment.shiprocket_order_id);
-                    console.log("🚀 Shiprocket order cancelled by admin");
-                } catch (err) {
-                    console.error("❌ Shiprocket cancel failed:", err.response?.data || err.message);
+            if (!txOrder) throw new Error("Order disappeared during transaction");
+
+            // ⭐ REVERSE STOCK + SALES ONLY IF ADMIN CONFIRMED
+            if (txOrder.adminConfirmed) {
+                for (const item of txOrder.products) {
+                    const product = await Product.findById(item.productId._id).session(session);
+                    if (!product) continue;
+
+                    const qty = Number(item.quantity || 0);
+
+                    if (item.variant?.sku) {
+                        const variantIndex = product.variants.findIndex(v => v.sku === item.variant.sku);
+                        if (variantIndex !== -1) {
+                            const variant = product.variants[variantIndex];
+
+                            // Restore stock
+                            variant.stock += qty;
+
+                            // Decrease sales count
+                            variant.sales = Math.max(0, (variant.sales || 0) - qty);
+                        }
+                    } else {
+                        product.quantity += qty;
+                    }
+
+                    // Product-wide sales rollback
+                    product.sales = Math.max(0, (product.sales || 0) - qty);
+
+                    // Update product.quantity (if variants exist)
+                    if (product.variants?.length > 0) {
+                        product.quantity = product.variants.reduce((s, v) => s + (v.stock || 0), 0);
+                    }
+
+                    // Update status
+                    if (product.quantity <= 0) product.status = "Out of stock";
+                    else if (product.thresholdValue != null && product.quantity < product.thresholdValue)
+                        product.status = "Low stock";
+                    else product.status = "In-stock";
+
+                    await product.save({ session });
                 }
             }
 
-            // 🔄 Payment Status
-            order.paymentStatus = order.paid ? "refund_requested" : "cancelled";
+            if (Array.isArray(txOrder.shipments)) {
+                for (const sh of txOrder.shipments) {
 
-            // 📝 Cancellation block
-            order.cancellation = {
+                    // Use proper ID
+                    const srShipmentId = sh.shipment_id;
+                    const srOrderId = sh.shiprocket_order_id;
+
+                    try {
+                        if (srShipmentId) {
+                            await cancelShiprocketShipment(srShipmentId); // Shipment cancel API
+                        } else if (srOrderId) {
+                            await cancelShiprocketOrder(srOrderId); // Order cancel API
+                        }
+                    } catch (ex) {
+                        console.error("Shiprocket cancel failed:", ex?.response?.data || ex.message);
+                    }
+
+                    // Update local
+                    sh.status = "Cancelled";
+                    sh.trackingHistory.push({
+                        status: "Cancelled",
+                        timestamp: new Date(),
+                        location: `Admin:${adminId}`
+                    });
+                }
+            }
+            else if (txOrder.shipment?.shiprocket_order_id) {
+                // fallback to legacy single shipment field
+                try {
+                    await cancelShiprocketShipment(txOrder.shipment.shiprocket_order_id);
+                } catch (err) {
+                    console.error("Shiprocket cancel failed:", err.response?.data || err.message);
+                }
+            }
+
+
+            // Payment status
+            txOrder.paymentStatus = txOrder.paid ? "refund_requested" : "cancelled";
+
+            // Mark cancelled
+            txOrder.orderStatus = "Cancelled";
+            txOrder.cancellation = {
                 cancelledBy: adminId,
                 reason: reason || "Cancelled by admin",
                 requestedAt: new Date(),
                 allowed: true
             };
 
-            // 📜 Add tracking event
-            order.trackingHistory.push({
+            // Tracking
+            txOrder.trackingHistory.push({
                 status: "Cancelled",
                 timestamp: new Date(),
                 location: `Admin:${adminId}`
             });
 
-            await order.save({ session });
+            await txOrder.save({ session });
         });
 
-        // 📧 Notify user
+        // Email notify
         try {
             await sendEmail(
                 order.user.email,
@@ -309,257 +806,7 @@ export const adminCancelOrder = async (req, res) => {
     }
 };
 
-// export const getAllOrders = async (req, res) => {
-//     try {
-//         const { status, orderType, fromDate, toDate, paid } = req.query;
-//         const query = {};
 
-//         // ✅ Filter by status
-//         if (status && status !== "all") {
-//             query.status = status;
-//         }
-
-//         // ✅ Filter by orderType
-//         if (orderType && orderType !== "all") {
-//             query.orderType = orderType;
-//         }
-
-//         // ✅ Filter by PAID / UNPAID
-//         if (paid === "true") {
-//             query.$or = [
-//                 { paid: true },
-//                 { paymentStatus: /paid/i },
-//                 { paymentStatus: "success" }
-//             ];
-//         } else if (paid === "false") {
-//             query.$or = [
-//                 { paid: false },
-//                 { paymentStatus: /pending|failed|cancelled/i }
-//             ];
-//         }
-
-//         // ✅ Filter by date range
-//         if (fromDate && toDate) {
-//             query.date = {
-//                 $gte: new Date(fromDate),
-//                 $lte: new Date(toDate)
-//             };
-//         } else if (fromDate) {
-//             query.date = { $gte: new Date(fromDate) };
-//         } else if (toDate) {
-//             query.date = { $lte: new Date(toDate) };
-//         }
-
-//         // ✅ Fetch orders
-//         const orders = await Order.find(query)
-//             .populate('products.productId', 'name')
-//             .sort({ createdAt: -1 });
-
-//         // ✅ Format response
-//         const formatted = orders.map(order => ({
-//             _id: order._id,
-//             orderId: order.orderId,
-//             date: order.date?.toDateString() || "N/A",
-//             customerName: order.customerName || "Unknown",
-//             status: order.status,
-//             orderType: order.orderType,
-
-//             paid: order.paid,
-//             paymentStatus: order.paymentStatus,
-
-//             amount: `₹${order.amount}`,
-//             products: order.products.map(p => ({
-//                 name: p.productId?.name || 'Unknown',
-//                 quantity: p.quantity,
-//                 price: `₹${p.price}`
-//             }))
-//         }));
-
-//         res.status(200).json(formatted);
-//     } catch (error) {
-//         console.error(error);
-//         res.status(500).json({ message: 'Failed to fetch orders', error });
-//     }
-// };
-
-// export const getOrderSummary = async (req, res) => {
-//     try {
-//         const { range = "7d" } = req.query;
-
-//         // ---------------- Range Helpers ----------------
-//         const now = new Date();
-//         const buildRange = (r) => {
-//             const end = new Date(now);
-//             const start = new Date(now);
-
-//             switch (r) {
-//                 case "1d": start.setDate(now.getDate() - 1); break;
-//                 case "7d": start.setDate(now.getDate() - 7); break;
-//                 case "1m": start.setMonth(now.getMonth() - 1); break;
-//                 case "1y": start.setFullYear(now.getFullYear() - 1); break;
-//                 default: start.setDate(now.getDate() - 7);
-//             }
-//             return { start, end };
-//         };
-
-//         const { start: currentStart, end: currentEnd } = buildRange(range);
-
-//         const buildPrevRange = (r, currentStart) => {
-//             const prevEnd = new Date(currentStart);
-//             const prevStart = new Date(currentStart);
-
-//             switch (r) {
-//                 case "1d": prevStart.setDate(prevEnd.getDate() - 1); break;
-//                 case "7d": prevStart.setDate(prevEnd.getDate() - 7); break;
-//                 case "1m": prevStart.setMonth(prevEnd.getMonth() - 1); break;
-//                 case "1y": prevStart.setFullYear(prevEnd.getFullYear() - 1); break;
-//                 default: prevStart.setDate(prevEnd.getDate() - 7);
-//             }
-//             return { prevStart, prevEnd };
-//         };
-
-//         const { prevStart, prevEnd } = buildPrevRange(range, currentStart);
-
-//         // ---------------- % Helper ----------------
-//         const pctChange = (curr, prev) => {
-//             if (prev === 0 && curr > 0) return { change: 100, trend: "up" };
-//             if (prev === 0 && curr === 0) return { change: 0, trend: "no-change" };
-//             const diff = ((curr - prev) / prev) * 100;
-//             return {
-//                 change: Number(Math.abs(diff).toFixed(2)),
-//                 trend: diff > 0 ? "up" : diff < 0 ? "down" : "no-change"
-//             };
-//         };
-
-//         // ---------------- TOTAL ORDERS ----------------
-//         const [totalOrders, prevTotalOrders] = await Promise.all([
-//             Order.countDocuments({ createdAt: { $gte: currentStart, $lte: currentEnd } }),
-//             Order.countDocuments({ createdAt: { $gte: prevStart, $lt: prevEnd } })
-//         ]);
-
-//         // ---------------- REFUNDED ORDERS (FIXED) ----------------
-//         const refundedFilterCurrent = {
-//             $or: [
-//                 { paymentStatus: "refunded" },
-//                 { "refund.isRefunded": true },
-//                 { "refund.status": "completed" }
-//             ],
-//             "refund.refundedAt": { $gte: currentStart, $lte: currentEnd }
-//         };
-
-//         const refundedFilterPrev = {
-//             $or: [
-//                 { paymentStatus: "refunded" },
-//                 { "refund.isRefunded": true },
-//                 { "refund.status": "completed" }
-//             ],
-//             "refund.refundedAt": { $gte: prevStart, $lt: prevEnd }
-//         };
-
-//         const [refundOrders, prevRefundOrders] = await Promise.all([
-//             Order.countDocuments(refundedFilterCurrent),
-//             Order.countDocuments(refundedFilterPrev)
-//         ]);
-
-//         // ---------------- COMPLETED VIA TIMELINE ----------------
-//         const deliveredRegex = /delivered|completed/i;
-
-//         const [completedAgg, prevCompletedAgg] = await Promise.all([
-//             Order.aggregate([
-//                 { $unwind: "$trackingHistory" },
-//                 {
-//                     $match: {
-//                         "trackingHistory.status": deliveredRegex,
-//                         "trackingHistory.timestamp": { $gte: currentStart, $lte: currentEnd }
-//                     }
-//                 },
-//                 { $group: { _id: "$_id" } },
-//                 { $count: "count" }
-//             ]),
-//             Order.aggregate([
-//                 { $unwind: "$trackingHistory" },
-//                 {
-//                     $match: {
-//                         "trackingHistory.status": deliveredRegex,
-//                         "trackingHistory.timestamp": { $gte: prevStart, $lt: prevEnd }
-//                     }
-//                 },
-//                 { $group: { _id: "$_id" } },
-//                 { $count: "count" }
-//             ])
-//         ]);
-
-//         const completedOrders = completedAgg?.[0]?.count || 0;
-//         const prevCompletedOrders = prevCompletedAgg?.[0]?.count || 0;
-
-//         // ---------------- CANCELLED ORDERS ----------------
-//         const cancelRegex = /cancel/i;
-
-//         const [cancelledAgg, prevCancelledAgg] = await Promise.all([
-//             Order.aggregate([
-//                 { $unwind: "$trackingHistory" },
-//                 {
-//                     $match: {
-//                         "trackingHistory.status": cancelRegex,
-//                         "trackingHistory.timestamp": { $gte: currentStart, $lte: currentEnd }
-//                     }
-//                 },
-//                 { $group: { _id: "$_id" } },
-//                 { $count: "count" }
-//             ]),
-//             Order.aggregate([
-//                 { $unwind: "$trackingHistory" },
-//                 {
-//                     $match: {
-//                         "trackingHistory.status": cancelRegex,
-//                         "trackingHistory.timestamp": { $gte: prevStart, $lt: prevEnd }
-//                     }
-//                 },
-//                 { $group: { _id: "$_id" } },
-//                 { $count: "count" }
-//             ])
-//         ]);
-
-//         const cancelledOrders = cancelledAgg?.[0]?.count || 0;
-//         const prevCancelledOrders = prevCancelledAgg?.[0]?.count || 0;
-
-//         // ---------------- RESPONSE ----------------
-//         res.json({
-//             range,
-
-//             totalOrders: {
-//                 count: totalOrders,
-//                 change: pctChange(totalOrders, prevTotalOrders),
-//                 note: `Last ${range}`
-//             },
-
-//             refundOrders: {
-//                 count: refundOrders,
-//                 change: pctChange(refundOrders, prevRefundOrders),
-//                 note: `Refunded in ${range}`
-//             },
-
-//             completedOrders: {
-//                 count: completedOrders,
-//                 change: pctChange(completedOrders, prevCompletedOrders),
-//                 note: `Last ${range}`
-//             },
-
-//             cancelledOrders: {
-//                 count: cancelledOrders,
-//                 change: pctChange(cancelledOrders, prevCancelledOrders),
-//                 note: `Last ${range}`
-//             }
-//         });
-
-//     } catch (error) {
-//         console.error(error);
-//         res.status(500).json({
-//             message: "Error generating order summary",
-//             error: error.message
-//         });
-//     }
-// };
 export const getAllOrders = async (req, res) => {
     try {
         const { status, orderType, fromDate, toDate, paid } = req.query;
@@ -625,199 +872,6 @@ export const getAllOrders = async (req, res) => {
     }
 };
 
-// export const getOrderSummary = async (req, res) => {
-//     try {
-//         const { range = "7d" } = req.query;
-
-//         const now = new Date();
-
-//         const buildRange = (r) => {
-//             const end = new Date(now);
-//             const start = new Date(now);
-//             switch (r) {
-//                 case "1d": start.setDate(now.getDate() - 1); break;
-//                 case "7d": start.setDate(now.getDate() - 7); break;
-//                 case "1m": start.setMonth(now.getMonth() - 1); break;
-//                 case "1y": start.setFullYear(now.getFullYear() - 1); break;
-//                 default: start.setDate(now.getDate() - 7);
-//             }
-//             return { start, end };
-//         };
-
-//         const { start: currentStart, end: currentEnd } = buildRange(range);
-
-//         const buildPrevRange = (r, currentStart) => {
-//             const prevEnd = new Date(currentStart);
-//             const prevStart = new Date(currentStart);
-//             switch (r) {
-//                 case "1d": prevStart.setDate(prevEnd.getDate() - 1); break;
-//                 case "7d": prevStart.setDate(prevEnd.getDate() - 7); break;
-//                 case "1m": prevStart.setMonth(prevEnd.getMonth() - 1); break;
-//                 case "1y": prevStart.setFullYear(prevEnd.getFullYear() - 1); break;
-//                 default: prevStart.setDate(prevEnd.getDate() - 7);
-//             }
-//             return { prevStart, prevEnd };
-//         };
-
-//         const { prevStart, prevEnd } = buildPrevRange(range, currentStart);
-
-//         const pctChange = (curr, prev) => {
-//             if (prev === 0 && curr > 0) return { change: 100, trend: "up" };
-//             if (prev === 0 && curr === 0) return { change: 0, trend: "no-change" };
-//             const diff = ((curr - prev) / prev) * 100;
-//             return {
-//                 change: Number(Math.abs(diff).toFixed(2)),
-//                 trend: diff > 0 ? "up" : diff < 0 ? "down" : "no-change"
-//             };
-//         };
-
-//         // ✅ TOTAL ORDERS
-//         const [totalOrders, prevTotalOrders] = await Promise.all([
-//             Order.countDocuments({
-//                 isDraft: false,
-//                 createdAt: { $gte: currentStart, $lte: currentEnd }
-//             }),
-//             Order.countDocuments({
-//                 isDraft: false,
-//                 createdAt: { $gte: prevStart, $lt: prevEnd }
-//             })
-//         ]);
-
-//         // ✅ REFUND ORDERS
-//         const refundedFilterCurrent = {
-//             isDraft: false,
-//             $or: [
-//                 { paymentStatus: "refunded" },
-//                 { "refund.isRefunded": true },
-//                 { "refund.status": "completed" }
-//             ],
-//             "refund.refundedAt": { $gte: currentStart, $lte: currentEnd }
-//         };
-
-//         const refundedFilterPrev = {
-//             isDraft: false,
-//             $or: [
-//                 { paymentStatus: "refunded" },
-//                 { "refund.isRefunded": true },
-//                 { "refund.status": "completed" }
-//             ],
-//             "refund.refundedAt": { $gte: prevStart, $lt: prevEnd }
-//         };
-
-//         const [refundOrders, prevRefundOrders] = await Promise.all([
-//             Order.countDocuments(refundedFilterCurrent),
-//             Order.countDocuments(refundedFilterPrev)
-//         ]);
-
-//         // ✅ COMPLETED ORDERS (Delivered in tracking)
-//         const deliveredRegex = /delivered|completed/i;
-
-//         const [completedAgg, prevCompletedAgg] = await Promise.all([
-//             Order.aggregate([
-//                 { $match: { isDraft: false } },
-//                 { $unwind: "$trackingHistory" },
-//                 {
-//                     $match: {
-//                         "trackingHistory.status": deliveredRegex,
-//                         "trackingHistory.timestamp": { $gte: currentStart, $lte: currentEnd }
-//                     }
-//                 },
-//                 { $group: { _id: "$_id" } },
-//                 { $count: "count" }
-//             ]),
-//             Order.aggregate([
-//                 { $match: { isDraft: false } },
-//                 { $unwind: "$trackingHistory" },
-//                 {
-//                     $match: {
-//                         "trackingHistory.status": deliveredRegex,
-//                         "trackingHistory.timestamp": { $gte: prevStart, $lt: prevEnd }
-//                     }
-//                 },
-//                 { $group: { _id: "$_id" } },
-//                 { $count: "count" }
-//             ])
-//         ]);
-
-//         const completedOrders = completedAgg?.[0]?.count || 0;
-//         const prevCompletedOrders = prevCompletedAgg?.[0]?.count || 0;
-
-//         const cancelRegex = /cancel/i;
-
-//         const cancelledFilterCurrent = {
-//             isDraft: false,
-//             $or: [
-//                 { orderStatus: cancelRegex },
-//                 { status: cancelRegex },
-//                 { paymentStatus: cancelRegex },
-//                 { "cancellation.reason": { $exists: true } },
-//                 { "trackingHistory.status": cancelRegex }
-//             ],
-//             createdAt: { $gte: currentStart, $lte: currentEnd }
-//         };
-
-//         const cancelledFilterPrev = {
-//             isDraft: false,
-//             $or: [
-//                 { orderStatus: cancelRegex },
-//                 { status: cancelRegex },
-//                 { paymentStatus: cancelRegex },
-//                 { "cancellation.reason": { $exists: true } },
-//                 { "trackingHistory.status": cancelRegex }
-//             ],
-//             createdAt: { $gte: prevStart, $lt: prevEnd }
-//         };
-
-//         const [cancelledOrders, prevCancelledOrders] = await Promise.all([
-//             Order.countDocuments(cancelledFilterCurrent),
-//             Order.countDocuments(cancelledFilterPrev)
-//         ]);
-
-
-//         // ✅ DRAFT COUNT (optional but useful)
-//         const draftOrders = await Order.countDocuments({ isDraft: true });
-
-//         res.json({
-//             range,
-
-//             totalOrders: {
-//                 count: totalOrders,
-//                 change: pctChange(totalOrders, prevTotalOrders),
-//                 note: `Last ${range}`
-//             },
-
-//             refundOrders: {
-//                 count: refundOrders,
-//                 change: pctChange(refundOrders, prevRefundOrders),
-//                 note: `Refunded in ${range}`
-//             },
-
-//             completedOrders: {
-//                 count: completedOrders,
-//                 change: pctChange(completedOrders, prevCompletedOrders),
-//                 note: `Last ${range}`
-//             },
-
-//             cancelledOrders: {
-//                 count: cancelledOrders,
-//                 change: pctChange(cancelledOrders, prevCancelledOrders),
-//                 note: `Last ${range}`
-//             },
-
-//             draftOrders: {
-//                 count: draftOrders,
-//                 note: "Draft / abandoned checkouts"
-//             }
-//         });
-
-//     } catch (error) {
-//         console.error(error);
-//         res.status(500).json({
-//             message: "Error generating order summary",
-//             error: error.message
-//         });
-//     }
-// };
 export const getOrderSummary = async (req, res) => {
     try {
         const { range = "7d" } = req.query;
@@ -1012,149 +1066,6 @@ export const getOrderSummary = async (req, res) => {
         });
     }
 };
-
-// export const getOrderById = async (req, res) => {
-//     try {
-//         const { id } = req.params;
-
-//         const order = await Order.findById(id)
-//             .populate("user", "name email phone")
-//             .populate("products.productId", "name brand category images price")
-//             .populate("affiliate", "name referralCode")
-//             .populate("discount", "code type value")
-//             .lean();
-
-//         if (!order) return res.status(404).json({ message: "Order not found" });
-
-//         // Timeline sorted + deduplicated
-//         const timeline = [];
-
-//         (order.trackingHistory || [])
-//             .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-//             .forEach(entry => {
-//                 const last = timeline[timeline.length - 1];
-//                 if (!last || last.status !== entry.status) {
-//                     timeline.push({
-//                         status: entry.status,
-//                         timestamp: entry.timestamp,
-//                         location: entry.location || null
-//                     });
-//                 }
-//             });
-
-//         // 🧾 Order summary
-//         const summary = {
-//             orderId: order.orderId || order._id,
-//             orderNumber: order.orderNumber,
-//             date: order.date,
-//             totalAmount: order.amount,
-//             status: order.orderStatus,
-//             currentStatus: order.orderStatus || order.shipment?.status || order.status,
-//             orderType: order.orderType || "Online",
-//         };
-
-//         // 👤 Customer details
-//         const customer = {
-//             id: order.user?._id || null,
-//             name: order.user?.name || order.customerName || "",
-//             email: order.user?.email || "",
-//             phone: order.user?.phone || "",
-//         };
-
-//         // 📦 Product details (for both detail view + tracking view)
-//         const products = order.products.map((p) => ({
-//             id: p.productId?._id,
-//             name: p.productId?.name,
-//             brand: p.productId?.brand || "Unknown",
-//             category: p.productId?.category,
-//             image: p.productId?.images?.[0] || null,
-//             quantity: p.quantity,
-//             price: p.price,
-//             total: p.quantity * p.price,
-//         }));
-
-//         // 🚚 Shipping details
-//         const shipping = {
-//             name: order.shippingAddress?.name,
-//             phone: order.shippingAddress?.phone,
-//             address: [
-//                 order.shippingAddress?.addressLine1,
-//                 order.shippingAddress?.city,
-//                 order.shippingAddress?.state,
-//                 order.shippingAddress?.pincode,
-//             ].filter(Boolean).join(", "),
-//             expectedDelivery: order.expectedDelivery || null,
-//         };
-
-//         // 💳 Payment details
-//         const payment = {
-//             method: order.paymentMethod || "Not specified",
-//             status: order.paymentStatus || "Pending",
-//             transactionId: order.transactionId || null,
-//             amount: order.amount,
-//         };
-
-//         // 🎁 Discount and affiliate info
-//         const discount = order.discount
-//             ? {
-//                 code: order.discount.code,
-//                 type: order.discount.type,
-//                 value: order.discount.value,
-//                 discountAmount: order.discountAmount || 0,
-//                 buyerDiscountAmount: order.buyerDiscountAmount || 0,
-//             }
-//             : null;
-
-//         const affiliate = order.affiliate
-//             ? {
-//                 id: order.affiliate._id,
-//                 name: order.affiliate.name,
-//                 referralCode: order.affiliate.referralCode,
-//             }
-//             : null;
-
-//         // 📦 Shipment info
-//         const shipment = order.shipment
-//             ? {
-//                 courierName: order.shipment.courier_name || null,
-//                 trackingNumber: order.shipment.awb_code || null,
-//                 currentStatus: order.shipment.status || null,
-//                 assignedAt: order.shipment.assignedAt || null,
-//             }
-//             : null;
-
-//         // 🧠 Compute totals
-//         const subtotal = order.products.reduce((acc, p) => acc + p.price * p.quantity, 0);
-//         const shippingCharge = order.shippingCharge || 0;
-//         const tax = order.taxAmount || 0;
-//         const totalPrice = subtotal + shippingCharge + tax - (order.discountAmount || 0);
-
-//         // 🧩 Final structured response (for both UIs)
-//         const response = {
-//             summary,
-//             customer,
-//             products,
-//             shipping,
-//             payment,
-//             discount,
-//             affiliate,
-//             shipment,
-//             totals: {
-//                 subtotal,
-//                 shipping: shippingCharge,
-//                 tax,
-//                 totalPrice,
-//             },
-//             timeline,
-//         };
-
-//         res.status(200).json(response);
-//     } catch (err) {
-//         console.error("Error fetching order:", err);
-//         res.status(500).json({ message: "Failed to fetch order", error: err.message });
-//     }
-// };
-// Shared Shiprocket status map
 
 export const getOrderById = async (req, res) => {
     try {

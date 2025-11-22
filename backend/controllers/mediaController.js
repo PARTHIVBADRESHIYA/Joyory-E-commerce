@@ -8,12 +8,10 @@ export const uploadVideoController = async (req, res) => {
 
         const isVideo = req.file.mimetype.startsWith("video/");
 
-        const { 
-            title, 
-            descriptionMobile, 
-            descriptionDesktop, 
-            buttonText, 
-            buttonLink 
+        const {
+            title,
+            description,
+            buttonText
         } = req.body;
 
         const media = await Media.create({
@@ -23,10 +21,8 @@ export const uploadVideoController = async (req, res) => {
             uploadedBy: req.user?._id || null,
 
             title,
-            descriptionMobile,
-            descriptionDesktop,
-            buttonText,
-            buttonLink
+            description,
+            buttonText
         });
 
         return res.status(200).json({
@@ -100,25 +96,20 @@ export const getMediaById = async (req, res) => {
 };
 
 // ================================
-// ⭐ UPDATE MEDIA
+// ⭐ UPDATE MEDIA  
 // ================================
 export const updateMedia = async (req, res) => {
     try {
         const { id } = req.params;
-        const { 
-            title, 
-            descriptionMobile, 
-            descriptionDesktop, 
-            buttonText, 
-            buttonLink 
-        } = req.body;
+        const {
+            title,
+            description,
+            buttonText } = req.body;
 
-        const updateData = { 
-            title, 
-            descriptionMobile, 
-            descriptionDesktop, 
-            buttonText, 
-            buttonLink 
+        const updateData = {
+            title,
+            description,
+            buttonText
         };
 
         // If new file is uploaded
