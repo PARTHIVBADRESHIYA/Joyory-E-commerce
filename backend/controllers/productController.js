@@ -292,6 +292,10 @@ export const resolveFormulationId = async (input) => {
 //         });
 
 //         await product.save();
+
+//         // Clear cache for this product (and optionally global product lists)
+//         await clearProductCacheForId(product._id);
+
 //         return res.status(201).json({
 //             message: "✅ Product created successfully",
 //             product,
@@ -514,6 +518,10 @@ export const resolveFormulationId = async (input) => {
 //         // ---------------- Save Update ----------------
 //         const updatedProduct = await Product.findByIdAndUpdate(id, updateData, { new: true });
 
+//         // Clear cache for this product id/slug
+//         await clearProductCacheForId(updatedProduct._id);
+//         await clearProductCacheForId(updatedProduct.slug);   // ❗ ADD THIS
+
 //         res.status(200).json({
 //             message: "✅ Product updated successfully",
 //             product: updatedProduct
@@ -527,6 +535,8 @@ export const resolveFormulationId = async (input) => {
 //         });
 //     }
 // };
+
+
 const addProductController = async (req, res) => {
     try {
         const {
@@ -692,10 +702,26 @@ const addProductController = async (req, res) => {
 
                         if (combinedImages.length === 0)
                             throw new Error(`Variant ${v.sku} must have at least one image`);
+                        // Sum stock from warehouse
+                        let totalStock = 0;
+
+                        if (v.stockByWarehouse && Array.isArray(v.stockByWarehouse)) {
+                            v.stockByWarehouse = v.stockByWarehouse.map(w => ({
+                                warehouseCode: w.warehouseCode,
+                                stock: Number(w.stock || 0)
+                            }));
+
+                            totalStock = v.stockByWarehouse.reduce((sum, w) => sum + w.stock, 0);
+                        }
+
+                        const finalStock = totalStock > 0 ? totalStock : Number(v.stock || 0);
+
+
 
                         return {
                             ...v,
-                            stock: Number(v.stock),
+                            stock: finalStock,
+                            stockByWarehouse: v.stockByWarehouse || [],
                             sales: Number(v.sales) || 0,
                             thresholdValue: Number(v.thresholdValue),
                             discountedPrice:
@@ -827,10 +853,17 @@ const updateProductById = async (req, res) => {
         const updateData = { ...req.body };
 
         // ---------------- Numeric Fields ----------------
-        if (req.body.price) updateData.price = Number(req.body.price);
-        if (req.body.buyingPrice) updateData.buyingPrice = Number(req.body.buyingPrice);
-        if (isNaN(updateData.price) || isNaN(updateData.buyingPrice))
-            return res.status(400).json({ message: "❌ Invalid numeric values for price or buyingPrice" });
+        if (req.body.price !== undefined) {
+            updateData.price = Number(req.body.price);
+            if (isNaN(updateData.price))
+                return res.status(400).json({ message: "❌ Invalid value for price" });
+        }
+
+        if (req.body.buyingPrice !== undefined) {
+            updateData.buyingPrice = Number(req.body.buyingPrice);
+            if (isNaN(updateData.buyingPrice))
+                return res.status(400).json({ message: "❌ Invalid value for buyingPrice" });
+        }
 
         // ---------------- Parse Variants ----------------
         let rawVariants = req.body.variants || [];
@@ -935,10 +968,32 @@ const updateProductById = async (req, res) => {
                 if (combinedImages.length === 0)
                     throw new Error(`Variant ${v.sku} must have at least one image`);
 
+                // Build warehouse stock
+                let updatedStockByWarehouse = [];
+
+                if (v.stockByWarehouse) {
+                    let wb = typeof v.stockByWarehouse === "string"
+                        ? JSON.parse(v.stockByWarehouse)
+                        : v.stockByWarehouse;
+
+                    updatedStockByWarehouse = wb.map(w => ({
+                        warehouseCode: w.warehouseCode,
+                        stock: Number(w.stock || 0),
+                    }));
+                }
+
+                // calculate auto total stock
+                let totalStock = updatedStockByWarehouse.reduce((sum, w) => sum + w.stock, 0);
+                const finalStock = totalStock > 0 ? totalStock : Number(v.stock || oldVariant?.stock || 0);
+
+
                 const updatedVariant = {
                     ...oldVariant?._doc,
                     ...v,
-                    stock: Number(v.stock),
+                    stock: finalStock,
+                    stockByWarehouse: updatedStockByWarehouse.length
+                        ? updatedStockByWarehouse
+                        : oldVariant?.stockByWarehouse || [],
                     sales: Number(v.sales) || oldVariant?.sales || 0,
                     thresholdValue: Number(v.thresholdValue),
                     discountedPrice:
@@ -1278,6 +1333,76 @@ const deleteProduct = async (req, res) => {
     }
 }
 
+// const getSingleProductById = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+
+//         if (!mongoose.Types.ObjectId.isValid(id))
+//             return res.status(400).json({ message: 'Invalid product ID format' });
+
+//         const product = await Product.findById(id)
+//             .populate('category', 'name slug')
+//             .populate('categoryHierarchy', 'name slug')
+//             .lean();
+
+//         if (!product) return res.status(404).json({ message: '❌ Product not found' });
+
+//         // ✅ Ensure product has a slug (auto-generate if missing)
+//         if (!product.slug) {
+//             const { generateUniqueSlug } = await import("../middlewares/utils/slug.js");
+//             const slug = await generateUniqueSlug(Product, product.name);
+//             await Product.findByIdAndUpdate(id, { slug });
+//             product.slug = slug;
+//         }
+
+//         // ✅ Variant handling
+//         if (product.variants?.length) {
+//             product.variants = product.variants.map(v => {
+//                 let statusMessage;
+//                 if (v.stock === 0) statusMessage = "No stock available now, please try again later";
+//                 else if (v.stock < (v.thresholdValue || 5)) statusMessage = `Few left (${v.stock})`;
+//                 else statusMessage = "In-stock";
+
+
+//                 return {
+//                     ...v,
+//                     status: statusMessage,
+//                     displayPrice:
+//                         v.discountedPrice && v.discountedPrice < v.price
+//                             ? v.discountedPrice
+//                             : v.price
+//                 };
+//             });
+//             delete product.quantity;
+//             delete product.status;
+//         } else {
+//             // ✅ Non-variant stock message
+//             let statusMessage;
+//             if (product.quantity === 0)
+//                 statusMessage = "No stock available now, please try again later";
+//             else if (product.quantity < (product.thresholdValue || 5))
+//                 statusMessage = `Few left (${product.quantity})`;
+//             else statusMessage = "In-stock";
+//             product.status = statusMessage;
+//         }
+
+//         // ✅ Final response (slug included)
+//         res.status(200).json({
+//             message: "✅ Product fetched successfully",
+//             product: {
+//                 ...product,
+//                 slug: product.slug, // explicitly ensure slug is included
+//             }
+//         });
+
+//     } catch (error) {
+//         console.error("❌ Error fetching single product:", error);
+//         res.status(500).json({
+//             message: "Failed to fetch product",
+//             error: error.message
+//         });
+//     }
+// };
 const getSingleProductById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -1292,7 +1417,7 @@ const getSingleProductById = async (req, res) => {
 
         if (!product) return res.status(404).json({ message: '❌ Product not found' });
 
-        // ✅ Ensure product has a slug (auto-generate if missing)
+        // ✅ Ensure product has a slug
         if (!product.slug) {
             const { generateUniqueSlug } = await import("../middlewares/utils/slug.js");
             const slug = await generateUniqueSlug(Product, product.name);
@@ -1300,16 +1425,34 @@ const getSingleProductById = async (req, res) => {
             product.slug = slug;
         }
 
-        // ✅ Variant handling
+        // -------------------------------------------------------
+        // ✅ VARIANT HANDLING + WAREHOUSE STOCK PATCH
+        // -------------------------------------------------------
         if (product.variants?.length) {
+
             product.variants = product.variants.map(v => {
+
+                // 🔥 NEW: Ensure warehouse stock always returned
+                const warehouseStock = v.stockByWarehouse || [];
+
+                // 🔥 NEW: Auto-sync global stock with warehouse stock if available
+                let finalStock = v.stock;
+
+                if (warehouseStock.length > 0) {
+                    finalStock = warehouseStock.reduce((sum, w) => sum + (w.stock || 0), 0);
+                }
+
+                // 🔥 Stock status message
                 let statusMessage;
-                if (v.stock === 0) statusMessage = "No stock available now, please try again later";
-                else if (v.stock < (v.thresholdValue || 5)) statusMessage = `Few left (${v.stock})`;
+                if (finalStock === 0) statusMessage = "No stock available now, please try again later";
+                else if (finalStock < (v.thresholdValue || 5))
+                    statusMessage = `Few left (${finalStock})`;
                 else statusMessage = "In-stock";
 
                 return {
                     ...v,
+                    stock: finalStock,               // 🔥 Updated final stock
+                    stockByWarehouse: warehouseStock, // 🔥 Returned always
                     status: statusMessage,
                     displayPrice:
                         v.discountedPrice && v.discountedPrice < v.price
@@ -1317,25 +1460,32 @@ const getSingleProductById = async (req, res) => {
                             : v.price
                 };
             });
+
             delete product.quantity;
             delete product.status;
+
         } else {
-            // ✅ Non-variant stock message
+            // -------------------------------------------------------
+            // ✅ NON-VARIANT PRODUCT LOGIC (unchanged)
+            // -------------------------------------------------------
             let statusMessage;
             if (product.quantity === 0)
                 statusMessage = "No stock available now, please try again later";
             else if (product.quantity < (product.thresholdValue || 5))
                 statusMessage = `Few left (${product.quantity})`;
             else statusMessage = "In-stock";
+
             product.status = statusMessage;
         }
 
-        // ✅ Final response (slug included)
+        // -------------------------------------------------------
+        // FINAL RESPONSE
+        // -------------------------------------------------------
         res.status(200).json({
             message: "✅ Product fetched successfully",
             product: {
                 ...product,
-                slug: product.slug, // explicitly ensure slug is included
+                slug: product.slug
             }
         });
 

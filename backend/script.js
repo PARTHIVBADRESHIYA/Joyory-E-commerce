@@ -78,12 +78,27 @@ async function start() {
                 "courier_name",
                 "courier_company",
                 "assigned_courier",
+                "last_mile_courier",
+                "last_mile_courier_name",
+                "lm_courier_name",
+                "lm_courier",
+                "courier",
+            ]) ||
+            deepSearch(srShipment?.last_mile, [
+                "courier_name",
+                "courier_company",
+                "courier_code",
             ]) ||
             deepSearch(data, [
-                "last_mile_courier",
+                "courier_name",
                 "courier_company",
+                "assigned_courier",
+                "last_mile_courier",
+                "last_mile_courier_name",
+                "lm_courier_name",
             ]) ||
             null;
+
 
         const trackUrl =
             deepSearch(srShipment, [

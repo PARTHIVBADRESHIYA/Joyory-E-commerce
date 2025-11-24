@@ -430,27 +430,37 @@ export function deepSearch(obj, keys) {
     return found;
 }
 
-export function extractAWBFromShiprocket(data, shipmentId = null) {
+export function extractAWBFromShiprocket(data, srShipment) {
     // Try find shipment inside array
-    let srShipment = null;
-
-    if (data.shipments && Array.isArray(data.shipments)) {
-        if (shipmentId) {
-            srShipment = data.shipments.find(
-                s => String(s.shipment_id) === String(shipmentId)
-            );
-        }
-        if (!srShipment) srShipment = data.shipments[0];
-    }
-
     const awb =
         deepSearch(srShipment, ["awb_code", "awb", "waybill", "last_mile_awb"]) ||
         deepSearch(data, ["awb_code", "awb", "waybill", "last_mile_awb"]) ||
         null;
 
     const courier =
-        deepSearch(srShipment, ["courier_name", "courier_company", "assigned_courier"]) ||
-        deepSearch(data, ["last_mile_courier", "courier_company"]) ||
+        deepSearch(srShipment, [
+            "courier_name",
+            "courier_company",
+            "assigned_courier",
+            "last_mile_courier",
+            "last_mile_courier_name",
+            "lm_courier_name",
+            "lm_courier",
+            "courier",
+        ]) ||
+        deepSearch(srShipment?.last_mile, [
+            "courier_name",
+            "courier_company",
+            "courier_code",
+        ]) ||
+        deepSearch(data, [
+            "courier_name",
+            "courier_company",
+            "assigned_courier",
+            "last_mile_courier",
+            "last_mile_courier_name",
+            "lm_courier_name",
+        ]) ||
         null;
 
     const trackUrl =

@@ -55,7 +55,7 @@ function buildCourierTimeline(history = []) {
       description: formatCourierDescription(h),
       location: h.location || ""
     }))
-    .sort((a, b) => new Date(a.time) - new Date(b.time));
+    .sort((a, b) => new Date(b.time) - new Date(a.time));  // NEWEST FIRST
 }
 
 
@@ -954,7 +954,6 @@ function calculateFinalOrderPricing(order) {
 }
 
 
-
 export const getUserOrders = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -1344,8 +1343,6 @@ export const getShipmentDetails = async (req, res) => {
       const MRP = variant.originalPrice || 0;
       const SP = variant.displayPrice || 0;
 
-      const additionalDiscount =
-        MRP > SP ? (MRP - SP) : (variant.discountAmount || 0);
 
       return {
         productId: p._id,
@@ -1357,7 +1354,6 @@ export const getShipmentDetails = async (req, res) => {
 
         mrp: MRP,
         sellingPrice: SP,
-        additionalDiscount,
         total: SP * (item.quantity || 1)
       };
     });
@@ -1413,7 +1409,19 @@ export const getShipmentDetails = async (req, res) => {
 
     const orderPriceSummary = calculateFinalOrderPricing(order);
 
+    // --------------------------------------------------------
+    // 🔥 FREE SHIPPING LOGIC
+    // --------------------------------------------------------
+    let shippingDiscount = 0;
 
+    if (orderPriceSummary.finalAmount >= 499) {
+      shippingDiscount = 70; // Free delivery ₹70
+    }
+
+    const additionalDiscounts = {
+      shippingDiscount,
+      message: shippingDiscount > 0 ? "Free delivery on orders above ₹499" : null
+    };
 
     // --------------------------------------------------------
     // 🔥 FINAL COURIER TIMELINE (NYKAA STYLE)
@@ -1445,10 +1453,14 @@ export const getShipmentDetails = async (req, res) => {
 
       priceDetails: {
         ...shipmentTotals,
-        totalPaid: shipmentTotals.sellingPriceTotal
+        totalPaid: shipmentTotals.sellingPriceTotal,
+        additionalDiscounts   // <-- Added here
       },
 
-      orderPriceSummary,  // includes subtotal, discounts, shipping, finalAmount
+      orderPriceSummary: {
+        ...orderPriceSummary,
+        additionalDiscounts   // <-- copy same discounts here
+      },
 
       trackingTimeline: timeline,
 
