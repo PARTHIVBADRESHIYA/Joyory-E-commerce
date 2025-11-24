@@ -1921,6 +1921,16 @@ export const getSingleProduct = async (req, res) => {
             });
         }
 
+        // 4.1 Fetch brand name (mini optimization)
+        let brandData = null;
+
+        if (product.brand) {
+            brandData = await Brand.findById(product.brand)
+                .select("_id name")
+                .lean();
+        }
+
+
         // 2) Fetch active promotions with tiny in-memory cache to reduce DB calls
         const now = Date.now();
         if (_promoCache.data && (now - _promoCache.ts) < _promoCache.ttl) {
@@ -1978,7 +1988,9 @@ export const getSingleProduct = async (req, res) => {
             _id: enrichedProduct._id,
             name: enrichedProduct.name,
             slug: enrichedProduct.slug,
-            brand: enrichedProduct.brand || null,
+            brand: brandData
+                ? { _id: brandData._id, name: brandData.name}
+                : null,
             mrp: enrichedProduct.mrp,
             variants: enrichedProduct.variants,
             shadeOptions: enrichedProduct.shadeOptions || [],
@@ -1996,7 +2008,9 @@ export const getSingleProduct = async (req, res) => {
             _id: enrichedProduct._id,
             name: enrichedProduct.name,
             slug: enrichedProduct.slug,
-            brand: enrichedProduct.brand || null,
+            brand: brandData
+                ? { _id: brandData._id, name: brandData.name }
+                : null,
             mrp: enrichedProduct.mrp,
             variants: enrichedProduct.variants,
             shadeOptions: enrichedProduct.shadeOptions || [],
