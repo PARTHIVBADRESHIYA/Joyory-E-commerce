@@ -447,7 +447,10 @@ export const getCartSummary = async (req, res) => {
             sku: enrichedVariant.sku,
             shadeName: enrichedVariant.shadeName,
             hex: enrichedVariant.hex,
-            image: enrichedVariant.images?.[0] || null,
+            image:
+              enrichedVariant.images?.[0] ||
+              productFromDB.images?.[0] ||
+              null,
             stock,
             originalPrice: enrichedVariant.originalPrice,
             discountedPrice: displayPrice,
@@ -531,4 +534,3 @@ export const getCartSummary = async (req, res) => {
   }
 };
 
-  
