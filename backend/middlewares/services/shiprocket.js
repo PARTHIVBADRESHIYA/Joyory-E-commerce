@@ -522,74 +522,6 @@ async function shiprocketRequest(url, method, data, token) {
     }
 }
 
-// async function checkSingleShiprocketOrderAndSave(srOrderId) {
-//     try {
-//         const token = await getShiprocketToken();
-//         const orderDetailsRes = await axios.get(`https://apiv2.shiprocket.in/v1/external/orders/show/${srOrderId}`, {
-//             headers: { Authorization: `Bearer ${token}` }
-//         });
-//         const shipOrder = orderDetailsRes.data;
-//         if (!shipOrder) return;
-
-//         // Extract shipments array and update any AWB found
-//         const srShipments = Array.isArray(shipOrder.shipments) ? shipOrder.shipments : [shipOrder];
-//         for (const srShipment of srShipments) {
-//             const shipmentId = srShipment.shipment_id || srShipment.id;
-//             const awb =
-//                 srShipment?.awb_code ||
-//                 Order.last_mile_awb ||
-//                 Order.awb_data?.awb ||
-//                 null;
-
-//             const trackUrl =
-//                 srShipment?.tracking_url ||
-//                 Order.last_mile_awb_track_url ||
-//                 null;
-
-//             const courier =
-//                 srShipment?.courier_name ||
-//                 Order.last_mile_courier_name ||
-//                 null;
-
-
-//             if (!awb) continue;
-
-//             // Atomic update like before
-//             const trackingEntry = {
-//                 status: "AWB Assigned",
-//                 timestamp: new Date(),
-//                 location: "Shiprocket",
-//                 description: `AWB ${awb} assigned via ${courier || 'unknown'}`
-//             };
-
-//             await Order.updateOne(
-//                 { "shipments.shipment_id": String(shipmentId) },
-
-//                 {
-//                     $set: {
-//                         "shipments.$.awb_code": awb,
-//                         "shipments.$.courier_name": courier,
-//                         "shipments.$.tracking_url": trackUrl,
-//                         "shipments.$.status": "AWB Assigned",
-//                         "orderStatus": "Shipped"
-//                     },
-//                     $push: {
-//                         "shipments.$.trackingHistory": trackingEntry,
-//                         trackingHistory: {
-//                             status: "AWB Assigned",
-//                             timestamp: new Date(),
-//                             location: "Shiprocket",
-//                             description: `Shipment ${shipmentId} AWB ${awb}`
-//                         }
-//                     }
-//                 }
-//             );
-//             console.log(`✅ Immediate AWB saved for srOrder ${srOrderId}, shipment ${shipmentId}`);
-//         }
-//     } catch (err) {
-//         console.warn("checkSingleShiprocketOrderAndSave err:", err.response?.data || err.message || err);
-//     }
-// }
 async function checkSingleShiprocketOrderAndSave(srOrderId) {
     try {
         const token = await getShiprocketToken();
@@ -872,7 +804,6 @@ export async function createShiprocketOrder(order) {
     return { shipments: successfulShipments, failed };
 }
 
-// Helper function to calculate expected delivery
 function calculateExpectedDelivery() {
     const deliveryDate = new Date();
     deliveryDate.setDate(deliveryDate.getDate() + 7); // 7 days from now
