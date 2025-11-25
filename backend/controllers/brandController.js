@@ -24,7 +24,6 @@ import { toSlug } from "../middlewares/utils/slug.js";
 // };
 
 
-
 /**
  * Create new brand
  */
@@ -71,7 +70,7 @@ export const createBrand = async (req, res) => {
         // Validate & format warehouses
         if (Array.isArray(parsedWarehouses) && parsedWarehouses.length > 0) {
             parsedWarehouses = parsedWarehouses.map((w, index) => ({
-                label: w.label || `${name} Warehouse ${index + 1}`,
+                name: w.name || w.label || `${name} Warehouse ${index + 1}`, // FIXED
                 code: w.code || `${slug}_WH_${index + 1}`,
                 address: w.address || "",
                 isActive: w.isActive !== undefined ? w.isActive : true,
@@ -80,7 +79,7 @@ export const createBrand = async (req, res) => {
             // Auto-create default warehouse
             parsedWarehouses = [
                 {
-                    label: `${name} Default Warehouse`,
+                    name: `${name} Default Warehouse`, // FIXED
                     code: `${slug}_WH_1`,
                     address: "",
                     isActive: true,
