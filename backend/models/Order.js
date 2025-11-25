@@ -255,9 +255,9 @@ const ShipmentSchema = new mongoose.Schema({
     courier_name: String,
     tracking_url: String,
     status: { type: String, default: "Created" },
-    assignedAt: Date,
-    deliveredAt: Date,
-    expected_delivery: Date,
+    assignedAt: { type: Date, default: Date.now },
+    deliveredAt: { type: Date, default: Date.now },
+    expected_delivery: { type: Date, default: Date.now },
 
     products: [
         {

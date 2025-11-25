@@ -371,14 +371,22 @@ function mapStatus(s) {
     return "Shipped";
 }
 
-
 async function trackShipments() {
     try {
         // Only orders that have shiprocket_order_id and shipments that haven't received an AWB yet OR not delivered
+        const THRESHOLD = new Date(Date.now() - 1000 * 60 * 60 * 2); // last 2 hours
+
         const orders = await Order.find({
-            "shipments.shiprocket_order_id": { $exists: true, $ne: null },
-            orderStatus: { $nin: ["Delivered", "Cancelled"] }
-        }).select("_id shipments"); // reduce payload
+            shipments: {
+                $elemMatch: {
+                    awb_code: null,
+                    courier_name: null,
+                    status: "Awaiting Pickup",
+                    assignedAt: { $gte: THRESHOLD }  // FIXED
+                }
+            }
+        }).select("_id shipments");
+
 
         console.log(`🔥 Tracking ${orders?.length || 0} orders for AWB updates`);
         if (!orders?.length) return;
@@ -391,18 +399,34 @@ async function trackShipments() {
 
                 for (const shipment of order.shipments) {
                     try {
-                        const srOrderId = shipment.shiprocket_order_id;
-                        if (!srOrderId) continue;
+                        if ([
+                            "Delivered",
+                            "Cancelled",
+                            "RTO Delivered",
+                            "RTO Initiated",
+                            "Lost",
+                            "Returning"
+                        ].includes(shipment.status)) {
+                            console.log(`⛔ Shipment ${shipment.shipment_id} already finished → skipping`);
+                            continue;
+                        }
+
+                        const srOrderId = shipment.shiprocket_order_id || shipment.shipment_id;
+                        if (!srOrderId) {
+                            console.log("❌ No Shiprocket order ID or shipment ID found → skipping");
+                            continue;
+                        }
+
 
                         console.log(
                             `📦 Order ${order._id} → Shipment ${shipment.shipment_id} (srOrderId ${srOrderId}) | AWB: ${shipment.awb_code || 'NOT ASSIGNED'}`
                         );
 
-                        // GET Shiprocket order details
                         const orderDetailsRes = await axios.get(
-                            `https://apiv2.shiprocket.in/v1/external/orders/show/${srOrderId}`,
+                            `https://apiv2.shiprocket.in/v1/external/courier/track/shipment/${shipment.shipment_id}`,
                             { headers: { Authorization: `Bearer ${token}` } }
                         );
+
                         const shipOrder = orderDetailsRes.data;
 
                         if (!shipOrder) {
@@ -500,6 +524,46 @@ async function trackShipments() {
                                 // AUTO UPDATE STATUS
                                 const lastEvent = formattedEvents[0];
                                 const mappedStatus = mapStatus(lastEvent?.status);
+
+                                // ---------------------------------------------
+                                // FIX 3: If shipment DELIVERED, stop tracking
+                                // ---------------------------------------------
+                                if (mappedStatus === "Delivered") {
+
+                                    await Order.updateOne(
+                                        {
+                                            _id: order._id,
+                                            "shipments.shipment_id": shipment.shipment_id
+                                        },
+                                        {
+                                            $set: {
+                                                "shipments.$.status": "Delivered",
+                                                orderStatus: "Delivered"
+                                            }
+                                        }
+                                    );
+
+                                    console.log(`🎉 Shipment ${shipment.shipment_id} delivered → tracking stopped`);
+                                    continue; // <-- VERY IMPORTANT
+                                }
+
+                                if (mappedStatus === "Cancelled" || mappedStatus === "RTO Delivered") {
+                                    await Order.updateOne(
+                                        {
+                                            _id: order._id,
+                                            "shipments.shipment_id": shipment.shipment_id
+                                        },
+                                        {
+                                            $set: {
+                                                "shipments.$.status": mappedStatus
+                                            }
+                                        }
+                                    );
+
+                                    console.log(`⚠️ Shipment ${shipment.shipment_id} completed (${mappedStatus}) → tracking stopped`);
+                                    continue;
+                                }
+
 
                                 if (mappedStatus !== shipment.status) {
                                     await Order.updateOne(

@@ -605,7 +605,7 @@ async function checkSingleShiprocketOrderAndSave(srOrderId) {
         for (const srShipment of srShipments) {
             const shipmentId = srShipment.shipment_id || srShipment.id;
             // AWB priority: shipment.awb_code -> order.last_mile_awb -> order.awb_data.awb
-            const { awb, courier, trackUrl } = extractAWBFromShiprocket(shipOrder, shipmentId);
+            const { awb, courier, trackUrl } = extractAWBFromShiprocket(shipOrder, srShipment);
 
 
             if (!awb) {
