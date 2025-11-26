@@ -47,7 +47,7 @@ function formatCourierDescription(event) {
 // --------------------------------------------------------
 // 🔥 HELPER: BUILD A CLEAN SHIPMENT TIMELINE (Nykaa-style)
 // --------------------------------------------------------
-function buildCourierTimeline(history = []) {
+export function buildCourierTimeline(history = []) {
   return history
     .map(h => ({
       time: h.timestamp,

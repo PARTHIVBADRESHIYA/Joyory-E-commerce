@@ -191,6 +191,7 @@ export const updateBrand = async (req, res) => {
 /**
  * Delete brand
  */
+
 export const deleteBrand = async (req, res) => {
     try {
         const { id } = req.params;
