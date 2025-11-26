@@ -112,12 +112,31 @@ const variantSchema = new mongoose.Schema({
     hex: { type: String },
     images: [{ type: String }],
     stock: { type: Number, default: 0 },
-    stockByWarehouse: [
-        {
-            warehouseCode: String, // e.g. "LAKME_WH_1"
-            stock: { type: Number, default: 0 }
+    stockByWarehouse: {
+        type: [
+            {
+                warehouseCode: {
+                    type: String,
+                    required: true, // 🔥 REQUIRED
+                    trim: true
+                },
+                stock: {
+                    type: Number,
+                    required: true, // 🔥 REQUIRED
+                    default: 0,
+                    min: 0
+                }
+            }
+        ],
+        required: true, // 🔥 ENTIRE ARRAY REQUIRED
+        validate: {
+            validator: function (arr) {
+                return Array.isArray(arr) && arr.length > 0;
+            },
+            message: "stockByWarehouse must have at least one warehouse entry."
         }
-    ],
+    },
+
     sales: { type: Number, default: 0 },
     thresholdValue: { type: Number, default: 0 },
     isActive: { type: Boolean, default: true },
@@ -162,6 +181,12 @@ const productSchema = new mongoose.Schema({
     minPrice: { type: Number, index: true, default: null },
     maxPrice: { type: Number, index: true, default: null },
 
+    supportsVTO: { type: Boolean, default: false },
+    vtoType: {
+        type: String,
+        enum: ["lips", "eyes", "face", null],
+        default: null
+    },
     isPublished: { type: Boolean, default: true }
 }, { timestamps: true });
 
