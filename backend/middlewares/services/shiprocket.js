@@ -471,7 +471,6 @@ export function extractAWBFromShiprocket(data, srShipment) {
     return { awb, courier, trackUrl, srShipment };
 }
 
-
 // 🔑 Get and cache Shiprocket token
 export async function getShiprocketToken(forceRefresh = false) {
     if (!forceRefresh && shiprocketToken && tokenExpiry && new Date() < tokenExpiry) {
@@ -552,9 +551,29 @@ async function checkSingleShiprocketOrderAndSave(srOrderId) {
                 description: `AWB ${awb} assigned via ${courier || 'unknown'}`
             };
 
-            // Match both shiprocket_order_id and shipment_id to be safe
+            // Find the local order that contains this shiprocket id / shipment id
+            const orderDoc = await Order.findOne(
+                {
+                    $or: [
+                        { "shipments.shiprocket_order_id": srOrderId },
+                        { "shipments.shipment_id": String(shipmentId) }
+                    ]
+                },
+                { _id: 1 }
+            );
+
+            if (!orderDoc) {
+                console.warn(`⚠️ No local order found for srOrderId=${srOrderId} / shipmentId=${shipmentId} — skipping AWB save`);
+                continue; // move to next srShipment
+            }
+
+            // Now update the specific order's matching shipment element (use $or so either field matches)
             const updateRes = await Order.updateOne(
-                { "shipments.shiprocket_order_id": srOrderId, "shipments.shipment_id": String(shipmentId) },
+                {
+                    _id: orderDoc._id,
+                    "shipments.shipment_id": String(shipmentId)
+                }
+                ,
                 {
                     $set: {
                         "shipments.$.awb_code": awb,
@@ -574,6 +593,8 @@ async function checkSingleShiprocketOrderAndSave(srOrderId) {
                     }
                 }
             );
+
+
 
             console.log(`✅ Immediate AWB saved for srOrder ${srOrderId}, shipment ${shipmentId}:`, { matched: updateRes.matchedCount, modified: updateRes.modifiedCount });
         }

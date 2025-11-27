@@ -22,7 +22,7 @@ const resolveParentId = async (parentId) => {
     if (!parentId) return null;
 
     if (mongoose.Types.ObjectId.isValid(parentId)) {
-        const exists = await Category.findById(parentId).select('_id');
+    const exists = await Category.findById(parentId).select('_id');
         return exists ? exists._id : null;
     }
 

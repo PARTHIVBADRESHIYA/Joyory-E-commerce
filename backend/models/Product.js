@@ -117,12 +117,10 @@ const variantSchema = new mongoose.Schema({
             {
                 warehouseCode: {
                     type: String,
-                    required: true, // 🔥 REQUIRED
                     trim: true
                 },
                 stock: {
                     type: Number,
-                    required: true, // 🔥 REQUIRED
                     default: 0,
                     min: 0
                 }

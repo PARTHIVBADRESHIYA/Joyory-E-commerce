@@ -235,7 +235,7 @@ const RefundSchema = new mongoose.Schema({
     attempts: { type: Number, default: 0 },
     refundedAt: Date
 }, { timestamps: true });
-        
+
 const CancellationSchema = new mongoose.Schema({
     cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     reason: String,
@@ -256,8 +256,8 @@ const ShipmentSchema = new mongoose.Schema({
     tracking_url: String,
     status: { type: String, default: "Created" },
     assignedAt: { type: Date, default: Date.now },
-    deliveredAt: { type: Date, default: Date.now },
-    expected_delivery: { type: Date, default: Date.now },
+    deliveredAt: { type: Date, default: null },
+    expected_delivery: { type: Date, default: null },
 
     products: [
         {
@@ -431,4 +431,4 @@ const orderSchema = new mongoose.Schema({
 orderSchema.index({ "refund.status": 1 });
 orderSchema.index({ "cancellation.requestedAt": 1 });
 
-    export default mongoose.model("Order", orderSchema);
+export default mongoose.model("Order", orderSchema);
