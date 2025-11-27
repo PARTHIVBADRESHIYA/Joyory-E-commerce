@@ -3,7 +3,7 @@ import SkinType from "../models/SkinType.js";
 import Product from "../models/Product.js";
 import { generateUniqueSlug } from "../middlewares/utils/slug.js";
 import mongoose from "mongoose";
-
+import { uploadToCloudinary } from "../middlewares/upload.js";
 const toObjectId = (id) => new mongoose.Types.ObjectId(id);
 
 // POST /admin/skin-types
@@ -20,8 +20,12 @@ export const createSkinType = async (req, res) => {
         }
 
         const slug = await generateUniqueSlug(SkinType, name.trim());
-        const image = req.files?.image?.[0]?.path || null;
-
+        // Upload image to Cloudinary if provided
+        let image = null;
+        if (req.files?.image?.[0]?.buffer) {
+            const result = await uploadToCloudinary(req.files.image[0].buffer, "skinTypes");
+            image = typeof result === "string" ? result : result.secure_url;
+        }
 
         const skinType = await SkinType.create({ name: name.trim(), slug, description, isActive, image });
         return res.status(201).json({ success: true, data: skinType });
@@ -177,10 +181,10 @@ export const updateSkinType = async (req, res) => {
         }
 
         // ------------------------ UPDATE IMAGE ------------------------
-        if (req.files?.image?.[0]) {
-            skinType.image = req.files.image[0].path;
+        if (req.files?.image?.[0]?.buffer) {
+            const result = await uploadToCloudinary(req.files.image[0].buffer, "skinTypes");
+            skinType.image = typeof result === "string" ? result : result.secure_url;
         }
-
         // ------------------------ SAVE ------------------------
         await skinType.save();
 

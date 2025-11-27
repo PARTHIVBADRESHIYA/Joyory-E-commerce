@@ -6,7 +6,7 @@ import Product from "../models/Product.js";
 import Brand from "../models/Brand.js";
 import mongoose from "mongoose";
 import moment from "moment-timezone";
-
+import { uploadToCloudinary } from "../middlewares/upload.js";
 
 /* ---------- helpers ---------- */
 const isObjectId = (s) => typeof s === "string" && /^[0-9a-fA-F]{24}$/.test(s);
@@ -217,11 +217,22 @@ const createPromotion = async (req, res) => {
       : [];
     const brands = await resolveBrands(brandsInput);
 
+    let uploadedImages = [];
+    if (req.files && req.files.length > 0) {
+      uploadedImages = await Promise.all(
+        req.files.map(async (file) => {
+          const result = await uploadToCloudinary(file.buffer, "promotions", "image");
+          return result.secure_url;
+        })
+      );
+    }
+
     const images = [
-      ...(req.files?.map((f) => f.path) || []),
+      ...uploadedImages,
       ...(Array.isArray(req.body.images) ? req.body.images.filter(Boolean) : []),
       ...(req.body.image ? [req.body.image] : []),
     ];
+
 
     const { promotionConfig } = await normalizeByType(req.body);
 
@@ -339,12 +350,22 @@ const updatePromotion = async (req, res) => {
       ? await resolveBrands(Array.isArray(req.body.brands) ? req.body.brands : [req.body.brands])
       : undefined;
 
-    // Collect new images
+    let uploadedImages = [];
+    if (req.files && req.files.length > 0) {
+      uploadedImages = await Promise.all(
+        req.files.map(async (file) => {
+          const result = await uploadToCloudinary(file.buffer, "promotions", "image");
+          return result.secure_url;
+        })
+      );
+    }
+
     const incomingImages = [
-      ...(req.files?.map((f) => f.path) || []),
+      ...uploadedImages,
       ...(Array.isArray(req.body.images) ? req.body.images.filter(Boolean) : []),
       ...(req.body.image ? [req.body.image] : []),
     ];
+
 
     let normalizedConfig = existing.promotionConfig;
     if (req.body.promotionConfig || req.body.promotionType) {

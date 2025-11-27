@@ -518,6 +518,16 @@ const allowedOrigins = [
     "http://192.168.1.6:5173",
     "http://192.168.1.7:5173",
     "http://192.168.1.5:5173",
+
+    "http://localhost:5174",
+    "http://192.168.1.1:5174",
+    "http://192.168.1.2:5174",
+    "http://192.168.1.3:5174",
+    "http://192.168.1.4:5174",
+    "http://192.168.1.6:5174",
+    "http://192.168.1.7:5174",
+    "http://192.168.1.5:5174",
+
     "https://joyory.com",
     "https://darkviolet-dolphin-447223.hostingersite.com"];
 

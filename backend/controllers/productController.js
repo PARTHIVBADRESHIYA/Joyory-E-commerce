@@ -7,6 +7,7 @@ import Formulation from '../models/shade/Formulation.js';
 import mongoose from 'mongoose';
 import moment from 'moment-timezone';
 // at top of admin controller file
+import { uploadToCloudinary } from '../middlewares/upload.js';
 import { clearProductCacheForId, clearAllProductCaches } from '../middlewares/utils/cacheUtils.js';
 
 // -----------------------------
@@ -234,9 +235,7 @@ const addProductController = async (req, res) => {
                         ) || [];
 
                         for (const file of variantFiles) {
-                            const result = await cloudinary.uploader.upload(file.path, {
-                                folder: "products/variants",
-                            });
+                            const result = await uploadToCloudinary(file.buffer, "products/variants", "image");
                             uploadedImages.push(result.secure_url);
                         }
 
@@ -454,7 +453,7 @@ const updateProductById = async (req, res) => {
 
             for (const file of req.files) {
                 try {
-                    const uploadResult = await cloudinary.uploader.upload(file.path, { folder: "products" });
+                    const uploadResult = await uploadToCloudinary(file.buffer, "products", "image");
                     console.log(`✅ Uploaded: ${file.fieldname} -> ${uploadResult.secure_url}`);
 
                     if (file.fieldname === "images") {
@@ -555,11 +554,11 @@ const updateProductById = async (req, res) => {
                     if (Array.isArray(v.images)) {
                         incomingImages = v.images;
                     } else if (typeof v.images === "string") {
-                        try { 
-                            incomingImages = JSON.parse(v.images); 
-                        } catch { 
+                        try {
+                            incomingImages = JSON.parse(v.images);
+                        } catch {
                             // If it's a single image URL string
-                            incomingImages = [v.images]; 
+                            incomingImages = [v.images];
                         }
                     }
                 }
@@ -588,7 +587,7 @@ const updateProductById = async (req, res) => {
 
                 // Combine images: incoming + retained + uploaded
                 let tempImages = [];
-                
+
                 // If frontend sends explicit images array, use it as base
                 if (incomingImages.length > 0) {
                     tempImages = [...incomingImages];
@@ -596,7 +595,7 @@ const updateProductById = async (req, res) => {
                     // Otherwise start with retained images
                     tempImages = [...retainedImages];
                 }
-                
+
                 // Always add uploaded images
                 tempImages.push(...uploadedVariantImages);
 
@@ -710,7 +709,7 @@ const updateProductById = async (req, res) => {
                 } else if (Array.isArray(req.body.images)) {
                     bodyImages = req.body.images;
                 }
-                
+
                 // Merge body images with existing ones (remove duplicates)
                 finalImages = [...new Set([...bodyImages, ...finalImages])];
             }

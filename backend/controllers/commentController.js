@@ -1,36 +1,48 @@
 // controllers/commentController.js
 import Comment from '../models/Comment.js';
 import { io } from '../server.js';
-
+import { uploadToCloudinary } from '../middlewares/upload.js';
 
 export const createComment = async (req, res) => {
     try {
-        const { text } = req.body;
-        const image = req.file?.path || '';
         const { blogId } = req.params;
+        const { text } = req.body;
 
+        // ✅ Initialize image as empty string
+        let image = "";
+
+        // ✅ Only upload if file exists and has buffer
+        if (req.file && req.file.buffer) {
+            const result = await uploadToCloudinary(req.file.buffer, "comments");
+            // result could be either string (if helper returns URL) or object (old version)
+            // so we ensure we only use secure_url
+            image = typeof result === "string" ? result : result.secure_url;
+        }
+
+        // ✅ Create comment
         const comment = await Comment.create({
             blogId,
             userId: req.user._id, // from middleware
             text,
-            image
+            image,
         });
 
-        io.emit('newComment', {
+        // ✅ Emit new comment via socket
+        io.emit("newComment", {
             blogId,
             comment: {
                 _id: comment._id,
                 text: comment.text,
                 image: comment.image,
                 userId: req.user._id,
-                createdAt: comment.createdAt
-            }
+                createdAt: comment.createdAt,
+            },
         });
 
-
-        res.status(201).json({ message: 'Comment added', comment });
+        res.status(201).json({ message: "Comment added", comment });
     } catch (error) {
-        res.status(500).json({ message: 'Failed to post comment', error: error.message });
+        console.error("Create comment error:", error);
+        res.status(500).json({ message: "Failed to post comment", error: error.message });
     }
 };
 

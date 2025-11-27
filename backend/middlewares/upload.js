@@ -437,175 +437,262 @@
 
 
 
-// upload.js
-import multer from 'multer';
-import { CloudinaryStorage } from 'multer-storage-cloudinary';
-import cloudinary from './utils/cloudinary.js';
+// // upload.js
+// import multer from 'multer';
+// import { CloudinaryStorage } from 'multer-storage-cloudinary';
+// import cloudinary from './utils/cloudinary.js';
+// import streamifier from "streamifier";
+
+// // -------------------- File Filter (Images) --------------------
+// const fileFilter = (req, file, cb) => {
+//   const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
+//   if (!allowedMimeTypes.includes(file.mimetype)) {
+//     return cb(new Error("Invalid file type. Only JPG, PNG, and WebP allowed."), false);
+//   }
+//   cb(null, true);
+// };
+
+// // -------------------- Generic Cloudinary Uploader (Original Size) --------------------
+// const makeCloudinaryUploader = (folder, maxFiles) =>
+//   multer({
+//     storage: new CloudinaryStorage({
+//       cloudinary,
+//       params: {
+//         folder,
+//         allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
+//         resource_type: 'image',
+//       }
+//     }),
+//     fileFilter,
+//     limits: {
+//       fileSize: 10 * 1024 * 1024,
+//       files: maxFiles,
+//     },
+//   });
+
+// // -------------------- PDF Upload Buffer --------------------
+// export const uploadPdfBuffer = (buffer, filename) => {
+//   return new Promise((resolve, reject) => {
+//     const uploadStream = cloudinary.uploader.upload_stream(
+//       {
+//         folder: "ecards",
+//         resource_type: "auto",
+//         public_id: filename.replace(".pdf", ""),
+//         format: "pdf",
+//         type: "upload",
+//         access_mode: "public",
+//       },
+//       (err, result) => {
+//         if (err) return reject(err);
+//         resolve(result);
+//       }
+//     );
+//     streamifier.createReadStream(buffer).pipe(uploadStream);
+//   });
+// };
+
+// // -------------------- PDF Uploader --------------------
+// const makeCloudinaryPdfUploader = (folder, maxFiles) =>
+//   multer({
+//     storage: new CloudinaryStorage({
+//       cloudinary,
+//       params: {
+//         folder,
+//         allowed_formats: ["pdf"],
+//         resource_type: "auto",
+//         access_mode: "public",
+//       },
+//     }),
+//     fileFilter: (req, file, cb) => {
+//       if (file.mimetype !== "application/pdf") {
+//         return cb(new Error("Invalid file type. Only PDF allowed."), false);
+//       }
+//       cb(null, true);
+//     },
+//     limits: {
+//       fileSize: 20 * 1024 * 1024,
+//       files: maxFiles,
+//     },
+//   });
+
+// // -------------------- Product Variant (Original Size) --------------------
+// export const uploadProductWithVariants = multer({
+//   storage: new CloudinaryStorage({
+//     cloudinary,
+//     params: {
+//       folder: "products",
+//       allowed_formats: ["jpg", "jpeg", "png", "webp"],
+//       resource_type: "image",
+//     },
+//   }),
+//   fileFilter,
+//   limits: {
+//     fileSize: 10 * 1024 * 1024,
+//     files: 50,
+//   },
+// }).any();
+
+// // -------------------- Video Upload --------------------
+// export const uploadVideo = multer({
+//   storage: new CloudinaryStorage({
+//     cloudinary,
+//     params: {
+//       folder: "videos",
+//       resource_type: "video",
+//       allowed_formats: ["mp4", "mov", "avi", "webm", "mkv"],
+//       access_mode: "public",
+//     },
+//   }),
+//   fileFilter: (req, file, cb) => {
+//     const allowedMimeTypes = [
+//       "video/mp4",
+//       "video/webm",
+//       "video/ogg",
+//       "video/quicktime",
+//       "video/x-msvideo",
+//       "video/x-matroska",
+//     ];
+//     if (!allowedMimeTypes.includes(file.mimetype)) {
+//       return cb(new Error("Invalid video type."), false);
+//     }
+//     cb(null, true);
+//   },
+//   limits: {
+//     fileSize: 100 * 1024 * 1024,
+//     files: 1,
+//   },
+// });
+
+// // -------------------- Universal Media Uploader --------------------
+// export const uploadMedia = multer({
+//   storage: new CloudinaryStorage({
+//     cloudinary,
+//     params: async (req, file) => {
+//       const isVideo = file.mimetype.startsWith("video/");
+//       return {
+//         folder: "uploads",
+//         resource_type: isVideo ? "video" : "image",
+//         allowed_formats: isVideo
+//           ? ["mp4", "mov", "avi", "webm", "mkv"]
+//           : ["jpg", "jpeg", "png", "webp"],
+//         access_mode: "public",
+//       };
+//     },
+//   }),
+//   fileFilter: (req, file, cb) => {
+//     const allowedMimeTypes = [
+//       "image/jpeg",
+//       "image/png",
+//       "image/webp",
+//       "video/mp4",
+//       "video/webm",
+//       "video/ogg",
+//       "video/quicktime",
+//       "video/x-msvideo",
+//       "video/x-matroska",
+//     ];
+
+//     if (!allowedMimeTypes.includes(file.mimetype)) {
+//       return cb(new Error("Invalid media type."), false);
+//     }
+//     cb(null, true);
+//   },
+//   limits: {
+//     fileSize: 10 * 1024 * 1024,
+//     files: 5,
+//   },
+// });
+
+// // -------------------- Video + Thumbnail --------------------
+// const imageMimeTypes = ["image/jpeg", "image/png", "image/webp"];
+// const videoMimeTypes = [
+//   "video/mp4",
+//   "video/webm",
+//   "video/ogg",
+//   "video/quicktime",
+//   "video/x-msvideo",
+//   "video/x-matroska",
+// ];
+
+// export const uploadVideoWithThumbnail = multer({
+//   storage: new CloudinaryStorage({
+//     cloudinary,
+//     params: async (req, file) => {
+//       if (file.fieldname === "video") {
+//         return {
+//           folder: "videos",
+//           resource_type: "video",
+//           allowed_formats: ["mp4", "mov", "avi", "webm", "mkv"],
+//           access_mode: "public",
+//         };
+//       } else if (file.fieldname === "thumbnail") {
+//         return {
+//           folder: "thumbnails",
+//           resource_type: "image",
+//           allowed_formats: ["jpg", "jpeg", "png", "webp"],
+//           access_mode: "public",
+//         };
+//       }
+//     },
+//   }),
+
+//   fileFilter: (req, file, cb) => {
+//     if (file.fieldname === "video" && videoMimeTypes.includes(file.mimetype)) {
+//       return cb(null, true);
+//     }
+//     if (file.fieldname === "thumbnail" && imageMimeTypes.includes(file.mimetype)) {
+//       return cb(null, true);
+//     }
+
+//     return cb(new Error(`Invalid file type for ${file.fieldname}.`), false);
+//   },
+
+//   limits: {
+//     fileSize: 100 * 1024 * 1024,
+//     files: 2,
+//   },
+// });
+
+// // -------------------- Exported Uploaders --------------------
+// export const uploadEcard = makeCloudinaryPdfUploader("ecards", 1);
+// export const uploadProduct = makeCloudinaryUploader("products", 25);
+// export const uploadPromotion = makeCloudinaryUploader("promotions", 1);
+// export const uploadCampaign = makeCloudinaryUploader("campaigns", 1);
+// export const uploadBlogImage = makeCloudinaryUploader("blogs", 1);
+// export const uploadCommentImage = makeCloudinaryUploader("comments", 1);
+// export const uploadCategory = makeCloudinaryUploader("categories", 20);
+// export const uploaduserProfile = makeCloudinaryUploader("users", 10);
+// export const uploadBrand = makeCloudinaryUploader("brands", 2);
+// export const uploadTones = makeCloudinaryUploader("tones", 2);
+// export const uploadUndertones = makeCloudinaryUploader("undertones", 2);
+// export const uploadFamilies = makeCloudinaryUploader("families", 2);
+// export const uploadFormulations = makeCloudinaryUploader("formulations", 2);
+// export const uploadSkinType = makeCloudinaryUploader("skin-types", 2);
+// export const uploadGiftCard = makeCloudinaryUploader("gift-cards", 1);
+// export const uploadSeller = makeCloudinaryUploader("sellers", 100);
+
+
+
+
+
+
+import multer from "multer";
 import streamifier from "streamifier";
+import cloudinary from "./utils/cloudinary.js";
 
-// -------------------- File Filter (Images) --------------------
-const fileFilter = (req, file, cb) => {
-  const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
-  if (!allowedMimeTypes.includes(file.mimetype)) {
-    return cb(new Error("Invalid file type. Only JPG, PNG, and WebP allowed."), false);
-  }
-  cb(null, true);
-};
+// -------------------- Memory Storage --------------------
+const storage = multer.memoryStorage();
 
-// -------------------- Generic Cloudinary Uploader (Original Size) --------------------
-const makeCloudinaryUploader = (folder, maxFiles) =>
-  multer({
-    storage: new CloudinaryStorage({
-      cloudinary,
-      params: {
-        folder,
-        allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
-        resource_type: 'image',
-      }
-    }),
-    fileFilter,
-    limits: {
-      fileSize: 10 * 1024 * 1024,
-      files: maxFiles,
-    },
-  });
-
-// -------------------- PDF Upload Buffer --------------------
-export const uploadPdfBuffer = (buffer, filename) => {
-  return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder: "ecards",
-        resource_type: "auto",
-        public_id: filename.replace(".pdf", ""),
-        format: "pdf",
-        type: "upload",
-        access_mode: "public",
-      },
-      (err, result) => {
-        if (err) return reject(err);
-        resolve(result);
-      }
-    );
-    streamifier.createReadStream(buffer).pipe(uploadStream);
-  });
-};
-
-// -------------------- PDF Uploader --------------------
-const makeCloudinaryPdfUploader = (folder, maxFiles) =>
-  multer({
-    storage: new CloudinaryStorage({
-      cloudinary,
-      params: {
-        folder,
-        allowed_formats: ["pdf"],
-        resource_type: "auto",
-        access_mode: "public",
-      },
-    }),
-    fileFilter: (req, file, cb) => {
-      if (file.mimetype !== "application/pdf") {
-        return cb(new Error("Invalid file type. Only PDF allowed."), false);
-      }
-      cb(null, true);
-    },
-    limits: {
-      fileSize: 20 * 1024 * 1024,
-      files: maxFiles,
-    },
-  });
-
-// -------------------- Product Variant (Original Size) --------------------
-export const uploadProductWithVariants = multer({
-  storage: new CloudinaryStorage({
-    cloudinary,
-    params: {
-      folder: "products",
-      allowed_formats: ["jpg", "jpeg", "png", "webp"],
-      resource_type: "image",
-    },
-  }),
-  fileFilter,
-  limits: {
-    fileSize: 10 * 1024 * 1024,
-    files: 50,
-  },
-}).any();
-
-// -------------------- Video Upload --------------------
-export const uploadVideo = multer({
-  storage: new CloudinaryStorage({
-    cloudinary,
-    params: {
-      folder: "videos",
-      resource_type: "video",
-      allowed_formats: ["mp4", "mov", "avi", "webm", "mkv"],
-      access_mode: "public",
-    },
-  }),
-  fileFilter: (req, file, cb) => {
-    const allowedMimeTypes = [
-      "video/mp4",
-      "video/webm",
-      "video/ogg",
-      "video/quicktime",
-      "video/x-msvideo",
-      "video/x-matroska",
-    ];
-    if (!allowedMimeTypes.includes(file.mimetype)) {
-      return cb(new Error("Invalid video type."), false);
-    }
-    cb(null, true);
-  },
-  limits: {
-    fileSize: 100 * 1024 * 1024,
-    files: 1,
-  },
-});
-
-// -------------------- Universal Media Uploader --------------------
-export const uploadMedia = multer({
-  storage: new CloudinaryStorage({
-    cloudinary,
-    params: async (req, file) => {
-      const isVideo = file.mimetype.startsWith("video/");
-      return {
-        folder: "uploads",
-        resource_type: isVideo ? "video" : "image",
-        allowed_formats: isVideo
-          ? ["mp4", "mov", "avi", "webm", "mkv"]
-          : ["jpg", "jpeg", "png", "webp"],
-        access_mode: "public",
-      };
-    },
-  }),
-  fileFilter: (req, file, cb) => {
-    const allowedMimeTypes = [
-      "image/jpeg",
-      "image/png",
-      "image/webp",
-      "video/mp4",
-      "video/webm",
-      "video/ogg",
-      "video/quicktime",
-      "video/x-msvideo",
-      "video/x-matroska",
-    ];
-
-    if (!allowedMimeTypes.includes(file.mimetype)) {
-      return cb(new Error("Invalid media type."), false);
-    }
-    cb(null, true);
-  },
-  limits: {
-    fileSize: 10 * 1024 * 1024,
-    files: 5,
-  },
-});
-
-// -------------------- Video + Thumbnail --------------------
-const imageMimeTypes = ["image/jpeg", "image/png", "image/webp"];
-const videoMimeTypes = [
+// -------------------- Mime Types --------------------
+const imageMime = [
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/avif",
+];
+const videoMime = [
   "video/mp4",
   "video/webm",
   "video/ogg",
@@ -613,70 +700,131 @@ const videoMimeTypes = [
   "video/x-msvideo",
   "video/x-matroska",
 ];
+const pdfMime = ["application/pdf"];
 
-export const uploadVideoWithThumbnail = multer({
-  storage: new CloudinaryStorage({
-    cloudinary,
-    params: async (req, file) => {
-      if (file.fieldname === "video") {
-        return {
-          folder: "videos",
-          resource_type: "video",
-          allowed_formats: ["mp4", "mov", "avi", "webm", "mkv"],
-          access_mode: "public",
-        };
-      } else if (file.fieldname === "thumbnail") {
-        return {
-          folder: "thumbnails",
-          resource_type: "image",
-          allowed_formats: ["jpg", "jpeg", "png", "webp"],
-          access_mode: "public",
-        };
-      }
+  // -------------------- Generic Cloudinary Upload Function --------------------
+  export function uploadToCloudinary(buffer, folder, resource_type = "image") {
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder, resource_type },
+        (err, result) => {
+          if (err) return reject(err);
+          resolve(result);
+        }
+      );
+      streamifier.createReadStream(buffer).pipe(uploadStream);
+    });
+  }
+
+// -------------------- Make Image Uploader --------------------
+function makeImageUploader(maxFiles) {
+  return multer({
+    storage,
+    fileFilter: (req, file, cb) => {
+      if (!imageMime.includes(file.mimetype))
+        return cb(new Error("Invalid image file"), false);
+      cb(null, true);
     },
-  }),
+    limits: { fileSize: 10 * 1024 * 1024, files: maxFiles },
+  });
+}
 
+// -------------------- Make PDF Uploader --------------------
+function makePdfUploader(maxFiles) {
+  return multer({
+    storage,
+    fileFilter: (req, file, cb) => {
+      if (!pdfMime.includes(file.mimetype))
+        return cb(new Error("Only PDF files allowed"), false);
+      cb(null, true);
+    },
+    limits: { fileSize: 20 * 1024 * 1024, files: maxFiles },
+  });
+}
+
+// -------------------- Make Video Uploader --------------------
+function makeVideoUploader(maxFiles) {
+  return multer({
+    storage,
+    fileFilter: (req, file, cb) => {
+      if (!videoMime.includes(file.mimetype))
+        return cb(new Error("Invalid video file"), false);
+      cb(null, true);
+    },
+    limits: { fileSize: 100 * 1024 * 1024, files: maxFiles },
+  });
+}
+
+// -------------------- Product Variant (any images) --------------------
+export const uploadProductWithVariants = multer({
+  storage,
   fileFilter: (req, file, cb) => {
-    if (file.fieldname === "video" && videoMimeTypes.includes(file.mimetype)) {
-      return cb(null, true);
-    }
-    if (file.fieldname === "thumbnail" && imageMimeTypes.includes(file.mimetype)) {
-      return cb(null, true);
-    }
-
-    return cb(new Error(`Invalid file type for ${file.fieldname}.`), false);
+    if (!imageMime.includes(file.mimetype))
+      return cb(new Error("Invalid image file"), false);
+    cb(null, true);
   },
+  limits: { fileSize: 10 * 1024 * 1024, files: 50 },
+}).any();
 
-  limits: {
-    fileSize: 100 * 1024 * 1024,
-    files: 2,
+// -------------------- Universal Media Uploader --------------------
+export const uploadMedia = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    if (![...imageMime, ...videoMime].includes(file.mimetype))
+      return cb(new Error("Invalid media file"), false);
+    cb(null, true);
   },
+  limits: { fileSize: 10 * 1024 * 1024, files: 5 },
 });
 
-// -------------------- Exported Uploaders --------------------
-export const uploadEcard = makeCloudinaryPdfUploader("ecards", 1);
-export const uploadProduct = makeCloudinaryUploader("products", 25);
-export const uploadPromotion = makeCloudinaryUploader("promotions", 1);
-export const uploadCampaign = makeCloudinaryUploader("campaigns", 1);
-export const uploadBlogImage = makeCloudinaryUploader("blogs", 1);
-export const uploadCommentImage = makeCloudinaryUploader("comments", 1);
-export const uploadCategory = makeCloudinaryUploader("categories", 20);
-export const uploaduserProfile = makeCloudinaryUploader("users", 10);
-export const uploadBrand = makeCloudinaryUploader("brands", 2);
-export const uploadTones = makeCloudinaryUploader("tones", 2);
-export const uploadUndertones = makeCloudinaryUploader("undertones", 2);
-export const uploadFamilies = makeCloudinaryUploader("families", 2);
-export const uploadFormulations = makeCloudinaryUploader("formulations", 2);
-export const uploadSkinType = makeCloudinaryUploader("skin-types", 2);
-export const uploadGiftCard = makeCloudinaryUploader("gift-cards", 1);
-export const uploadSeller = makeCloudinaryUploader("sellers", 100);
+// -------------------- Video + Thumbnail --------------------
+export const uploadVideoWithThumbnail = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    // normalize mimetype for webp edge cases
+    const mime = file.mimetype.split(";")[0];
+    if (file.fieldname === "video" && videoMime.includes(mime)) return cb(null, true);
+    if (file.fieldname === "thumbnail" && imageMime.includes(mime)) return cb(null, true);
+    return cb(new Error(`Invalid file for ${file.fieldname}`), false);
+  },
+  limits: { fileSize: 100 * 1024 * 1024, files: 2 },
+}).fields([
+  { name: "video", maxCount: 1 },
+  { name: "thumbnail", maxCount: 1 },
+]);
 
 
+export const uploadMultipleToCloudinary = async (files, folder) => {
+  try {
+    if (!files || files.length === 0) return [];
 
+    const uploaded = [];
 
+    for (const file of files) {
+      const result = await uploadToCloudinary(file.buffer, folder); 
+      uploaded.push(result.secure_url);
+    }
 
+    return uploaded;
 
+  } catch (err) {
+    console.error("Cloudinary Upload Error →", err);
+    return [];
+  }
+};
 
-
-
-
+// -------------------- All Uploaders Export --------------------
+export const uploadProduct = makeImageUploader(25);
+export const uploadCampaign = makeImageUploader(1);
+export const uploadBlogImage = makeImageUploader(1);
+export const uploadCommentImage = makeImageUploader(1);
+export const uploadCategory = makeImageUploader(20);
+export const uploaduserProfile = makeImageUploader(10);
+export const uploadBrand = makeImageUploader(2);
+export const uploadTones = makeImageUploader(2);
+export const uploadUndertones = makeImageUploader(2);
+export const uploadFamilies = makeImageUploader(2);
+export const uploadFormulations = makeImageUploader(2);
+export const uploadSkinType = makeImageUploader(2);
+export const uploadGiftCard = makeImageUploader(1);
+export const uploadSeller = makeImageUploader(100);

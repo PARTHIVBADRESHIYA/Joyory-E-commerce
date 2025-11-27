@@ -1,32 +1,8 @@
 // controllers/admin/brandAdminController.js
 import Brand from "../models/Brand.js";
 import { toSlug } from "../middlewares/utils/slug.js";
+import { uploadToCloudinary } from "../middlewares/upload.js";
 
-/**
- * Create new brand
- */
-// export const createBrand = async (req, res) => {
-//     try {
-//         const { name, description } = req.body;
-
-//         const slug = toSlug(name);
-//         const existing = await Brand.findOne({ slug });
-//         if (existing) return res.status(400).json({ message: "Brand already exists" });
-
-//         const logo = req.files?.logo?.[0]?.path || null;
-//         const banner = req.files?.banner?.[0]?.path || null;
-
-//         const brand = await Brand.create({ name, slug, description, logo, banner });
-//         res.status(201).json({ message: "Brand created", brand });
-//     } catch (err) {
-//         res.status(500).json({ message: "Failed to create brand", error: err.message });
-//     }
-// };
-
-
-/**
- * Create new brand
- */
 export const createBrand = async (req, res) => {
     try {
         const { name, description } = req.body;
@@ -41,8 +17,29 @@ export const createBrand = async (req, res) => {
             return res.status(400).json({ message: "Brand already exists" });
         }
 
-        const logo = req.files?.logo?.[0]?.path || null;
-        const banner = req.files?.banner?.[0]?.path || null;
+
+        let logo = "";
+        let banner = "";
+
+        // 🔥 Upload LOGO
+        if (req.files?.logo?.[0]?.buffer) {
+            const result = await uploadToCloudinary(
+                req.files.logo[0].buffer,
+                "brands/logo"
+            );
+
+            logo = typeof result === "string" ? result : result.secure_url;
+        }
+
+        // 🔥 Upload BANNER
+        if (req.files?.banner?.[0]?.buffer) {
+            const result = await uploadToCloudinary(
+                req.files.banner[0].buffer,
+                "brands/banner"
+            );
+
+            banner = typeof result === "string" ? result : result.secure_url;
+        }
 
         // Warehouses can come as:
         // - raw JSON
@@ -106,34 +103,6 @@ export const createBrand = async (req, res) => {
     }
 };
 
-
-/**
- * Update brand
- */
-// export const updateBrand = async (req, res) => {
-//     try {
-//         const { id } = req.params;
-//         const { name, description, isActive } = req.body;
-
-//         const update = {};
-//         if (name) {
-//             update.name = name;
-//             update.slug = toSlug(name);
-//         }
-//         if (description !== undefined) update.description = description;
-//         if (isActive !== undefined) update.isActive = isActive;
-
-//         if (req.files?.logo?.[0]) update.logo = req.files.logo[0].path;
-//         if (req.files?.banner?.[0]) update.banner = req.files.banner[0].path;
-
-//         const brand = await Brand.findByIdAndUpdate(id, update, { new: true });
-//         if (!brand) return res.status(404).json({ message: "Brand not found" });
-
-//         res.json({ message: "Brand updated", brand });
-//     } catch (err) {
-//         res.status(500).json({ message: "Failed to update brand", error: err.message });
-//     }
-// };
 export const updateBrand = async (req, res) => {
     try {
         const { id } = req.params;
@@ -175,8 +144,22 @@ export const updateBrand = async (req, res) => {
             update.primaryWarehouse = primaryWarehouse;
         }
 
-        if (req.files?.logo?.[0]) update.logo = req.files.logo[0].path;
-        if (req.files?.banner?.[0]) update.banner = req.files.banner[0].path;
+        // ---------- CLOUDINARY UPLOADS ----------
+        if (req.files?.logo?.[0]?.buffer) {
+            const result = await uploadToCloudinary(
+                req.files.logo[0].buffer,
+                "brands/logo"
+            );
+            update.logo = typeof result === "string" ? result : result.secure_url;
+        }
+
+        if (req.files?.banner?.[0]?.buffer) {
+            const result = await uploadToCloudinary(
+                req.files.banner[0].buffer,
+                "brands/banner"
+            );
+            update.banner = typeof result === "string" ? result : result.secure_url;
+        }
 
         const brand = await Brand.findByIdAndUpdate(id, update, { new: true });
         if (!brand)
@@ -187,10 +170,6 @@ export const updateBrand = async (req, res) => {
         res.status(500).json({ message: "Failed to update brand", error: err.message });
     }
 };
-
-/**
- * Delete brand
- */
 
 export const deleteBrand = async (req, res) => {
     try {
@@ -204,9 +183,6 @@ export const deleteBrand = async (req, res) => {
     }
 };
 
-/**
- * Get all brands (admin)
- */
 export const getAllBrandsAdmin = async (req, res) => {
     try {
         const brands = await Brand.find().sort({ createdAt: -1 });

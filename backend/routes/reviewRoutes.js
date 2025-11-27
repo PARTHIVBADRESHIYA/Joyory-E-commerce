@@ -14,7 +14,7 @@ import {
 } from '../controllers/reviewController.js';
 
 import { protect,isAdmin } from './../middlewares/authMiddleware.js';
-import { uploadReview } from '../middlewares/uploadReview.js';
+// import { uploadReview } from '../middlewares/uploadReview.js';
 
 const router = express.Router();
 
@@ -22,7 +22,6 @@ const router = express.Router();
 router.post(
     '/add',
     protect,
-    uploadReview.array('images', 3),
     submitReview
 );
 

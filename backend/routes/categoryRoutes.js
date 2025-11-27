@@ -18,11 +18,9 @@ router.post('/top', verifyAdminOrTeamMember, setTopCategories);
 router.post(
     '/',
     verifyAdminOrTeamMember,
-    uploadCategory.fields([ 
+    uploadCategory.fields([
         { name: 'bannerImage', maxCount: 5 },
-        { name: 'thumbnailImage', maxCount: 5 },
-        { name: 'image', maxCount: 1 }
-    ]),
+        { name: 'thumbnailImage', maxCount: 5 }]),
     addCategory
 );
 
@@ -36,9 +34,7 @@ router.put(
     verifyAdminOrTeamMember,
     uploadCategory.fields([
         { name: 'bannerImage', maxCount: 5 },
-        { name: 'thumbnailImage', maxCount: 5 },
-        { name: 'image', maxCount: 1 }
-
+        { name: 'thumbnailImage', maxCount: 5 }
     ]),
     updateCategory
 );

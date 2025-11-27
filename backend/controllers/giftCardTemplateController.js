@@ -4,9 +4,14 @@ import GiftCardTemplate from "../models/GiftCardTemplate.js";
 // ✅ Create template
 export const createGiftCardTemplate = async (req, res) => {
     try {
-        const { title, description, minAmount, maxAmount,tag } = req.body;
-        const image = req.file ? req.file.path : null;
+        const { title, description, minAmount, maxAmount, tag } = req.body;
+        let image = null;
 
+        // Upload image to Cloudinary if file exists
+        if (req.file?.buffer) {
+            const result = await uploadToCloudinary(req.file.buffer, "giftCardTemplates");
+            image = typeof result === "string" ? result : result.secure_url;
+        }
         if (!title || !description || !image || !tag) {
             return res.status(400).json({ message: "Title, description,tag  and image are required" });
         }
@@ -43,8 +48,10 @@ export const updateGiftCardTemplate = async (req, res) => {
         const { id } = req.params;
         const updateData = { ...req.body };
 
-        if (req.file) {
-            updateData.image = req.file.path;
+        // Upload new image if provided
+        if (req.file?.buffer) {
+            const result = await uploadToCloudinary(req.file.buffer, "giftCardTemplates");
+            updateData.image = typeof result === "string" ? result : result.secure_url;
         }
 
         const template = await GiftCardTemplate.findByIdAndUpdate(id, updateData, { new: true });

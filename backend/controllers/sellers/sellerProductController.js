@@ -10,6 +10,7 @@ import {
     updateVariantImages
 } from "../productController.js";
 
+import { uploadToCloudinary } from "../../middlewares/upload.js";
 // ================= ADD PRODUCT =================
 export const addProductBySeller = async (req, res) => {
     try {

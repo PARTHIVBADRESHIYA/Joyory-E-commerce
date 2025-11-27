@@ -5,7 +5,7 @@ import { sendEmail } from '../../../middlewares/utils/emailService.js';
 import { sendSms } from '../../../middlewares/utils/sendSms.js';
 import { addressSchema } from "../../../middlewares/validations/userProfileValidation.js";
 import { validatePincodeServiceability } from "../../../middlewares/services/shiprocket.js";
-
+import { uploadToCloudinary } from "../../../middlewares/upload.js";
 import bcrypt from 'bcryptjs';
 
 // Get Basic User Profile
@@ -77,26 +77,40 @@ export const updateUserProfile = async (req, res) => {
 };
 
 
-// Upload / Update Profile Image (Cloudinary with public_id)
 export const uploadProfileImage = async (req, res) => {
     try {
-        if (!req.file) {
-            return res.status(400).json({ message: 'No file uploaded' });
+
+        if (!req.file || !req.file.buffer) {
+            return res.status(400).json({ message: "No image uploaded" });
         }
 
-        const uploadResult = await cloudinary.uploader.upload(req.file.path);
-
         const user = await User.findById(req.user._id);
-        user.profileImage = uploadResult.secure_url;
-        user.profileImageId = uploadResult.public_id;     // 👈 store public id
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        // 🔥 Upload to Cloudinary using buffer (just like comments)
+        const result = await uploadToCloudinary(req.file.buffer, "users/profile");
+
+        // result may be object OR string → normalize it
+        const imageUrl = typeof result === "string" ? result : result.secure_url;
+        const publicId = typeof result === "string" ? "" : result.public_id;
+
+        // 🔥 Save to DB
+        user.profileImage = imageUrl;
+        user.profileImageId = publicId;
+
         await user.save();
 
         res.status(200).json({
-            message: 'Profile image updated',
-            profileImage: uploadResult.secure_url
+            message: "Profile image updated",
+            profileImage: imageUrl
         });
+
     } catch (err) {
-        res.status(500).json({ message: 'Failed to upload profile image', error: err.message });
+        console.error("Profile upload error:", err);
+        res.status(500).json({
+            message: "Failed to upload profile image",
+            error: err.message
+        });
     }
 };
 

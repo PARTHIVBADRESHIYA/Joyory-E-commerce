@@ -5,7 +5,6 @@ import { BUSINESS_REQUIREMENTS } from "../../businessRequirements.js";
 import { sendEmail } from "../../middlewares/utils/emailService.js";
 import { createFundAccountForSeller } from "../../middlewares/services/razorpayX.js";
 import { buildSellerAppPdf } from "../../middlewares/services/ecardPdf.js";
-import { uploadPdfBuffer } from "../../middlewares/upload.js";
 import mongoose from "mongoose";
 
 export const applySeller = async (req, res) => {

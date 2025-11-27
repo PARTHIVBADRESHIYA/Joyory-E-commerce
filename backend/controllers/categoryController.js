@@ -4,7 +4,7 @@ import Product from './../models/Product.js';
 import Brand from './../models/Brand.js';
 import slugify from 'slugify';
 import mongoose from 'mongoose';
-
+import { uploadToCloudinary, uploadMultipleToCloudinary } from '../middlewares/upload.js';
 /* ---------------------- Helpers ---------------------- */
 
 // ✅ Generate unique slug
@@ -22,7 +22,7 @@ const resolveParentId = async (parentId) => {
     if (!parentId) return null;
 
     if (mongoose.Types.ObjectId.isValid(parentId)) {
-    const exists = await Category.findById(parentId).select('_id');
+        const exists = await Category.findById(parentId).select('_id');
         return exists ? exists._id : null;
     }
 
@@ -73,22 +73,30 @@ export const addCategory = async (req, res) => {
         const { name, description } = req.body;
         let { parentId } = req.body;
 
-        if (!name) return res.status(400).json({ message: 'Name required' });
+        if (!name)
+            return res.status(400).json({ message: 'Name required' });
 
-        // Normalize brand inputs
-        let brandInputs = req.body.brands || req.body.brand || req.body['brands[]'];
-        if (brandInputs && !Array.isArray(brandInputs)) brandInputs = [brandInputs];
+        // Normalize brand input: brands, brand, brands[]
+        let brandInputs = req.body.brands || req.body.brand || req.body["brands[]"];
+        if (brandInputs && !Array.isArray(brandInputs)) {
+            brandInputs = [brandInputs];
+        }
 
-        // Check duplicate category name
-        const existingCategory = await Category.findOne({ name: { $regex: `^${name}$`, $options: 'i' } });
-        if (existingCategory) return res.status(400).json({ message: 'Category name already exists' });
+        // Check for duplicate category name
+        const existingCategory = await Category.findOne({
+            name: { $regex: `^${name}$`, $options: "i" },
+        });
+        if (existingCategory)
+            return res.status(400).json({ message: "Category name already exists" });
 
         // Resolve parent & ancestors
         let parent = null;
         let ancestors = [];
+
         if (parentId) {
             const resolvedId = await resolveParentId(parentId);
-            if (!resolvedId) return res.status(400).json({ message: 'Parent category not found' });
+            if (!resolvedId)
+                return res.status(400).json({ message: "Parent category not found" });
 
             parent = await Category.findById(resolvedId);
             ancestors = [...(parent.ancestors || []), parent._id];
@@ -96,25 +104,36 @@ export const addCategory = async (req, res) => {
 
         // Resolve brands
         const brandIds = await resolveBrandIds(brandInputs);
-        if (brandInputs && brandIds.length === 0) return res.status(400).json({ message: `No valid brands found` });
+        if (brandInputs && brandIds.length === 0)
+            return res.status(400).json({ message: "No valid brands found" });
 
         const slug = await generateUniqueSlug(name);
 
-        // Handle file uploads
-        const bannerImages = (req.files?.bannerImage || []).slice(0, 5).map(f => f.path);
-        const thumbnailImages = (req.files?.thumbnailImage || []).slice(0, 5).map(f => f.path);
-        const images = (req.files?.image || []).slice(0, 5).map(f => f.path); // new field
+        // -----------------------------
+        // ✔ CLOUDINARY IMAGE UPLOADS
+        // -----------------------------
+        const bannerImages = await uploadMultipleToCloudinary(
+            req.files?.bannerImage,
+            "categories/banner"
+        );
 
+        const thumbnailImages = await uploadMultipleToCloudinary(
+            req.files?.thumbnailImage,
+            "categories/thumbnail"
+        );
+
+        // -----------------------------
+        // ✔ Save Category
+        // -----------------------------
         const category = new Category({
             name,
             slug,
             description,
-            bannerImage: bannerImages,
-            thumbnailImage: thumbnailImages,
-            image: images, // new field
+            bannerImage: bannerImages,       // Array of Cloudinary URLs
+            thumbnailImage: thumbnailImages, // Array of Cloudinary URLs
             parent: parent ? parent._id : null,
             ancestors,
-            brands: brandIds
+            brands: brandIds,
         });
 
         await category.save();
@@ -123,13 +142,17 @@ export const addCategory = async (req, res) => {
             .populate("brands", "name slug")
             .populate("parent", "name slug");
 
-        res.status(201).json({ message: 'Category created', category: fullCategory });
+        res.status(201).json({
+            message: "Category created",
+            category: fullCategory,
+        });
 
     } catch (err) {
-        console.error(err);
+        console.error("❌ Add Category Error:", err);
         res.status(500).json({ message: err.message });
     }
 };
+
 
 export const getCategories = async (req, res) => {
     try {
@@ -167,6 +190,84 @@ export const getCategoryById = async (req, res) => {
 };
 
 // Update category
+// export const updateCategory = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const { name, description, parentId } = req.body;
+
+//         const category = await Category.findById(id);
+//         if (!category) return res.status(404).json({ message: 'Category not found' });
+
+//         // Check duplicate name
+//         if (name && name.toLowerCase() !== category.name.toLowerCase()) {
+//             const duplicate = await Category.findOne({
+//                 name: { $regex: `^${name}$`, $options: 'i' },
+//                 _id: { $ne: id }
+//             });
+//             if (duplicate) return res.status(400).json({ message: 'Category name already exists' });
+//         }
+
+//         // Handle parent change (same as before)
+//         if (parentId && parentId !== String(category.parent)) {
+//             const resolvedId = await resolveParentId(parentId);
+//             if (!resolvedId) return res.status(400).json({ message: 'New parent not found' });
+
+//             const descendants = await Category.find({ ancestors: category._id }, '_id').lean();
+//             if (descendants.some(d => String(d._id) === String(resolvedId))) {
+//                 return res.status(400).json({ message: 'Invalid parent: would create cycle' });
+//             }
+
+//             const newParent = await Category.findById(resolvedId);
+//             category.parent = newParent._id;
+//             category.ancestors = [...(newParent.ancestors || []), newParent._id];
+
+//             const updateDescendants = async (catId, parentAncestors) => {
+//                 const children = await Category.find({ parent: catId });
+//                 for (const child of children) {
+//                     child.ancestors = [...parentAncestors, catId];
+//                     await child.save();
+//                     await updateDescendants(child._id, child.ancestors);
+//                 }
+//             };
+//             await updateDescendants(category._id, category.ancestors);
+//         }
+
+//         // Update brands
+//         let brandInputs = req.body.brands || req.body.brand || req.body['brands[]'];
+//         if (brandInputs && !Array.isArray(brandInputs)) brandInputs = [brandInputs];
+//         if (brandInputs) {
+//             const brandIds = await resolveBrandIds(brandInputs);
+//             if (brandIds.length === 0) return res.status(400).json({ message: `No valid brands found` });
+//             category.brands = brandIds;
+//         }
+
+//         // Update name + slug
+//         if (name && name !== category.name) {
+//             category.name = name;
+//             category.slug = await generateUniqueSlug(name);
+//         }
+
+//         // Update description
+//         if (description !== undefined) category.description = description;
+
+//         // Update images
+//         if (req.files?.bannerImage) category.bannerImage = req.files.bannerImage.slice(0, 5).map(f => f.path);
+//         if (req.files?.thumbnailImage) category.thumbnailImage = req.files.thumbnailImage.slice(0, 5).map(f => f.path);
+//         if (req.files?.image) category.image = req.files.image.slice(0, 5).map(f => f.path); // new field
+
+//         await category.save();
+
+//         const fullCategory = await Category.findById(category._id)
+//             .populate("brands", "name slug")
+//             .populate("parent", "name slug");
+
+//         res.json({ message: 'Category updated', category: fullCategory });
+
+//     } catch (err) {
+//         console.error(err);
+//         res.status(500).json({ message: err.message });
+//     }
+// };
 export const updateCategory = async (req, res) => {
     try {
         const { id } = req.params;
@@ -175,7 +276,7 @@ export const updateCategory = async (req, res) => {
         const category = await Category.findById(id);
         if (!category) return res.status(404).json({ message: 'Category not found' });
 
-        // Check duplicate name
+        // ------- Duplicate Name -------
         if (name && name.toLowerCase() !== category.name.toLowerCase()) {
             const duplicate = await Category.findOne({
                 name: { $regex: `^${name}$`, $options: 'i' },
@@ -184,7 +285,7 @@ export const updateCategory = async (req, res) => {
             if (duplicate) return res.status(400).json({ message: 'Category name already exists' });
         }
 
-        // Handle parent change (same as before)
+        // ------- Handle Parent Update -------
         if (parentId && parentId !== String(category.parent)) {
             const resolvedId = await resolveParentId(parentId);
             if (!resolvedId) return res.status(400).json({ message: 'New parent not found' });
@@ -198,6 +299,7 @@ export const updateCategory = async (req, res) => {
             category.parent = newParent._id;
             category.ancestors = [...(newParent.ancestors || []), newParent._id];
 
+            // Recursively update children
             const updateDescendants = async (catId, parentAncestors) => {
                 const children = await Category.find({ parent: catId });
                 for (const child of children) {
@@ -206,31 +308,52 @@ export const updateCategory = async (req, res) => {
                     await updateDescendants(child._id, child.ancestors);
                 }
             };
+
             await updateDescendants(category._id, category.ancestors);
         }
 
-        // Update brands
+        // ------- Brands Update -------
         let brandInputs = req.body.brands || req.body.brand || req.body['brands[]'];
         if (brandInputs && !Array.isArray(brandInputs)) brandInputs = [brandInputs];
+
         if (brandInputs) {
             const brandIds = await resolveBrandIds(brandInputs);
-            if (brandIds.length === 0) return res.status(400).json({ message: `No valid brands found` });
+            if (brandIds.length === 0)
+                return res.status(400).json({ message: `No valid brands found` });
+
             category.brands = brandIds;
         }
 
-        // Update name + slug
+        // ------- Name + Slug -------
         if (name && name !== category.name) {
             category.name = name;
             category.slug = await generateUniqueSlug(name);
         }
 
-        // Update description
+        // ------- Description -------
         if (description !== undefined) category.description = description;
 
-        // Update images
-        if (req.files?.bannerImage) category.bannerImage = req.files.bannerImage.slice(0, 5).map(f => f.path);
-        if (req.files?.thumbnailImage) category.thumbnailImage = req.files.thumbnailImage.slice(0, 5).map(f => f.path);
-        if (req.files?.image) category.image = req.files.image.slice(0, 5).map(f => f.path); // new field
+        // ------- Image Update (Cloudinary buffer upload) -------
+        if (req.files?.bannerImage) {
+            category.bannerImage = await uploadMultipleToCloudinary(
+                req.files.bannerImage,
+                "categories/banner"
+            );
+        }
+
+        if (req.files?.thumbnailImage) {
+            category.thumbnailImage = await uploadMultipleToCloudinary(
+                req.files.thumbnailImage,
+                "categories/thumbnail"
+            );
+        }
+
+        if (req.files?.image) {
+            category.image = await uploadMultipleToCloudinary(
+                req.files.image,
+                "categories/image"
+            );
+        }
 
         await category.save();
 

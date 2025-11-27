@@ -1,12 +1,15 @@
 import Blog from '../models/Blog.js';
 import moment from 'moment';
-
+import { uploadToCloudinary } from '../middlewares/upload.js';
 // Create Blog
 export const createBlog = async (req, res) => {
     try {
         const { title, description, category } = req.body;
-        const image = req.file?.path || ''; // assuming you're using multer
-
+        let image = "";
+        if (req.file) {
+            const result = await uploadToCloudinary(req.file.buffer, "blogs");
+            image = result.secure_url; // only the URL string
+        }
         const blog = await Blog.create({ title, description, category, image });
         res.status(201).json({ message: 'Blog created successfully', blog });
     } catch (error) {
