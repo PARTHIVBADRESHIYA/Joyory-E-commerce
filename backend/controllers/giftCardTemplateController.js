@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import GiftCardTemplate from "../models/GiftCardTemplate.js";
-
+import { uploadToCloudinary } from "../middlewares/upload.js";
 // ✅ Create template
 export const createGiftCardTemplate = async (req, res) => {
     try {
