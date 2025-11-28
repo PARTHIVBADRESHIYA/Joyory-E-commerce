@@ -4,7 +4,7 @@ import {
     getAllReviews,
     updateReviewStatus,
     deleteReview,
-    getReviewSummary,
+    getGlobalReviewSummary,
     voteReviewHelpful,
     getProductReviews,
     reactToReview,
@@ -33,7 +33,7 @@ router.get('/product/:productId', getProductReviews);
 
 // 🛠 Admin Panel APIs
 router.get('/', getAllReviews);
-router.get('/summary/:id', getReviewSummary);
+router.get('/summary', getGlobalReviewSummary);
 router.patch('/:id', isAdmin,updateReviewStatus);
 router.delete('/:id',isAdmin, deleteReview);
 

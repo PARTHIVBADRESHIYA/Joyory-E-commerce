@@ -157,25 +157,184 @@ const getProductReviews = async (req, res) => {
 /**
  * Admin: get all reviews
  */
+// const getAllReviews = async (req, res) => {
+//     try {
+//         const reviews = await Review.find({ status: "Active" })
+//             .populate("customer", "name profileImage")
+//             .populate("productId", "name image");
+
+//         const data = reviews.map(r => ({
+//             id: r._id,
+//             productName: r.productId?.name,
+//             productImage: r.productId?.image,
+//             customerName: r.customer?.name,
+//             customerProfileImage: r.customer?.profileImage,
+//             rating: r.rating,
+//             comment: r.comment,
+//             verifiedPurchase: r.verifiedPurchase,
+//             createdAt: r.createdAt,
+//         }));
+
+//         res.status(200).json(data);
+//     } catch (err) {
+//         res.status(500).json({ message: "Failed to fetch reviews", error: err.message });
+//     }
+// };
 const getAllReviews = async (req, res) => {
     try {
-        const reviews = await Review.find({ status: "Active" })
-            .populate("customer", "name profileImage")
-            .populate("productId", "name image");
+        const {
+            rating,
+            minRating,
+            maxRating,
+            productId,
+            customerId,
+            verified,
+            search,
+            customerName,
+            productName,
+            fromDate,
+            toDate,
+            sort = "recent",
+            page = 1,
+            limit = 20
+        } = req.query;
 
-        const data = reviews.map(r => ({
-            id: r._id,
-            productName: r.productId?.name,
-            productImage: r.productId?.image,
-            customerName: r.customer?.name,
-            customerProfileImage: r.customer?.profileImage,
-            rating: r.rating,
-            comment: r.comment,
-            verifiedPurchase: r.verifiedPurchase,
-            createdAt: r.createdAt,
-        }));
+        const match = { status: "Active" };
 
-        res.status(200).json(data);
+        // ---- Standard Filters ----
+        if (rating) match.rating = Number(rating);
+
+        if (minRating || maxRating) {
+            match.rating = {};
+            if (minRating) match.rating.$gte = Number(minRating);
+            if (maxRating) match.rating.$lte = Number(maxRating);
+        }
+
+        if (productId) match.productId = productId;
+        if (customerId) match.customer = customerId;
+
+        if (verified === "true") match.verifiedPurchase = true;
+        if (verified === "false") match.verifiedPurchase = false;
+
+        if (fromDate || toDate) {
+            match.createdAt = {};
+            if (fromDate) match.createdAt.$gte = new Date(fromDate);
+            if (toDate) match.createdAt.$lte = new Date(toDate);
+        }
+
+        const skip = (Number(page) - 1) * Number(limit);
+
+        const sortOption = {
+            recent: { createdAt: -1 },
+            oldest: { createdAt: 1 },
+            rating_desc: { rating: -1 },
+            rating_asc: { rating: 1 },
+            helpful: { helpfulVotes: -1 }
+        }[sort] || { createdAt: -1 };
+
+
+        // --------------------------
+        // 🔥 AGGREGATION START
+        // --------------------------
+        const pipeline = [
+            { $match: match },
+
+            // Join customer
+            {
+                $lookup: {
+                    from: "users",
+                    localField: "customer",
+                    foreignField: "_id",
+                    as: "customer"
+                }
+            },
+            { $unwind: { path: "$customer", preserveNullAndEmptyArrays: true } },
+
+            // Join product
+            {
+                $lookup: {
+                    from: "products",
+                    localField: "productId",
+                    foreignField: "_id",
+                    as: "product"
+                }
+            },
+            { $unwind: { path: "$product", preserveNullAndEmptyArrays: true } },
+
+            // Ensure product object exists
+            {
+                $addFields: {
+                    productNameSafe: { $ifNull: ["$product.name", "Unknown Product"] },
+                    productImageSafe: { $ifNull: ["$product.image", null] },
+                    customerNameSafe: { $ifNull: ["$customer.name", "Unknown Customer"] },
+                    customerImageSafe: { $ifNull: ["$customer.profileImage", null] }
+                }
+            }
+        ];
+
+        // ---- Search ----
+        if (search) {
+            const reg = new RegExp(search, "i");
+            pipeline.push({
+                $match: {
+                    $or: [
+                        { comment: reg },
+                        { "customer.name": reg },
+                        { "product.name": reg }
+                    ]
+                }
+            });
+        }
+
+        // ---- Filter by customer name ----
+        if (customerName) {
+            pipeline.push({
+                $match: { "customer.name": new RegExp(customerName, "i") }
+            });
+        }
+
+        // ---- Filter by product name ----
+        if (productName) {
+            pipeline.push({
+                $match: { "product.name": new RegExp(productName, "i") }
+            });
+        }
+
+        // ---- Count ----
+        const countPipeline = [...pipeline, { $count: "total" }];
+        const totalResult = await Review.aggregate(countPipeline);
+        const total = totalResult[0]?.total || 0;
+
+        // ---- Sort + Pagination ----
+        pipeline.push({ $sort: sortOption });
+        pipeline.push({ $skip: skip });
+        pipeline.push({ $limit: Number(limit) });
+
+        // ---- FINAL CLEAN FIELDS ONLY ----
+        pipeline.push({
+            $project: {
+                _id: 1,
+                rating: 1,
+                comment: 1,
+                createdAt: 1,
+
+                productName: "$product.name",
+                productImage: "$product.image",
+
+                customerName: "$customer.name",
+                customerProfileImage: "$customer.profileImage",
+            }
+        });
+
+        const reviews = await Review.aggregate(pipeline);
+
+        res.status(200).json({
+            total,
+            page: Number(page),
+            limit: Number(limit),
+            reviews
+        });
+
     } catch (err) {
         res.status(500).json({ message: "Failed to fetch reviews", error: err.message });
     }
@@ -214,32 +373,82 @@ const deleteReview = async (req, res) => {
 /**
  * Product Review Summary (for product page header)
  */
-const getReviewSummary = async (req, res) => {
+const getGlobalReviewSummary = async (req, res) => {
     try {
-        const { id } = req.params;
+        // Fetch ALL active reviews across ALL products
+        const reviews = await Review.find({ status: "Active" });
 
-        const reviews = await Review.find({ productId: id, status: "Active" });
         if (!reviews.length) {
-            return res.json({ message: "No reviews found for this product." });
+            return res.status(200).json({
+                totalReviews: 0,
+                averageRating: 0,
+                positiveReviews: 0,
+                negativeReviews: 0,
+                breakdown: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+                reviewsWithPhotos: 0,
+                verifiedPurchases: 0,
+                last30DaysCount: 0
+            });
         }
 
         const totalReviews = reviews.length;
-        const averageRating = (
-            reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews
-        ).toFixed(1);
 
+        // ⭐ Breakdown object (1–5)
         const breakdown = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-        reviews.forEach(r => {
-            breakdown[r.rating] = (breakdown[r.rating] || 0) + 1;
-        });
 
-        res.status(200).json({
+        let totalRating = 0;
+        let positiveReviews = 0;
+        let negativeReviews = 0;
+        let reviewsWithPhotos = 0;
+        let verifiedPurchases = 0;
+        let last30DaysCount = 0;
+
+        const last30Days = new Date();
+        last30Days.setDate(last30Days.getDate() - 30);
+
+        for (const r of reviews) {
+            const rating = r.rating;
+
+            // total rating for avg
+            totalRating += rating;
+
+            // breakdown count
+            breakdown[rating]++;
+
+            // positive: 3,4,5
+            if (rating >= 3) positiveReviews++;
+
+            // negative: 1,2
+            if (rating <= 2) negativeReviews++;
+
+            // photo reviews
+            if (r.images && r.images.length > 0) reviewsWithPhotos++;
+
+            // verified purchase
+            if (r.verifiedPurchase) verifiedPurchases++;
+
+            // last 30 days activity
+            if (r.createdAt >= last30Days) last30DaysCount++;
+        }
+
+        const averageRating = parseFloat((totalRating / totalReviews).toFixed(1));
+
+        return res.status(200).json({
             totalReviews,
             averageRating,
             breakdown,
+            positiveReviews,
+            negativeReviews,
+            reviewsWithPhotos,
+            verifiedPurchases,
+            last30DaysCount
         });
+
     } catch (err) {
-        res.status(500).json({ message: "Failed to load summary", error: err.message });
+        res.status(500).json({
+            message: "Failed to load global review summary",
+            error: err.message
+        });
     }
 };
 
@@ -314,7 +523,7 @@ export {
     getAllReviews,
     updateReviewStatus,
     deleteReview,
-    getReviewSummary,
+    getGlobalReviewSummary,
     getTopReviews,
     reactToReview,
     reportReview,

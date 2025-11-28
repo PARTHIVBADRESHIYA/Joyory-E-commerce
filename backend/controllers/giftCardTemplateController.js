@@ -63,7 +63,7 @@ export const updateGiftCardTemplate = async (req, res) => {
     }
 };
 
-// ✅ Delete template
+// ✅ Delete template   
 export const deleteGiftCardTemplate = async (req, res) => {
     try {
         const { id } = req.params;
