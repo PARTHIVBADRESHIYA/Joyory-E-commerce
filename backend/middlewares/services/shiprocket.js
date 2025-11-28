@@ -680,7 +680,7 @@ export async function createShiprocketOrder(order) {
 
         // Compose Shiprocket payload
         const shipmentData = {
-            order_id: `${order._id.toString()}-${warehouseCode}`,
+            order_id: `${order.orderId}-${warehouseCode}`,
             order_date: new Date(order.createdAt || Date.now()).toISOString().slice(0, 19).replace("T", " "),
             pickup_location,
             pickup_address_id,

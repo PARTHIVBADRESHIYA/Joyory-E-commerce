@@ -185,6 +185,8 @@ import cron from "node-cron";
 import axios from "axios";
 import Order from "../../../models/Order.js";
 import { getShiprocketToken, extractAWBFromShiprocket } from "../../services/shiprocket.js";
+import { computeOrderStatus } from "../../../controllers/orderController.js";
+
 
 function mapTimelineToNykaa(events = []) {
     if (!Array.isArray(events) || events.length === 0) return [];
@@ -501,6 +503,18 @@ async function trackShipments() {
                                 updatePayload
                             );
 
+                            // ⭐ After AWB assignment → recalc order status
+                            const refreshed = await Order.findById(order._id).select("shipments");
+
+                            const finalStatus = computeOrderStatus(refreshed.shipments);
+
+                            await Order.updateOne(
+                                { _id: order._id },
+                                { $set: { orderStatus: finalStatus } }
+                            );
+
+                            console.log(`🏁 Updated Order Status → ${finalStatus}`);
+
                             console.log(
                                 `✅ AWB update result for order ${order._id}, shipment ${shipment.shipment_id}:`,
                                 {
@@ -580,6 +594,12 @@ async function trackShipmentTimeline() {
                         shipment.status = trackingData.shipment_status;
                     }
 
+                    // ⭐ Recompute orderStatus after shipment status change
+                    const finalStatus = computeOrderStatus(order.shipments);
+                    order.orderStatus = finalStatus;
+
+                    console.log(`📦 Order ${order._id} recalculated → ${finalStatus}`);
+
                     // THIS WAS MISSING — REQUIRED FOR SUBDOCUMENT OVERWRITE
                     order.markModified("shipments");
 
@@ -601,7 +621,6 @@ async function trackShipmentTimeline() {
         console.log("❌ Timeline cron failed:", err.message);
     }
 }
-
 
 export function startTrackingJob() {
     // CRON 1 → AWB + Shipment status

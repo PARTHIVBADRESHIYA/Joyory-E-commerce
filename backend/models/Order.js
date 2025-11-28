@@ -379,7 +379,11 @@ const orderSchema = new mongoose.Schema({
             "Out for Delivery",
             "Delivered",
             "Cancelled",
-            "Returned"
+            "Returned",
+            // NEW FOR YOUR FLOW
+            "Partially Delivered",
+            "Partially Cancelled",
+            "Partially Delivered / Cancelled"
         ],
         default: "Pending"
     },

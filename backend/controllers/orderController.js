@@ -10,7 +10,7 @@ import { splitOrderForPersistence } from "../middlewares/services/orderSplit.js"
 import { createShiprocketOrder, cancelShiprocketShipment } from "../middlewares/services/shiprocket.js";
 import { sendEmail } from "../middlewares/utils/emailService.js"; // ✅ assume you already have an email service
 import { allocateWarehousesForOrder } from "../middlewares/utils/warehouseAllocator.js";
-import {buildCourierTimeline} from "../controllers/user/userOrderController.js";
+import { buildCourierTimeline } from "../controllers/user/userOrderController.js";
 const shiprocketStatusMap = {
     0: "Not Picked",
     1: "Pickup Scheduled",
@@ -25,6 +25,47 @@ const shiprocketStatusMap = {
     10: "RTO Delivered"
 };
 
+
+export function computeOrderStatus(shipments = []) {
+    if (!shipments || shipments.length === 0) return "Pending";
+
+    const normalize = (s = "") => s.trim().toLowerCase();
+
+    // Map numeric status / deliveredAt to proper string
+    const statuses = shipments.map(s => {
+        if (s.deliveredAt) return "Delivered";
+        if (s.status === "cancelled") return "Cancelled"; // your cancelled code
+        if (["shipped", "out for delivery", "in transit"].includes(s.status.toLowerCase()))
+            return "Shipped";
+
+        // fallback to last trackingHistory status
+        const lastTracking = s.trackingHistory?.[s.trackingHistory.length - 1]?.status;
+        if (lastTracking) return lastTracking;
+        return "Processing";
+    });
+
+    const total = statuses.length;
+    const count = (s) => statuses.filter(x => normalize(x) === normalize(s)).length;
+    const has = (s) => count(s) > 0;
+    const all = (s) => count(s) === total;
+
+    if (all("delivered")) return "Delivered";
+    if (all("cancelled")) return "Cancelled";
+    if (statuses.every(s => ["shipped", "out for delivery", "in transit"].includes(normalize(s))))
+        return "Shipped";
+
+    if (has("delivered") && has("cancelled") && !has("shipped") && !has("processing"))
+        return "Partially Delivered / Cancelled";
+    if (has("delivered") && !has("cancelled"))
+        return "Partially Delivered";
+    if (has("cancelled") && !has("delivered"))
+        return "Partially Cancelled";
+
+    if (has("shipped") || has("out for delivery") || has("in transit"))
+        return "Processing";
+
+    return "Processing";
+}
 
 export const adminListOrders = async (req, res) => {
     try {
@@ -200,8 +241,6 @@ export const adminConfirmOrder = async (req, res) => {
                 console.error("Shiprocket API failed for order:", finalOrder._id, shiprocketRes.failed);
                 throw new Error("Shiprocket shipment creation failed. Order not confirmed.");
             }
-
-            // ✔ SUCCESS case
             if (Array.isArray(shiprocketRes?.shipments) && shiprocketRes.shipments.length > 0) {
                 await Order.updateOne(
                     { _id: finalOrder._id },
@@ -212,13 +251,22 @@ export const adminConfirmOrder = async (req, res) => {
                                 timestamp: new Date(),
                                 location: "Shiprocket"
                             }
-                        },
-                        $set: { orderStatus: "Processing" }
+                        }
                     },
                     { timestamps: false }
                 );
 
+                // ⭐ Recalculate order status based on new shipments
+                const updated = await Order.findById(finalOrder._id).populate("shipments");
+                const finalStatus = computeOrderStatus(updated.shipments || []);
+
+                await Order.updateOne(
+                    { _id: finalOrder._id },
+                    { $set: { orderStatus: finalStatus } },
+                    { timestamps: false }
+                );
             }
+
 
             // ❌ PARTIAL FAILURE
             else if (shiprocketRes?.failed?.length) {
@@ -414,14 +462,16 @@ export const adminCancelOrder = async (req, res) => {
             // Payment status
             txOrder.paymentStatus = txOrder.paid ? "refund_requested" : "cancelled";
 
-            // Mark cancelled
-            txOrder.orderStatus = "Cancelled";
             txOrder.cancellation = {
                 cancelledBy: adminId,
                 reason: reason || "Cancelled by admin",
                 requestedAt: new Date(),
                 allowed: true
             };
+
+            // ⭐ Recompute orderStatus using all shipments mixed statuses
+            const finalStatus = computeOrderStatus(txOrder.shipments || []);
+            txOrder.orderStatus = finalStatus;
 
             // Tracking
             txOrder.trackingHistory.push({
@@ -463,23 +513,84 @@ export const adminCancelOrder = async (req, res) => {
 };
 
 
+// export const getAllOrders = async (req, res) => {
+//     try {
+//         const { status, orderType, fromDate, toDate, paid, refundStatus } = req.query;
+//         const query = { isDraft: false };
+
+//         if (status && status !== "all") {
+//             query.status = status;
+//         }
+
+//         if (orderType && orderType !== "all") {
+//             query.orderType = orderType;
+//         }
+
+//         // NEW REFUND FILTER
+//         if (refundStatus && refundStatus !== "all") {
+//             query["refund.status"] = refundStatus;
+//         }
+
+//         if (paid === "true") {
+//             query.$or = [
+//                 { paid: true },
+//                 { paymentStatus: /paid/i },
+//                 { paymentStatus: "success" }
+//             ];
+//         } else if (paid === "false") {
+//             query.$or = [
+//                 { paid: false },
+//                 { paymentStatus: /pending|failed|cancelled/i }
+//             ];
+//         }
+
+//         if (fromDate && toDate) {
+//             query.date = {
+//                 $gte: new Date(fromDate),
+//                 $lte: new Date(toDate)
+//             };
+//         } else if (fromDate) {
+//             query.date = { $gte: new Date(fromDate) };
+//         } else if (toDate) {
+//             query.date = { $lte: new Date(toDate) };
+//         }
+
+//         const orders = await Order.find(query)
+//             .populate('products.productId', 'name')
+//             .sort({ createdAt: -1 });
+
+//         const formatted = orders.map(order => ({
+//             _id: order._id,
+//             orderId: order.orderId,
+//             date: order.date?.toDateString() || "N/A",
+//             customerName: order.customerName || "Unknown",
+//             status: order.orderStatus,
+//             orderType: order.orderType,
+//             paid: order.paid,
+//             paymentStatus: order.paymentStatus,
+//             amount: `₹${order.amount}`,
+//             products: order.products.map(p => ({
+//                 name: p.productId?.name || 'Unknown',
+//                 quantity: p.quantity,
+//                 price: `₹${p.price}`
+//             }))
+//         }));
+
+//         res.status(200).json(formatted);
+//     } catch (error) {
+//         console.error(error);
+//         res.status(500).json({ message: 'Failed to fetch orders', error });
+//     }
+// };
+
 export const getAllOrders = async (req, res) => {
     try {
         const { status, orderType, fromDate, toDate, paid, refundStatus } = req.query;
         const query = { isDraft: false };
 
-        if (status && status !== "all") {
-            query.status = status;
-        }
-
-        if (orderType && orderType !== "all") {
-            query.orderType = orderType;
-        }
-
-        // NEW REFUND FILTER
-        if (refundStatus && refundStatus !== "all") {
-            query["refund.status"] = refundStatus;
-        }
+        if (status && status !== "all") query.orderStatus = status;
+        if (orderType && orderType !== "all") query.orderType = orderType;
+        if (refundStatus && refundStatus !== "all") query["refund.status"] = refundStatus;
 
         if (paid === "true") {
             query.$or = [
@@ -495,36 +606,37 @@ export const getAllOrders = async (req, res) => {
         }
 
         if (fromDate && toDate) {
-            query.date = {
-                $gte: new Date(fromDate),
-                $lte: new Date(toDate)
-            };
-        } else if (fromDate) {
-            query.date = { $gte: new Date(fromDate) };
-        } else if (toDate) {
-            query.date = { $lte: new Date(toDate) };
-        }
+            query.date = { $gte: new Date(fromDate), $lte: new Date(toDate) };
+        } else if (fromDate) query.date = { $gte: new Date(fromDate) };
+        else if (toDate) query.date = { $lte: new Date(toDate) };
 
         const orders = await Order.find(query)
             .populate('products.productId', 'name')
             .sort({ createdAt: -1 });
 
-        const formatted = orders.map(order => ({
-            _id: order._id,
-            orderId: order.orderId,
-            date: order.date?.toDateString() || "N/A",
-            customerName: order.customerName || "Unknown",
-            status: order.orderStatus,
-            orderType: order.orderType,
-            paid: order.paid,
-            paymentStatus: order.paymentStatus,
-            amount: `₹${order.amount}`,
-            products: order.products.map(p => ({
-                name: p.productId?.name || 'Unknown',
-                quantity: p.quantity,
-                price: `₹${p.price}`
-            }))
-        }));
+        const formatted = orders.map(order => {
+            // compute live status
+            const liveStatus = order.shipments?.length > 0
+                ? computeOrderStatus(order.shipments)
+                : order.orderStatus;
+
+            return {
+                _id: order._id,
+                orderId: order.orderId,
+                date: order.date?.toDateString() || "N/A",
+                customerName: order.customerName || "Unknown",
+                status: liveStatus, // <-- use computed status
+                orderType: order.orderType,
+                paid: order.paid,
+                paymentStatus: order.paymentStatus,
+                amount: `₹${order.amount}`,
+                products: order.products.map(p => ({
+                    name: p.productId?.name || 'Unknown',
+                    quantity: p.quantity,
+                    price: `₹${p.price}`
+                }))
+            };
+        });
 
         res.status(200).json(formatted);
     } catch (error) {
@@ -534,95 +646,95 @@ export const getAllOrders = async (req, res) => {
 };
 
 export const getAdminOrderTracking = async (req, res) => {
-  try {
-    const { id } = req.params;
+    try {
+        const { id } = req.params;
 
-    const order = await Order.findById(id)
-      .populate("shipments.products.productId")
-      .lean();
+        const order = await Order.findById(id)
+            .populate("shipments.products.productId")
+            .lean();
 
-    if (!order) {
-      return res.status(404).json({ success: false, message: "Order not found" });
-    }
+        if (!order) {
+            return res.status(404).json({ success: false, message: "Order not found" });
+        }
 
-    const shipments = order.shipments || [];
+        const shipments = order.shipments || [];
 
-    // ----------------------------
-    // 1. Build shipment-wise timeline WITH PRODUCT DETAILS
-    // ----------------------------
-    const shipmentBlocks = shipments.map((s, i) => {
+        // ----------------------------
+        // 1. Build shipment-wise timeline WITH PRODUCT DETAILS
+        // ----------------------------
+        const shipmentBlocks = shipments.map((s, i) => {
 
-      const products = (s.products || []).map(item => {
-        const p = item.productId || {};
-        const variant = item.variant || {};
+            const products = (s.products || []).map(item => {
+                const p = item.productId || {};
+                const variant = item.variant || {};
 
-        return {
-          productId: p._id,
-          name: p.name || item.name,
-          image: variant.image || p.images?.[0] || null,
-          qty: item.quantity,
-          price: item.price,
+                return {
+                    productId: p._id,
+                    name: p.name || item.name,
+                    image: variant.image || p.images?.[0] || null,
+                    qty: item.quantity,
+                    price: item.price,
 
-          variant: {
-            sku: variant.sku || null,
-            shadeName: variant.shadeName || null,
-            hex: variant.hex || null
-          },
+                    variant: {
+                        sku: variant.sku || null,
+                        shadeName: variant.shadeName || null,
+                        hex: variant.hex || null
+                    },
 
-          mrp: variant.originalPrice || 0,
-          sellingPrice: variant.displayPrice || 0,
-          total: (variant.displayPrice || 0) * (item.quantity || 1)
-        };
-      });
+                    mrp: variant.originalPrice || 0,
+                    sellingPrice: variant.displayPrice || 0,
+                    total: (variant.displayPrice || 0) * (item.quantity || 1)
+                };
+            });
 
-      return {
-        shipmentId: s.shipment_id,
-        label: `Shipment ${i + 1}`,
-        courier: s.courier_name || null,
-        awb: s.awb_code || null,
-        expectedDelivery: s.expected_delivery || null,
-        status: s.status,
+            return {
+                shipmentId: s.shipment_id,
+                label: `Shipment ${i + 1}`,
+                courier: s.courier_name || null,
+                awb: s.awb_code || null,
+                expectedDelivery: s.expected_delivery || null,
+                status: s.status,
 
-        products,  // ⬅⬅⬅ ADDED PRODUCT DETAILS INSIDE SHIPMENT
+                products,  // ⬅⬅⬅ ADDED PRODUCT DETAILS INSIDE SHIPMENT
 
-        timeline: buildCourierTimeline(s.trackingHistory || [])
-      };
-    });
-
-    // ----------------------------
-    // 2. Build merged timeline
-    // ----------------------------
-    let mergedTimeline = [];
-
-    shipments.forEach((s, i) => {
-      (s.trackingHistory || []).forEach(event => {
-        mergedTimeline.push({
-          shipmentId: s.shipment_id,
-          shipmentLabel: `Shipment ${i + 1}`,
-          courier: s.courier_name || null,
-          status: event.status,
-          location: event.location,
-          timestamp: new Date(event.timestamp || event.createdAt || order.createdAt)
+                timeline: buildCourierTimeline(s.trackingHistory || [])
+            };
         });
-      });
-    });
 
-    mergedTimeline.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        // ----------------------------
+        // 2. Build merged timeline
+        // ----------------------------
+        let mergedTimeline = [];
 
-    return res.json({
-      success: true,
-      orderId: order.orderId,
-      orderNumber: order.orderNumber,
-      createdAt: order.createdAt,
+        shipments.forEach((s, i) => {
+            (s.trackingHistory || []).forEach(event => {
+                mergedTimeline.push({
+                    shipmentId: s.shipment_id,
+                    shipmentLabel: `Shipment ${i + 1}`,
+                    courier: s.courier_name || null,
+                    status: event.status,
+                    location: event.location,
+                    timestamp: new Date(event.timestamp || event.createdAt || order.createdAt)
+                });
+            });
+        });
 
-      shipments: shipmentBlocks, // ⬅ now includes full product details
-      mergedTimeline              // full combined status timeline
-    });
+        mergedTimeline.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
-  } catch (err) {
-    console.error("getAdminOrderTracking failed:", err);
-    return res.status(500).json({ success: false, message: "Failed to fetch order tracking" });
-  }
+        return res.json({
+            success: true,
+            orderId: order.orderId,
+            orderNumber: order.orderNumber,
+            createdAt: order.createdAt,
+
+            shipments: shipmentBlocks, // ⬅ now includes full product details
+            mergedTimeline              // full combined status timeline
+        });
+
+    } catch (err) {
+        console.error("getAdminOrderTracking failed:", err);
+        return res.status(500).json({ success: false, message: "Failed to fetch order tracking" });
+    }
 };
 
 export const getOrderSummary = async (req, res) => {
