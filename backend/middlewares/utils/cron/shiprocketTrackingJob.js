@@ -541,110 +541,50 @@ async function trackShipmentTimeline() {
                     status: { $nin: ["Delivered", "Cancelled", "RTO Delivered"] }
                 }
             }
-        }).select("_id shipments");
+        });
 
         console.log(`📍 Timeline Tracker → Checking ${orders.length} orders`);
 
         for (const order of orders) {
             for (const shipment of order.shipments) {
                 if (!shipment.awb_code) continue;
-                if (["Delivered", "Cancelled", "RTO Delivered"].includes(shipment.status)) continue;
 
                 const awb = shipment.awb_code;
                 console.log(`⏳ Fetching timeline for AWB → ${awb}`);
 
                 try {
-                    // EXACT same API as working script
-                    const courierRes = await axios.get(
+                    const res = await axios.get(
                         `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${awb}`,
                         { headers: { Authorization: `Bearer ${token}` } }
                     );
 
-                    const trackingData = courierRes.data?.tracking_data;
+                    const trackingData = res.data?.tracking_data;
                     if (!trackingData) {
                         console.log(`⚠️ No tracking_data for AWB ${awb}`);
                         continue;
                     }
 
-                    // EXACT same source priority (script logic)
-                    const rawEvents =
-                        trackingData.shipment_track_activities ||
-                        trackingData.shipment_track ||
-                        [];
+                    // EXACT SAME LOGIC AS YOUR SCRIPT
+                    const rawEvents = trackingData.shipment_track_activities || [];
 
-                    // FORMAT EXACTLY like your script
-                    const formattedEvents = rawEvents
-                        .map(ev => {
-                            if (!ev || !ev.date) return null;
+                    const events = rawEvents.map(ev => ({
+                        status: ev.activity,
+                        timestamp: new Date(ev.date),
+                        location: ev.location || "N/A",
+                        description: ev.activity
+                    }));
 
-                            const ts = new Date(ev.date);
-                            if (isNaN(ts)) return null;
+                    shipment.trackingHistory = events;
 
-                            return {
-                                status: ev.activity || ev.status || "Unknown",
-                                timestamp: ts,
-                                location: ev.location || "N/A",
-                                description: ev.activity || ev.status || "N/A",
-                            };
-                        })
-                        .filter(Boolean);
-
-                    if (!formattedEvents.length) {
-                        console.log(`⚠️ No timeline events for AWB ${awb}`);
-                        continue;
+                    if (trackingData.shipment_status) {
+                        shipment.status = trackingData.shipment_status;
                     }
 
-                    // EXACT sort (latest → top)
-                    formattedEvents.sort((a, b) => b.timestamp - a.timestamp);
+                    // THIS WAS MISSING — REQUIRED FOR SUBDOCUMENT OVERWRITE
+                    order.markModified("shipments");
 
-                    // status mapping
-                    const lastEvent = formattedEvents[0];
-                    const mappedStatus = mapStatus(lastEvent.status || "Update");
+                    console.log(`✅ Timeline updated for ${awb}`);
 
-                    // Nykaa style milestones
-                    const milestones = mapTimelineToNykaa(
-                        [...formattedEvents].sort((a, b) => a.timestamp - b.timestamp)
-                    );
-
-                    /** 
-                     * 🚀 FINAL OVERWRITE LOGIC  
-                     * EXACTLY WHAT YOUR SCRIPT DOES
-                     * No merging, no retaining old events
-                     */
-                    await Order.updateOne(
-                        {
-                            _id: order._id,
-                            "shipments.shipment_id": shipment.shipment_id
-                        },
-                        {
-                            $set: {
-                                "shipments.$.trackingHistory": formattedEvents,
-                                "shipments.$.milestones": milestones,
-                                "shipments.$.status": mappedStatus,
-                                updatedAt: new Date()
-                            }
-                        }
-                    );
-
-                    console.log(`📦 Timeline updated → ${awb} | Status → ${mappedStatus}`);
-
-                    // Auto-complete if delivered
-                    if (mappedStatus === "Delivered") {
-                        await Order.updateOne(
-                            {
-                                _id: order._id,
-                                "shipments.shipment_id": shipment.shipment_id
-                            },
-                            {
-                                $set: {
-                                    "shipments.$.deliveredAt": new Date(),
-                                    orderStatus: "Delivered"
-                                }
-                            }
-                        );
-
-                        console.log(`🎉 Delivered → Tracking stopped for AWB ${awb}`);
-                    }
 
                 } catch (err) {
                     console.log(
@@ -653,12 +593,15 @@ async function trackShipmentTimeline() {
                     );
                 }
             }
+
+            await order.save();
         }
 
     } catch (err) {
         console.log("❌ Timeline cron failed:", err.message);
     }
 }
+
 
 export function startTrackingJob() {
     // CRON 1 → AWB + Shipment status
