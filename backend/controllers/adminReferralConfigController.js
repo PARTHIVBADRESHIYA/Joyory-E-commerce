@@ -181,7 +181,6 @@ export const upsertReferralConfigCampaign = async (req, res) => {
     }
 };
 
-
 export const getReferralConfigCampaignById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -260,6 +259,33 @@ export const createReferralCampaign = async (req, res) => {
         res.status(500).json({
             success: false,
             message: "Failed to create campaign",
+            error: err.message
+        });
+    }
+};
+
+export const deleteReferralCampaign = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const deleted = await ReferralCampaign.findByIdAndDelete(id);
+
+        if (!deleted) {
+            return res.status(404).json({
+                success: false,
+                message: "Campaign not found"
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: "Referral campaign deleted successfully"
+        });
+
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            message: "Failed to delete referral campaign",
             error: err.message
         });
     }

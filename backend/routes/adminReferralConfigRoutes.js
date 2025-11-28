@@ -6,7 +6,8 @@ import {
     createReferralCampaign,
     getReferralConfigCampaigns,
     upsertReferralConfigCampaign,
-    getReferralConfigCampaignById
+    getReferralConfigCampaignById,
+    deleteReferralCampaign
 
 } from "../controllers/adminReferralConfigController.js";
 
@@ -18,5 +19,6 @@ router.post("/campaign", isAdmin, createReferralCampaign);
 router.get("/campaign", isAdmin, getReferralConfigCampaigns);
 router.get("/campaign/:id", isAdmin, getReferralConfigCampaignById);
 router.put("/campaign/:id", isAdmin, upsertReferralConfigCampaign);
+router.delete("/campaign/:id", isAdmin, deleteReferralCampaign);
 
 export default router;
