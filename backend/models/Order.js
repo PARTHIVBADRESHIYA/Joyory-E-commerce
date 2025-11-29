@@ -303,7 +303,7 @@ const orderSchema = new mongoose.Schema({
 
     subtotal: { type: Number, default: 0 },
     totalSavings: { type: Number, default: 0 },
-
+    shippingCharge: { type: Number, default: 0 },
     couponDiscount: { type: Number, default: 0 },
     pointsDiscount: { type: Number, default: 0 },
     giftCardDiscount: { type: Number, default: 0 },

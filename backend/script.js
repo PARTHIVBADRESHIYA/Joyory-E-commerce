@@ -119,98 +119,13 @@
 
 
 
-
-
-
-// update-order-statuses.js
 import mongoose from "mongoose";
-import dotenv from "dotenv";
-import path from "path";
-import { fileURLToPath } from "url";
-import Order from "./models/Order.js"; // <-- adjust path
+import Comment from "./models/Comment.js";
 
-// Load ENV
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.join(__dirname, ".env") });
+await mongoose.connect("mongodb+srv://parthivbadreshiya:parthiv12345@cluster0.silkevx.mongodb.net/joyory?retryWrites=true&w=majority&appName=Cluster0");
 
-// --- YOUR SAME FUNCTION EXACTLY ---
-export function computeOrderStatus(shipments = []) {
-    if (!shipments || shipments.length === 0) return "Pending";
 
-    const normalize = (s = "") => s.trim().toLowerCase();
+const id = "692a9880910aa7a04c132633";
 
-    // Map numeric status / deliveredAt to proper string
-    const statuses = shipments.map(s => {
-        if (s.deliveredAt) return "Delivered";
-        if (s.status === "cancelled") return "Cancelled"; // your cancelled code
-        if (["shipped", "out for delivery", "in transit"].includes(s.status.toLowerCase()))
-            return "Shipped";
-
-        // fallback to last trackingHistory status
-        const lastTracking = s.trackingHistory?.[s.trackingHistory.length - 1]?.status;
-        if (lastTracking) return lastTracking;
-        return "Processing";
-    });
-
-    const total = statuses.length;
-    const count = (s) => statuses.filter(x => normalize(x) === normalize(s)).length;
-    const has = (s) => count(s) > 0;
-    const all = (s) => count(s) === total;
-
-    if (all("delivered")) return "Delivered";
-    if (all("cancelled")) return "Cancelled";
-    if (statuses.every(s => ["shipped", "out for delivery", "in transit"].includes(normalize(s))))
-        return "Shipped";
-
-    if (has("delivered") && has("cancelled") && !has("shipped") && !has("processing"))
-        return "Partially Delivered / Cancelled";
-    if (has("delivered") && !has("cancelled"))
-        return "Partially Delivered";
-    if (has("cancelled") && !has("delivered"))
-        return "Partially Cancelled";
-
-    if (has("shipped") || has("out for delivery") || has("in transit"))
-        return "Processing";
-
-    return "Processing";
-}
-
-// --- MAIN SYNC SCRIPT ---
-async function run() {
-    try {
-        console.log("⏳ Connecting to MongoDB...");
-        await mongoose.connect(process.env.MONGO_URI);
-
-        const orders = await Order.find({});
-        console.log(`📦 Total Orders Found: ${orders.length}`);
-
-        let updated = 0;
-        let skipped = 0;
-
-        for (const order of orders) {
-            if (!order.shipments || order.shipments.length === 0) {
-                skipped++;
-                continue; // skip orders without shipments
-            }
-
-            const newStatus = computeOrderStatus(order.shipments);
-
-            if (order.orderStatus !== newStatus) {
-                order.orderStatus = newStatus;
-                await order.save();
-                updated++;
-            }
-        }
-
-        console.log("✅ Status Update Complete!");
-        console.log(`🔹 Updated Orders: ${updated}`);
-        console.log(`🔸 Skipped (no shipments): ${skipped}`);
-
-        process.exit(0);
-    } catch (err) {
-        console.error("❌ Error:", err);
-        process.exit(1);
-    }
-}
-
-run();
+const found = await Comment.findById(id);
+console.log("FOUND?", found);

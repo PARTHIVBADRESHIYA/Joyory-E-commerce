@@ -1079,20 +1079,14 @@ export const getOrderById = async (req, res) => {
             }
             : null;
 
-        // 🧠 TOTALS
-        const subtotal = order.products.reduce(
-            (acc, p) => acc + p.price * p.quantity,
-            0
-        );
+        // 📊 TOTALS
+        const subtotal = order.subtotal || 0;
 
         const shippingCharge = order.shippingCharge || 0;
         const tax = order.taxAmount || 0;
 
-        const totalPrice =
-            subtotal +
-            shippingCharge +
-            tax -
-            (order.discountAmount || 0);
+        const totalPrice = order.amount; // FINAL AMOUNT STORED IN ORDER
+        const totalSavings = order.totalSavings || 0;   
 
         // FINAL RESPONSE
         const response = {
@@ -1108,8 +1102,10 @@ export const getOrderById = async (req, res) => {
                 subtotal,
                 shipping: shippingCharge,
                 tax,
-                totalPrice,
+                totalSavings, // 💥 new field
+                totalPrice, // always exactly what customer paid
             },
+
             timeline,
         };
 

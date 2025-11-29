@@ -512,6 +512,8 @@ export const initiateOrderFromCart = async (req, res) => {
         priceDetails.couponDiscount +
         priceDetails.referralPointsDiscount +
         priceDetails.giftCardDiscount,
+      shippingCharge: priceDetails.shippingCharge,   // 🔥 NEW
+
       couponDiscount: priceDetails.couponDiscount,
       pointsDiscount: priceDetails.referralPointsDiscount,
       giftCardDiscount: priceDetails.giftCardDiscount,
@@ -529,6 +531,7 @@ export const initiateOrderFromCart = async (req, res) => {
       displayOrderId: newOrder.orderId,
       nextStep: "SELECT_PAYMENT_METHOD",
       finalAmount: grandTotal,
+      shippingCharge: priceDetails.shippingCharge,
       priceBreakdown: priceDetails,
       cart: finalCart,
       appliedCoupon,

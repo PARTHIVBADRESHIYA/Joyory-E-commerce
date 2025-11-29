@@ -1,10 +1,13 @@
 import express from 'express';
 import {
     createBlog,
+    updateBlog,
     getBlogById,
     getAllBlogs,
     getBlogCategories,
-    getBlogBySlug
+    getBlogBySlug,
+    deleteComment,
+    deleteBlog
 } from '../controllers/blogController.js';
 
 import { uploadBlogImage } from '../middlewares/upload.js';
@@ -13,11 +16,12 @@ import { uploadBlogImage } from '../middlewares/upload.js';
 
 const router = express.Router();
 
-router.post('/', uploadBlogImage.single('image'), createBlog);        // Create Blog
-router.get('/:id', getBlogById);                             // Blog Details
 router.get('/', getAllBlogs);                                // Blog List
-router.get('/utils/categories', getBlogCategories);
-// routes/blogRoutes.js
+router.post('/', uploadBlogImage.single('image'), createBlog);        // Create Blog
 router.get('/slug/:slug', getBlogBySlug); // 👈 Route using slug
-
+router.get('/utils/categories', getBlogCategories);
+router.get('/:id', getBlogById); 
+router.put('/:id', uploadBlogImage.single('image'), updateBlog);
+router.delete('/:id', deleteBlog);
+router.delete('/comment/:id', deleteComment);
 export default router;
