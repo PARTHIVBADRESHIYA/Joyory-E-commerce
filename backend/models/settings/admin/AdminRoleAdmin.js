@@ -1,33 +1,32 @@
 import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
 
-const AdminRoleAdminSchema = new mongoose.Schema({
-    name: String,
-    email: { type: String, unique: true },
-    password: String,
-    role: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminRole' },
-    newsletter: {
-        type: Boolean,
-        default: false
-    },
-    optimizeSpeed: {
-        type: Boolean,
-        default: true
-    },
-    profilePic: {
-        type: String, // URL or path
-        default: ''
-    },
-    otp: {
-    code: { type: String },
-    expiresAt: { type: Date }
-},
-otpRequests: [{ type: Date }]
-,
+const RoleAdminSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    email: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
 
-      // 🔒 Security fields
+    // This MUST be required
+    role: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminRole', required: true },
+
+    profilePic: String,
+
     loginAttempts: { type: Number, default: 0 },
-    lockUntil: { type: Date }
+    lockUntil: Date,
 
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' }, // who created this admin
+
+    otp: {
+        code: String,
+        expiresAt: Date
+    },
+    otpRequests: [{ type: Date }],
 }, { timestamps: true });
 
-export default mongoose.model('AdminRoleAdmin', AdminRoleAdminSchema);
+RoleAdminSchema.pre('save', async function (next) {
+    if (!this.isModified('password')) return next();
+    this.password = await bcrypt.hash(this.password, 10);
+    next();
+});
+
+export default mongoose.model('AdminRoleAdmin', RoleAdminSchema);

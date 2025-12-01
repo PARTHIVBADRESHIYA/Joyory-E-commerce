@@ -4,7 +4,8 @@ import mongoose from "mongoose";
 const pendingAdminSchema = new mongoose.Schema({
     name: String,
     email: { type: String, unique: true },
-    password: String, // hashed password
+    password: String, // hashed password,
+    isSuperAdmin: { type: Boolean, default: false },
     otp: {
         code: String,
         expiresAt: Date,

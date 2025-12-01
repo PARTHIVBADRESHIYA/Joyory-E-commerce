@@ -5,7 +5,7 @@ const adminSchema = new mongoose.Schema({
     name: { type: String, required: true },
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
-    role: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminRole' },
+    isSuperAdmin: { type: Boolean, default: false },
     profileImage: { type: String },
     profileImageId: { type: String },
 
@@ -22,14 +22,19 @@ const adminSchema = new mongoose.Schema({
     },
     otpRequests: [{ type: Date }]
 
-
-
 }, { timestamps: true });
 
-// Hash password before save
 adminSchema.pre('save', async function (next) {
-    if (!this.isModified('password')) return next();
-    this.password = await bcrypt.hash(this.password, 10);
+    // If password is already bcrypt hashed (starts with $2b$), skip hashing
+    if (this.password && this.password.startsWith("$2b$")) {
+        return next();
+    }
+
+    // Otherwise hash normally
+    if (this.isModified('password')) {
+        this.password = await bcrypt.hash(this.password, 10);
+    }
+
     next();
 });
 

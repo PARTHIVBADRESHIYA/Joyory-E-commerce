@@ -1,24 +1,33 @@
 import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
 
 const TeamMemberSchema = new mongoose.Schema({
-    name: String,
+    name: { type: String, required: true },
     email: { type: String, required: true, unique: true },
-    password: String, // hashed
-    role: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminRole' },
-    loginAttempts: {
-        type: Number,
-        default: 0
-    },
-    lockUntil: Date
-    ,
-    otp: {
-    code: { type: String },
-    expiresAt: { type: Date }
-},
-otpRequests: [{ type: Date }]
-,
+    password: { type: String, required: true },
 
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' } // the admin or sub-admin who invited
+    // assigned role
+    role: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminRole', required: true },
+
+    // NEW: Unique permissions assigned to this team member
+    permissionSubset: [{ type: String }],
+
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminRoleAdmin' },
+
+    loginAttempts: { type: Number, default: 0 },
+    lockUntil: Date,
+
+    otp: {
+        code: String,
+        expiresAt: Date
+    },
+    otpRequests: [{ type: Date }],
 }, { timestamps: true });
+
+TeamMemberSchema.pre('save', async function (next) {
+    if (!this.isModified('password')) return next();
+    this.password = await bcrypt.hash(this.password, 10);
+    next();
+});
 
 export default mongoose.model('TeamMember', TeamMemberSchema);

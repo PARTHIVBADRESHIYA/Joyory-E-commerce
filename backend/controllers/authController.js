@@ -104,127 +104,155 @@ import { generateOTP } from '../middlewares/utils/generateOTP.js';
 import { sendEmail } from '../middlewares/utils/emailService.js';
 import { sendSms } from '../middlewares/utils/sendSms.js';
 
-// JWT Token Generator
-const generateToken = (user) => {
-    return jwt.sign(
-        { id: user._id, role: user.role },
-        process.env.JWT_SECRET,
-        { expiresIn: '7d' }
-    );
+// // JWT Token Generator
+// const generateToken = (user) => {
+//     return jwt.sign(
+//         { id: user._id, role: user.role },
+//         process.env.JWT_SECRET,
+//         { expiresIn: '7d' }
+//     );
+// };
+
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) throw new Error('JWT_SECRET not defined');
+
+export const generateToken = ({ id, type = 'SUPER_ADMIN', role = null }, opts = {}) => {
+    const payload = { id, type };
+    if (role) payload.role = role;
+    return jwt.sign(payload, JWT_SECRET, { expiresIn: opts.expiresIn || '1d' });
 };
 
-// ====================== ADMIN SECTION ===================== //
 // const adminRegister = async (req, res) => {
 //     try {
 //         const { name, email, password } = req.body;
 
-//         const existing = await Admin.findOne({ email });
-//         if (existing) return res.status(400).json({ message: 'Admin already exists' });
+//         // Check if already a verified admin
+//         const existingAdmin = await Admin.findOne({ email });
+//         if (existingAdmin) {
+//             return res.status(400).json({ message: 'Admin already exists' });
+//         }
 
-//         // Create Admin
-//         const admin = await Admin.create({
-//             name,
-//             email,
-//             password,
-//             isVerified: false
-//         });
+//         // Remove old pending record if it exists
+//         await PendingAdmin.deleteOne({ email });
 
 //         // Generate OTP
 //         const otp = generateOTP();
 //         const hashedOtp = await bcrypt.hash(otp, 10);
 
-//         admin.otp = {
-//             code: hashedOtp,
-//             expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-//             attemptsLeft: 3
-//         };
-//         admin.otpRequests = [new Date()];
-//         await admin.save();
+//         // Save in PendingAdmin collection
+//         const pending = await PendingAdmin.create({
+//             name,
+//             email,
+//             password,
+//             otp: {
+//                 code: hashedOtp,
+//                 expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 mins
+//                 attemptsLeft: 3
+//             }
+//         });
 
-//         // Send Email
+//         // Send Email with OTP
 //         await sendEmail(
-//             admin.email,
+//             email,
 //             'Verify your admin account',
 //             `<p>Your verification OTP is: <b>${otp}</b></p>`
 //         );
 
 //         res.status(201).json({
-//             message: 'Admin created successfully. OTP sent to email for verification.'
+//             message: 'OTP sent to email. Please verify to complete registration.'
 //         });
 //     } catch (err) {
 //         console.error('Admin Register Error:', err);
-//         res.status(500).json({ message: 'Admin creation failed', error: err.message });
+//         res.status(500).json({ message: 'Admin registration failed', error: err.message });
 //     }
 // };
+
+// const adminLogin = async (req, res) => {
+//     try {
+//         const { email, password } = req.body;
+
+//         const admin = await Admin.findOne({ email });
+//         if (!admin) return res.status(401).json({ message: 'Invalid credentials' });
+
+
+//         const isMatch = await admin.matchPassword(password);
+
+//         if (!isMatch) {
+//             return res.status(401).json({ message: 'Invalid credentials' });
+//         }
+
+//         const token = generateToken(admin);
+//         res.status(200).json({
+//             token,
+//             admin: { id: admin._id, name: admin.name, role: admin.role }
+//         });
+//     } catch (err) {
+//         res.status(500).json({ message: 'Login failed', error: err.message });
+//     }
+// }
+
 
 const adminRegister = async (req, res) => {
     try {
         const { name, email, password } = req.body;
+        if (!name || !email || !password)
+            return res.status(400).json({ message: 'Missing fields' });
 
-        // Check if already a verified admin
-        const existingAdmin = await Admin.findOne({ email });
-        if (existingAdmin) {
+        const existing = await Admin.findOne({ email });
+        if (existing)
             return res.status(400).json({ message: 'Admin already exists' });
-        }
 
-        // Remove old pending record if it exists
+        // Check if this is the first admin
+        const isFirstAdmin = (await Admin.countDocuments()) === 0;
+
+        // Remove old pending
         await PendingAdmin.deleteOne({ email });
 
-        // Generate OTP
         const otp = generateOTP();
         const hashedOtp = await bcrypt.hash(otp, 10);
+        const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Save in PendingAdmin collection
-        const pending = await PendingAdmin.create({
+        await PendingAdmin.create({
             name,
             email,
-            password,
+            password: hashedPassword,
+            isSuperAdmin: isFirstAdmin,   // <<<< VERY IMPORTANT
             otp: {
                 code: hashedOtp,
-                expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 mins
+                expiresAt: Date.now() + 10 * 60 * 1000,
                 attemptsLeft: 3
             }
         });
 
-        // Send Email with OTP
-        await sendEmail(
-            email,
-            'Verify your admin account',
-            `<p>Your verification OTP is: <b>${otp}</b></p>`
-        );
+        await sendEmail(email, 'Verify Admin account', `<p>Your OTP: <b>${otp}</b></p>`);
+        return res.status(201).json({ message: 'OTP sent' });
 
-        res.status(201).json({
-            message: 'OTP sent to email. Please verify to complete registration.'
-        });
     } catch (err) {
-        console.error('Admin Register Error:', err);
-        res.status(500).json({ message: 'Admin registration failed', error: err.message });
+        console.error(err);
+        return res.status(500).json({ message: 'Registration failed', error: err.message });
     }
 };
 
 const adminLogin = async (req, res) => {
     try {
         const { email, password } = req.body;
-
         const admin = await Admin.findOne({ email });
         if (!admin) return res.status(401).json({ message: 'Invalid credentials' });
+        if (!admin.isSuperAdmin) return res.status(403).json({ message: 'Not a super admin' });
 
-
-        const isMatch = await admin.matchPassword(password);
-
-        if (!isMatch) {
+        const ok = await admin.matchPassword(password);
+        if (!ok) {
+            // increment attempts/lock logic (optional) — implement if you want
             return res.status(401).json({ message: 'Invalid credentials' });
         }
 
-        const token = generateToken(admin);
-        res.status(200).json({
-            token,
-            admin: { id: admin._id, name: admin.name, role: admin.role }
-        });
+        const token = generateToken({ id: admin._id, type: 'SUPER_ADMIN' }, { expiresIn: '7d' });
+        res.status(200).json({ message: 'Logged in', token, admin: { id: admin._id, email: admin.email, name: admin.name } });
     } catch (err) {
-        res.status(500).json({ message: 'Login failed', error: err.message });
+        console.error(err);
+        return res.status(500).json({ message: 'Login failed', error: err.message });
     }
-}
+};
 
 
 

@@ -1,56 +1,18 @@
-// import mongoose from 'mongoose';
-
-// // models/settings/admin/AdminRole.js
-// const AdminRoleSchema = new mongoose.Schema({
-//     roleName: { type: String, required: true , unique: true },
-//     description: { type: String },
-//     users: { type: Number, required: true, min: 1 },
-//     permissions: {
-//         dashboard: { view: Boolean, customize: Boolean },
-//         orders: { view: Boolean, edit: Boolean, delete: Boolean },
-//         products: { view: Boolean, manage: Boolean },
-//         settings: { update: Boolean, manageRoles: Boolean }
-//     },
-//     teamMembers: [{
-//         type: mongoose.Schema.Types.ObjectId,
-//         ref: 'Admin'
-//     }],
-//     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' }
-// }, { timestamps: true });
-
-
-// export default mongoose.model('AdminRole', AdminRoleSchema);
-
-
-
-
-
-// models/settings/admin/AdminRole.js
 import mongoose from 'mongoose';
-
+import { ALL_PERMISSIONS } from '../../../permissions.js';
 const AdminRoleSchema = new mongoose.Schema({
     roleName: { type: String, required: true, unique: true },
-    description: { type: String },
-    users: { type: Number, required: true, min: 1 },
+    description: String,
 
-    // your existing nested object (keep as-is for backward compatibility)
-    permissions: {
-        dashboard: { view: Boolean, customize: Boolean },
-        orders: { view: Boolean, edit: Boolean, delete: Boolean },
-        products: { view: Boolean, manage: Boolean },
-        settings: { update: Boolean, manageRoles: Boolean }
-    },
+    maxUsers: { type: Number, default: 0 }, // 0 = unlimited
 
-    // NEW fields (non-breaking additions)
-    permissionsList: [{ type: String }], // e.g. ['products:view','orders:refund']
-    maxUsers: { type: Number, default: 0 }, // 0 => unlimited (keeps compatibility with `users`)
-    archived: { type: Boolean, default: false }, // soft-delete flag
+    // list of allowed permissions → modern RBAC
+    permissions: [
+        { type: String, enum: ALL_PERMISSIONS, required: true } // ✅ only valid permissions
+    ],
+    archived: { type: Boolean, default: false },
 
-    teamMembers: [{
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Admin'
-    }],
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' }
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' }, // super admin only
 }, { timestamps: true });
 
 export default mongoose.model('AdminRole', AdminRoleSchema);

@@ -517,6 +517,7 @@ export const verifyAdminEmailOtp = async (req, res) => {
             name: pending.name,
             email: pending.email,
             password: pending.password, // already hashed
+            isSuperAdmin: pending.isSuperAdmin,  // <<<< ADD THIS
             isVerified: true,
         });
 
