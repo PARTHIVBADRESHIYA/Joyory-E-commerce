@@ -1308,6 +1308,9 @@ export const getShipmentDetails = async (req, res) => {
       return res.status(400).json({ success: false, message: "shipment_id is required" });
     }
 
+    // ------------------------------------------------------------------
+    // FIND THE ORDER WHICH CONTAINS THIS SHIPMENT
+    // ------------------------------------------------------------------
     const order = await Order.findOne({
       "shipments.shipment_id": shipment_id
     })
@@ -1318,109 +1321,90 @@ export const getShipmentDetails = async (req, res) => {
       return res.status(404).json({ success: false, message: "Shipment not found" });
     }
 
-    const shipment = order.shipments.find(s => String(s.shipment_id) === String(shipment_id));
+    // ------------------------------------------------------------------
+    // EXTRACT EXACT SHIPMENT DATA
+    // ------------------------------------------------------------------
+    const shipment = order.shipments.find(
+      s => String(s.shipment_id) === String(shipment_id)
+    );
+
     if (!shipment) {
       return res.status(404).json({ success: false, message: "Shipment not found" });
     }
 
+    // ------------------------------------------------------------------
+    // FINAL SHIPMENT STATUS (DIRECTLY FROM SCHEMA FIELD)
+    // ------------------------------------------------------------------
+    const finalShipmentStatus = shipment.status || "Created";
 
-    // --------------------------------------------------------
-    // 🔥 SIMPLE SHIPMENT STATUS (VISIBLE ON TOP)
-    // --------------------------------------------------------
-    const rawStatus = shipment.status || "Created";
-
-    const simpleShipmentStatus =
-      rawStatus === "Delivered"
-        ? "Delivered"
-        : ["Shipped", "Out for Delivery", "In Transit", "Picked Up", "Awaiting Pickup"].includes(rawStatus)
-          ? "Shipped"
-          : "Confirmed";
-
-
-
-    // --------------------------------------------------------
-    // 🔥 PRODUCTS OF THIS SHIPMENT (Nykaa style)
-    // --------------------------------------------------------
+    // ------------------------------------------------------------------
+    // BUILD PRODUCT LIST (schema-accurate)
+    // ------------------------------------------------------------------
     const shipmentProducts = shipment.products.map(item => {
       const p = item.productId || {};
       const variant = item.variant || {};
 
-      const MRP = variant.originalPrice || 0;
-      const SP = variant.displayPrice || 0;
-
-
       return {
         productId: p._id,
-        name: p.name || item.name,
+        name: p.name,
         variant: variant.shadeName || variant.sku || null,
         image: variant.image || p.images?.[0] || null,
 
-        qty: item.quantity || 1,
+        qty: item.quantity,
 
-        mrp: MRP,
-        sellingPrice: SP,
-        total: SP * (item.quantity || 1)
+        mrp: variant.originalPrice || 0,
+        sellingPrice: variant.displayPrice || 0,
+        total: (variant.displayPrice || 0) * item.quantity
       };
     });
 
-
-
-    // --------------------------------------------------------
-    // 🔥 OTHER ITEMS IN ORDER
-    // --------------------------------------------------------
+    // ------------------------------------------------------------------
+    // OTHER ITEMS (other shipments)
+    // ------------------------------------------------------------------
     const otherItems = order.shipments
       .filter(s => s.shipment_id !== shipment_id)
       .flatMap(s =>
-        s.products.map(item => {
-          const p = item.productId || {};
-          return {
-            productId: p._id,
-            name: p.name || item.name,
-            variant: item.variant?.shadeName || item.variant?.sku || null,
-            image: item.variant?.image || p.images?.[0] || null
-          };
-        })
+        s.products.map(item => ({
+          productId: item.productId?._id,
+          name: item.productId?.name || item.name,
+          variant: item.variant?.shadeName || item.variant?.sku || null,
+          image: item.variant?.image || item.productId?.images?.[0] || null
+        }))
       );
 
-
-
-    // --------------------------------------------------------
-    // 🔥 SHIPPING ADDRESS
-    // --------------------------------------------------------
+    // ------------------------------------------------------------------
+    // SHIPPING ADDRESS (direct from schema)
+    // ------------------------------------------------------------------
     const shippingAddress = order.shippingAddress
       ? {
-        name: order.shippingAddress.name || "",
-        email: order.shippingAddress.email || "",
-        phone: order.shippingAddress.phone || "",
-        pincode: order.shippingAddress.pincode || "",
-        city: order.shippingAddress.city || "",
-        state: order.shippingAddress.state || "",
-        country: order.shippingAddress.country || "India",
-        addressLine1: order.shippingAddress.addressLine1 || "",
-        addressLine2: order.shippingAddress.addressLine2 || ""
-      }
+          name: order.shippingAddress.name || "",
+          email: order.shippingAddress.email || "",
+          phone: order.shippingAddress.phone || "",
+          pincode: order.shippingAddress.pincode || "",
+          city: order.shippingAddress.city || "",
+          state: order.shippingAddress.state || "",
+          country: order.shippingAddress.country || "India",
+          addressLine1: order.shippingAddress.addressLine1 || "",
+          addressLine2: order.shippingAddress.addressLine2 || ""
+        }
       : null;
 
+    // ------------------------------------------------------------------
+    // PRICE SUMMARY (Shipment Wise)
+    // ------------------------------------------------------------------
+    const mrpTotal = shipmentProducts.reduce((sum, p) => sum + p.mrp * p.qty, 0);
+    const sellingPriceTotal = shipmentProducts.reduce(
+      (sum, p) => sum + p.sellingPrice * p.qty,
+      0
+    );
 
-
-    // --------------------------------------------------------
-    // 🔥 PRICE SUMMARY (NYKAA STYLE)
-    // --------------------------------------------------------
-    const shipmentTotals = {
-      mrpTotal: shipmentProducts.reduce((s, p) => s + (p.mrp * p.qty), 0),
-      sellingPriceTotal: shipmentProducts.reduce((s, p) => s + (p.sellingPrice * p.qty), 0),
-      additionalDiscountTotal: shipmentProducts.reduce((s, p) => s + (p.additionalDiscount * p.qty), 0)
-    };
-
-    const orderPriceSummary = calculateFinalOrderPricing(order);
-
-    // --------------------------------------------------------
-    // 🔥 FREE SHIPPING LOGIC
-    // --------------------------------------------------------
+    // ------------------------------------------------------------------
+    // SHIPPING CHARGE LOGIC (Based on your order schema)
+    // ------------------------------------------------------------------
     let shippingDiscount = 0;
 
-    if (orderPriceSummary.finalAmount >= 499) {
-      shippingDiscount = 70; // Free delivery ₹70
+    if (order.amount >= 499) {
+      shippingDiscount = order.shippingCharge || 0; // you stored shippingCharge in order schema
     }
 
     const additionalDiscounts = {
@@ -1428,21 +1412,19 @@ export const getShipmentDetails = async (req, res) => {
       message: shippingDiscount > 0 ? "Free delivery on orders above ₹499" : null
     };
 
-    // --------------------------------------------------------
-    // 🔥 FINAL COURIER TIMELINE (NYKAA STYLE)
-    // --------------------------------------------------------
-    const timeline = buildCourierTimeline(shipment.trackingHistory || []);
+    // ------------------------------------------------------------------
+    // TRACKING HISTORY (schema-accurate)
+    // ------------------------------------------------------------------
+    const trackingTimeline = shipment.trackingHistory || [];
 
-
-
-    // --------------------------------------------------------
-    // 🔥 FINAL RESPONSE
-    // --------------------------------------------------------
+    // ------------------------------------------------------------------
+    // FINAL RESPONSE (0 assumptions)
+    // ------------------------------------------------------------------
     return res.json({
       success: true,
 
       shipmentId: shipment.shipment_id,
-      shipmentStatus: simpleShipmentStatus,
+      shipmentStatus: finalShipmentStatus,
       expectedDelivery: shipment.expected_delivery || null,
 
       courier: {
@@ -1453,24 +1435,20 @@ export const getShipmentDetails = async (req, res) => {
 
       products: shipmentProducts,
       otherItems,
-
       shippingAddress,
 
       priceDetails: {
-        ...shipmentTotals,
-        totalPaid: shipmentTotals.sellingPriceTotal,
-        additionalDiscounts   // <-- Added here
+        mrpTotal,
+        sellingPriceTotal,
+        totalPaid: sellingPriceTotal,
+        additionalDiscounts
       },
 
-      orderPriceSummary: {
-        ...orderPriceSummary,
-        additionalDiscounts   // <-- copy same discounts here
-      },
-
-      trackingTimeline: timeline,
+      trackingTimeline,
 
       orderInfo: {
         orderId: order.orderId,
+        orderNumber: order.orderNumber || null,
         orderDate: order.createdAt,
         day: new Date(order.createdAt).toLocaleDateString("en-IN", {
           weekday: "long"
@@ -1479,9 +1457,11 @@ export const getShipmentDetails = async (req, res) => {
         awb: shipment.awb_code || null
       }
     });
-
   } catch (err) {
     console.error("getShipmentDetails failed:", err);
-    return res.status(500).json({ success: false, message: "Failed to fetch shipment details" });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch shipment details"
+    });
   }
 };
