@@ -6,9 +6,16 @@ const adminSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     isSuperAdmin: { type: Boolean, default: false },
-    profileImage: { type: String },
-    profileImageId: { type: String },
+    // PROFILE FIELDS
+    gender: { type: String, enum: ["male", "female", "other"], default: null },
+    department: { type: String, default: null },
+    workLocation: { type: String, default: null },
+    joiningDate: { type: Date, default: null },
+    roleTitle: { type: String, default: "Super Admin" },
+    roleIdText: { type: String, default: "SUPER_ADMIN" },
 
+    profileImage: { type: String, default: null },
+    profileImageId: { type: String, default: null },
     loginAttempts: {
         type: Number,
         default: 0

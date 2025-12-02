@@ -9,7 +9,16 @@ const RoleAdminSchema = new mongoose.Schema({
     // This MUST be required
     role: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminRole', required: true },
 
-    profilePic: String,
+    // PROFILE FIELDS
+    gender: { type: String, enum: ["male", "female", "other"], default: null },
+    department: { type: String, default: null },
+    workLocation: { type: String, default: null },
+    joiningDate: { type: Date, default: null },
+    roleTitle: { type: String, default: "Admin" },
+    roleIdText: { type: String, default: null },
+
+    profileImage: { type: String, default: null },
+    profileImageId: { type: String, default: null },
 
     loginAttempts: { type: Number, default: 0 },
     lockUntil: Date,

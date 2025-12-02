@@ -491,7 +491,7 @@ import sellerDashboardRoutes from "./routes/sellers/sellerDashboardRoutes.js";
 import sellerCategoryRoutes from "./routes/sellers/sellerCategoryRoutes.js";
 import virtualTryOnRoutes from "./routes/virtualTryOnRoutes.js";
 import permissionsRoutes from "./routes/permissionsRoutes.js";
-
+import adminProfileRoutes from "./routes/adminProfileRoutes.js";
 // User side
 import userProductRoutes from "./routes/user/userProductRoutes.js";
 import userCartAndOrderRoutes from "./routes/user/userCartAndOrderRoutes.js";
@@ -649,6 +649,7 @@ app.use("/api/seller-dashboard", sellerDashboardRoutes);
 app.use("/api/seller-category", sellerCategoryRoutes);
 app.use("/api/vto", virtualTryOnRoutes);
 app.use("/api/permissions", permissionsRoutes);
+app.use("/api/admin/profile", adminProfileRoutes);
 
 if ((process.env.SHIPPING_PROVIDER || "mock").toLowerCase() === "mock") {
     app.use("/api/shipping", mockShippingRoutes);

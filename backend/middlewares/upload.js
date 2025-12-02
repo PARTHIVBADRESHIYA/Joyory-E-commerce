@@ -828,3 +828,4 @@ export const uploadFormulations = makeImageUploader(2);
 export const uploadSkinType = makeImageUploader(2);
 export const uploadGiftCard = makeImageUploader(1);
 export const uploadSeller = makeImageUploader(100);
+export const uploadAdminProfile = makeImageUploader(2);
