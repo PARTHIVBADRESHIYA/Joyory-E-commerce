@@ -6,7 +6,7 @@ import { sendEmail } from '../middlewares/utils/emailService.js';
 import { sendSms } from '../middlewares/utils/sendSms.js';
 
 import Admin from '../models/Admin.js';
-import PendingAdmin from "../models/PendingAdmin.js";
+import PendingUser from "../models/PendingAdmin.js";
 import AdminRoleAdmin from '../models/settings/admin/AdminRoleAdmin.js';
 import TeamMember from '../models/settings/admin/TeamMember.js';
 import User from '../models/User.js';
@@ -444,96 +444,135 @@ export const adminLoginWithOtp = async (req, res) => {
     });
 };
 
-// Verify Admin Email OTP (after registration)
+
+// // Verify Admin Email OTP (after registration)
 // export const verifyAdminEmailOtp = async (req, res) => {
-//     const { email, otp } = req.body;
+//     try {
+//         const { email, otp } = req.body;
 
-//     const admin = await Admin.findOne({ email });
-//     if (!admin) return res.status(404).json({ message: 'Admin not found' });
-//     if (admin.isVerified) return res.status(400).json({ message: 'Admin already verified' });
+//         // Check pending admin
+//         const pending = await PendingAdmin.findOne({ email });
+//         if (!pending) {
+//             return res.status(404).json({ message: "No pending admin found or OTP expired" });
+//         }
 
-//     if (!admin.otp?.code || new Date() > new Date(admin.otp.expiresAt)) {
-//         admin.otp = undefined;
-//         await admin.save();
-//         return res.status(400).json({ message: 'OTP expired or not requested' });
+//         // Check OTP expiry
+//         if (!pending.otp?.code || new Date() > new Date(pending.otp.expiresAt)) {
+//             await PendingAdmin.deleteOne({ email }); // cleanup
+//             return res.status(400).json({ message: "OTP expired or not requested" });
+//         }
+
+//         // Check attempts
+//         if (pending.otp.attemptsLeft <= 0) {
+//             await PendingAdmin.deleteOne({ email });
+//             return res.status(429).json({ message: "Too many invalid attempts. Please register again." });
+//         }
+
+//         // Compare OTP
+//         const isValid = await bcrypt.compare(otp, pending.otp.code);
+//         if (!isValid) {
+//             pending.otp.attemptsLeft -= 1;
+//             await pending.save();
+//             return res.status(401).json({
+//                 message: `Invalid OTP. ${pending.otp.attemptsLeft} attempts left.`,
+//             });
+//         }
+
+//         // ✅ OTP is valid → Create real Admin
+//         const admin = await Admin.create({
+//             name: pending.name,
+//             email: pending.email,
+//             password: pending.password, // already hashed
+//             isSuperAdmin: pending.isSuperAdmin,  // <<<< ADD THIS
+//             isVerified: true,
+//         });
+
+//         // Cleanup
+//         await PendingAdmin.deleteOne({ email });
+
+//         return res.status(201).json({
+//             message: "Email verified successfully. Admin created. You can now login.",
+//             adminId: admin._id,
+//         });
+//     } catch (err) {
+//         console.error("Verify Admin OTP Error:", err);
+//         return res.status(500).json({
+//             message: "OTP verification failed",
+//             error: err.message,
+//         });
 //     }
-
-//     if (admin.otp.attemptsLeft <= 0) {
-//         admin.otp = undefined;
-//         await admin.save();
-//         return res.status(429).json({ message: 'Too many invalid attempts. Request a new OTP.' });
-//     }
-
-//     const isValid = await bcrypt.compare(otp, admin.otp.code);
-//     if (!isValid) {
-//         admin.otp.attemptsLeft -= 1;
-//         await admin.save();
-//         return res.status(401).json({ message: `Invalid OTP. ${admin.otp.attemptsLeft} attempts left.` });
-//     }
-
-//     admin.isVerified = true;
-//     admin.otp = undefined;
-//     admin.otpRequests = [];
-//     await admin.save();
-
-//     return res.status(200).json({ message: 'Email verified successfully. You can now login.' });
 // };
-
-// Verify Admin Email OTP (after registration)
-export const verifyAdminEmailOtp = async (req, res) => {
+export const verifyUnifiedOtp = async (req, res) => {
     try {
         const { email, otp } = req.body;
 
-        // Check pending admin
-        const pending = await PendingAdmin.findOne({ email });
-        if (!pending) {
-            return res.status(404).json({ message: "No pending admin found or OTP expired" });
-        }
+        const pending = await PendingUser.findOne({ email });
+        if (!pending)
+            return res.status(404).json({ message: "OTP expired or not requested" });
 
         // Check OTP expiry
-        if (!pending.otp?.code || new Date() > new Date(pending.otp.expiresAt)) {
-            await PendingAdmin.deleteOne({ email }); // cleanup
-            return res.status(400).json({ message: "OTP expired or not requested" });
+        if (new Date() > new Date(pending.otp.expiresAt)) {
+            await PendingUser.deleteOne({ email });
+            return res.status(400).json({ message: "OTP expired" });
         }
 
         // Check attempts
         if (pending.otp.attemptsLeft <= 0) {
-            await PendingAdmin.deleteOne({ email });
-            return res.status(429).json({ message: "Too many invalid attempts. Please register again." });
+            await PendingUser.deleteOne({ email });
+            return res.status(429).json({ message: "Too many wrong attempts" });
         }
 
         // Compare OTP
-        const isValid = await bcrypt.compare(otp, pending.otp.code);
-        if (!isValid) {
+        const ok = await bcrypt.compare(otp, pending.otp.code);
+        if (!ok) {
             pending.otp.attemptsLeft -= 1;
             await pending.save();
-            return res.status(401).json({
-                message: `Invalid OTP. ${pending.otp.attemptsLeft} attempts left.`,
+            return res.status(401).json({ message: `Invalid OTP. ${pending.otp.attemptsLeft} attempts left.` });
+        }
+
+        let createdUser;
+
+        // CREATE FINAL USER BASED ON TYPE
+        if (pending.userType === "SUPER_ADMIN") {
+            createdUser = await Admin.create({
+                name: pending.name,
+                email,
+                password: pending.password,
+                isSuperAdmin: true,
+                isVerified: true
             });
         }
 
-        // ✅ OTP is valid → Create real Admin
-        const admin = await Admin.create({
-            name: pending.name,
-            email: pending.email,
-            password: pending.password, // already hashed
-            isSuperAdmin: pending.isSuperAdmin,  // <<<< ADD THIS
-            isVerified: true,
+        if (pending.userType === "ROLE_ADMIN") {
+            createdUser = await AdminRoleAdmin.create({
+                name: pending.name,
+                email,
+                password: pending.password,
+                role: pending.roleId
+            });
+        }
+
+        if (pending.userType === "TEAM_MEMBER") {
+            createdUser = await TeamMember.create({
+                name: pending.name,
+                email,
+                password: pending.password,
+                role: pending.roleId,
+                permissionSubset: pending.permissionSubset
+            });
+        }
+
+        await PendingUser.deleteOne({ email });
+
+        return res.status(200).json({
+            message: "OTP verified. Account activated.",
+            id: createdUser._id,
+            type: pending.userType
         });
 
-        // Cleanup
-        await PendingAdmin.deleteOne({ email });
-
-        return res.status(201).json({
-            message: "Email verified successfully. Admin created. You can now login.",
-            adminId: admin._id,
-        });
     } catch (err) {
-        console.error("Verify Admin OTP Error:", err);
-        return res.status(500).json({
-            message: "OTP verification failed",
-            error: err.message,
-        });
+        console.error("verifyUnifiedOtp error:", err);
+        return res.status(500).json({ message: "OTP verification failed", error: err.message });
     }
 };
 

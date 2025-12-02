@@ -475,6 +475,7 @@ import sellerPayoutRoutes from "./routes/sellers/sellerPayoutRoutes.js";
 import sellerDashboardRoutes from "./routes/sellers/sellerDashboardRoutes.js";
 import sellerCategoryRoutes from "./routes/sellers/sellerCategoryRoutes.js";
 import virtualTryOnRoutes from "./routes/virtualTryOnRoutes.js";
+import permissionsRoutes from "./routes/permissionsRoutes.js";
 
 // User side
 import userProductRoutes from "./routes/user/userProductRoutes.js";
@@ -633,6 +634,7 @@ app.use("/api/seller-orders", sellerOrderRoutes);
 app.use("/api/seller-dashboard", sellerDashboardRoutes);
 app.use("/api/seller-category", sellerCategoryRoutes);
 app.use("/api/vto", virtualTryOnRoutes);
+app.use("/api/permissions", permissionsRoutes);
 
 if ((process.env.SHIPPING_PROVIDER || "mock").toLowerCase() === "mock") {
     app.use("/api/shipping", mockShippingRoutes);

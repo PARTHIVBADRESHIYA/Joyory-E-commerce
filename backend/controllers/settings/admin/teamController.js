@@ -88,7 +88,6 @@ export const registerTeamMember = async (req, res) => {
 
 };
 
-// Login team member
 export const loginTeamMember = async (req, res) => {
     try {
         const { email, password } = req.body;

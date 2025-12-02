@@ -9,8 +9,8 @@ import { adminLoginSchema, adminSignupSchema } from '../middlewares/validations/
 
 import {
     manuallyAddCustomer,
-    adminRegister,
-    adminLogin,
+    // adminRegister,
+    // adminLogin,
     getAllUsers,
     getUserById,
     updateUserByAdmin,
@@ -19,7 +19,9 @@ import {
     getFullCustomerAnalytics,
     listSellers,
     approveProduct,
-    changeSellerStatus
+    changeSellerStatus,
+    registerUnified,
+    loginUnified
 } from './../controllers/authController.js';
 
 
@@ -28,8 +30,8 @@ const router = express.Router();
 // 🔐 Apply IP lock to all admin routes(after ready all the things use ipwishlist use in route )
 
 // ✅ Auth
-router.post('/register', validate(adminSignupSchema), adminRegister);
-router.post('/login', validate(adminLoginSchema), adminLogin);
+router.post('/register', registerUnified);
+router.post('/login', loginUnified);
 
 // ✅ User management
 router.get('/users', verifyAdminOrTeamMember, getAllUsers);

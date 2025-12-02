@@ -5,21 +5,32 @@ import { checkPermission } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 
-router.get('/admin/orders', isAdmin, adminListOrders);
-router.put('/admin/orders/:id/confirm', isAdmin, adminConfirmOrder);
-router.put('/admin/orders/:id/cancel', isAdmin,checkPermission('orders:cancel'), adminCancelOrder);
-router.get('/refund-requests', isAdmin, getAllRefundRequests);
-router.post('/reject-refund', isAdmin, adminRejectRefund);
-router.post('/approve-refund', isAdmin, adminApproveRefund);
+router.get('/admin/orders', isAdmin, checkPermission('orders:view'),
+    adminListOrders);
+router.put('/admin/orders/:id/confirm', checkPermission('orders:update'),
+    isAdmin, adminConfirmOrder);
+router.put('/admin/orders/:id/cancel', isAdmin, checkPermission('orders:cancel'),
+    adminCancelOrder);
+router.get('/refund-requests', isAdmin, checkPermission('orders:refund'),
+    getAllRefundRequests);
+router.post('/reject-refund', isAdmin, checkPermission('orders:refund'),
+    adminRejectRefund);
+router.post('/approve-refund', isAdmin, checkPermission('orders:refund'),
+    adminApproveRefund);
 
 
 router.get('/', isAdmin, checkPermission('orders:view'), // permission defined in role
     getAllOrders);
-router.get('/summary', isAdmin, getOrderSummary);
-router.post('/retry', isAdmin, retryFailedShipments);
-router.get("/:id", isAdmin,checkPermission('orders:update'), getOrderById);  // view details of one order
-router.get("/:id/tracking", isAdmin, getAdminOrderTracking);
-router.put("/:id/status", isAdmin, updateOrderStatus);
+router.get('/summary', isAdmin, checkPermission('orders:view'),
+    getOrderSummary);
+router.post('/retry', isAdmin, checkPermission('orders:update'),
+    retryFailedShipments);
+router.get("/:id", isAdmin, checkPermission('orders:view'),
+    getOrderById);  // view details of one order
+router.get("/:id/tracking", isAdmin, checkPermission('orders:view'),
+    getAdminOrderTracking);
+router.put("/:id/status", isAdmin, checkPermission('orders:update'),
+    updateOrderStatus);
 
 
 export default router;

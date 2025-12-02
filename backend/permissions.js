@@ -41,6 +41,7 @@ export const PERMISSIONS = {
     INVENTORY: {
         VIEW: "inventory:view",
         UPDATE: "inventory:update",
+        DELETE: "inventory:delete",
     },
     FINANCE: {
         VIEW: "finance:view",

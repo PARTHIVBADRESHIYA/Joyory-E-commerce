@@ -185,7 +185,6 @@ export const checkPermission = (requiredPermission) => async (req, res, next) =>
     }
 };
 
-
 export const verifyAdminOrTeamMember = async (req, res, next) => {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) return res.status(401).json({ message: 'Unauthorized: No token provided' });
@@ -213,8 +212,11 @@ export const verifyAdminOrTeamMember = async (req, res, next) => {
             req.roleAdmin = roleAdmin;
             req.user = { id: roleAdmin._id, email: roleAdmin.email };
             req.permissions = Array.isArray(roleAdmin.role?.permissions) ? roleAdmin.role.permissions : [];
+
+            req.isSuperAdmin = false;   // <-- REQUIRED FIX
             return next();
         }
+
 
         if (decoded.type === 'TEAM_MEMBER') {
             const tm = await TeamMember.findById(decoded.id).populate('role');
@@ -228,8 +230,10 @@ export const verifyAdminOrTeamMember = async (req, res, next) => {
             const subset = tm.permissionSubset || [];
             req.permissions = subset.filter(p => rolePermissions.includes(p));
 
+            req.isSuperAdmin = false;  // <-- REQUIRED FIX
             return next();
         }
+
 
         // fallback: try to detect by existence
         // check super admin by id
