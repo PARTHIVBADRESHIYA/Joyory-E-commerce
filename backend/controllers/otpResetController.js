@@ -364,43 +364,68 @@ export const verifyEmailOtp = async (req, res) => {
 };
 
 
-export const sendOtpToAdmin = async (req, res) => {
-    const { email, preferredOtpMethod } = req.body;
-
-    const admin = await Admin.findOne({ email });
-    if (!admin) return res.status(404).json({ message: 'Admin not found' });
-
-    const now = new Date();
-    admin.otpRequests = (admin.otpRequests || []).filter(ts => new Date(ts) > now - 10 * 60 * 1000);
-    if (admin.otpRequests.length >= 3) {
-        return res.status(429).json({ message: 'Too many OTP requests. Try again later.' });
-    }
-
-    const otp = generateOTP();
-    const hashedOtp = await bcrypt.hash(otp, 10);
-
-    admin.otp = {
-        code: hashedOtp,
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-        attemptsLeft: 3
-    };
-    admin.otpRequests.push(now);
-    await admin.save();
-
-    const method = (preferredOtpMethod && ['sms', 'email'].includes(preferredOtpMethod.toLowerCase()))
-        ? preferredOtpMethod.toLowerCase()
-        : 'email';
-
+export const sendOtpUnified = async (req, res) => {
     try {
-        if (method === 'sms') {
-            if (!admin.phone) return res.status(400).json({ message: 'Phone not available for SMS' });
-            await sendSms(admin.phone, `Your OTP is: ${otp}`);
-        } else {
-            await sendEmail(admin.email, 'OTP for Login/Verification', `<p>Your OTP is: <b>${otp}</b></p>`);
+        const { email, preferredOtpMethod } = req.body;
+
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: "Email is required"
+            });
         }
-        res.status(200).json({ message: `OTP sent via ${method.toUpperCase()}` });
+
+        // 🔢 GENERATE + HASH OTP
+        const otp = generateOTP();
+        const hashedOtp = await bcrypt.hash(otp, 10);
+
+        // 🔁 STORE OTP IN A TEMP COLLECTION FOR ANY EMAIL
+        await PendingUser.findOneAndUpdate(
+            { email },
+            {
+                email,
+                otp: {
+                    code: hashedOtp,
+                    expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+                    attemptsLeft: 5
+                },
+                updatedAt: new Date()
+            },
+            { upsert: true, new: true }
+        );
+
+        // 📩 SEND METHOD
+        const method = (preferredOtpMethod &&
+            ["sms", "email"].includes(preferredOtpMethod.toLowerCase()))
+            ? preferredOtpMethod.toLowerCase()
+            : "email";
+
+        // 📤 SEND OTP
+        if (method === "sms") {
+            return res.status(400).json({
+                success: false,
+                message: "SMS not supported without phone number"
+            });
+        }
+
+        await sendEmail(
+            email,
+            "OTP Verification",
+            `<p>Your OTP is: <b>${otp}</b></p>`
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: `OTP sent to ${email}`
+        });
+
     } catch (err) {
-        res.status(500).json({ message: 'Failed to send OTP', error: err.message });
+        console.error("sendOtpUnified error:", err);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to send OTP",
+            error: err.message
+        });
     }
 };
 

@@ -402,6 +402,22 @@
 // });
 
 
+
+
+
+
+
+
+
+
+
+
+
+//admin side complete till 02/12/2025
+
+
+
+
 import dotenv from "dotenv";
 dotenv.config();
 import express from "express";
@@ -454,7 +470,6 @@ import adminRoleAdminController from "./routes/settings/admin/adminRoleAdmin.js"
 import notificationRoutes from "./routes/settings/admin/notificationRoutes.js";
 import securityRoutes from "./routes/settings/admin/securityRoutes.js";
 import attributeRoutes from "./routes/attributeRoutes.js";
-import testRoutes from "./routes/testRoutes.js";
 import videoRoutes from "./routes/videoRoutes.js";
 import mediaRoutes from "./routes/mediaRoutes.js";
 import brandRoutes from "./routes/brandRoutes.js";
@@ -616,7 +631,6 @@ app.use("/api/admin/teams", teamRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/security", securityRoutes);
 app.use("/api/comments", commentRoutes);
-app.use("/api", testRoutes);
 app.use("/api/shadefinder", shadeFinderRoutes);
 app.use("/api/giftcards", giftCardRoutes);
 app.use("/api/skintypes", skinTypeAdminRoutes);
@@ -655,17 +669,6 @@ app.use("/api/user/giftcards", userGiftCardRoutes);
 app.use("/api/referral", referralRoutes);
 app.use("/api/user/wallet", userWalletRoutes);
 
-
-app.get("/redis-test", async (req, res) => {
-    try {
-        await connection.set("test-key", "Redis Works ✅");
-        const value = await connection.get("test-key");
-        res.json({ success: true, value });
-    } catch (err) {
-        console.error("❌ Redis test failed:", err.message);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
 
 // ================= HEALTH & TEST =================
 app.get("/health", (req, res) => {

@@ -1,6 +1,6 @@
 // routes/securityRoutes.js
 import express from 'express';
-import { sendOtpToUser, resetPasswordWithOtp,loginWithOtp ,verifyEmailOtp ,sendOtpToAdmin,adminLoginWithOtp,verifyUnifiedOtp,resetAdminPasswordWithOtp} from '../../../controllers/otpResetController.js';
+import { sendOtpToUser, resetPasswordWithOtp,loginWithOtp ,verifyEmailOtp ,sendOtpUnified,adminLoginWithOtp,verifyUnifiedOtp,resetAdminPasswordWithOtp} from '../../../controllers/otpResetController.js';
 import { otpLimiter } from "../../../middlewares/security/rateLimiter.js";
 
 import { resetPasswordWithOtpSchema } from "../../../middlewares/validations/otpValidation.js";
@@ -16,7 +16,7 @@ router.post('/login-otp', loginWithOtp);
 
 
 
-router.post('/admin/send-otp', sendOtpToAdmin);
+router.post('/admin/send-otp', sendOtpUnified);
 router.post('/admin/login-otp', adminLoginWithOtp);
 router.post('/admin/verify-otp', verifyUnifiedOtp);
 router.post('/admin/reset-password', validate (resetPasswordWithOtpSchema), resetAdminPasswordWithOtp);
