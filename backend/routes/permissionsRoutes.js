@@ -6,6 +6,7 @@ import {
     createCustomPermission,
     updateCustomPermission,
     deleteCustomPermission,
+    getRolePermissions
 } from "../controllers/permissionController.js";
 
 const router = express.Router();
@@ -19,5 +20,8 @@ router.get("/validate/:key", validatePermission);
 router.post("/custom", createCustomPermission);
 router.put("/custom/:key", updateCustomPermission);
 router.delete("/custom/:key", deleteCustomPermission);
+
+// Role permissions
+router.get("/role/:roleId", getRolePermissions);
 
 export default router;

@@ -1,6 +1,7 @@
 import { PERMISSIONS, ALL_PERMISSIONS } from "../permissions.js";
 import CustomPermission from "../models/CustomPermission.js";
-
+import mongoose from "mongoose";
+import AdminRole from "../models/settings/admin/AdminRole.js";
 // 🔹 GET ALL PERMISSIONS (Static + Custom)
 // 🔹 GET ALL PERMISSIONS (Static + Custom) — GROUPED BY MODULE
 export const getAllPermissions = async (req, res) => {
@@ -135,5 +136,39 @@ export const deleteCustomPermission = async (req, res) => {
 
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+export const getRolePermissions = async (req, res) => {
+    try {
+        const { roleId } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(roleId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid roleId"
+            });
+        }
+
+        const role = await AdminRole.findById(roleId).lean();
+
+        if (!role || role.archived) {
+            return res.status(404).json({
+                success: false,
+                message: "Role not found"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            roleId,
+            permissions: role.permissions
+        });
+
+    } catch (err) {
+        return res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 };
