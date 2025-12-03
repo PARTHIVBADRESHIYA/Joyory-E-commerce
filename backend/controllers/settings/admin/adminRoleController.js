@@ -1,5 +1,6 @@
 import AdminRole from '../../../models/settings/admin/AdminRole.js';
 import AdminRoleAdmin from '../../../models/settings/admin/AdminRoleAdmin.js';
+import TeamMember from '../../../models/settings/admin/TeamMember.js';
 import { ALL_PERMISSIONS } from '../../../permissions.js';
 
 import bcrypt from 'bcryptjs';
@@ -47,13 +48,56 @@ export const createAdminRole = async (req, res) => {
     }
 };
 
-// List roles
 export const getAllAdminRoles = async (req, res) => {
     try {
-        const roles = await AdminRole.find().select('roleName description maxUsers permissions archived createdBy');
-        res.status(200).json({ success: true, roles });
+        const roles = await AdminRole.aggregate([
+            {
+                $lookup: {
+                    from: "adminroleadmins",
+                    localField: "_id",
+                    foreignField: "role",
+                    as: "adminRoleAdmins"
+                }
+            },
+            {
+                $lookup: {
+                    from: "teammembers",
+                    localField: "_id",
+                    foreignField: "role",
+                    as: "teamMembers"
+                }
+            },
+            {
+                $project: {
+                    roleName: 1,
+                    description: 1,
+                    maxUsers: 1,
+                    permissions: 1,
+                    adminRoleAdmins: {
+                        _id: 1,
+                        profileImage: 1,
+                        name: 1,
+                        email: 1,
+                        permissionSubset: 1
+                    },
+                    teamMembers: {
+                        _id: 1,
+                        profileImage: 1,
+                        name: 1,
+                        email: 1,
+                        permissionSubset: 1
+                    }
+                }
+            }
+        ]);
+
+        return res.status(200).json({
+            success: true,
+            roles
+        });
+
     } catch (err) {
-        console.error('getAllAdminRoles error:', err);
+        console.error("getAllAdminRoles error:", err);
         res.status(500).json({ success: false, error: err.message });
     }
 };
