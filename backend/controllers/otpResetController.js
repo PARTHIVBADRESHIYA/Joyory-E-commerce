@@ -601,45 +601,139 @@ export const verifyUnifiedOtp = async (req, res) => {
     }
 };
 
+
+export const sendForgotPasswordOtp = async (req, res) => {
+    try {
+        const { email } = req.body;
+
+        if (!email) {
+            return res.status(400).json({ message: "Email is required" });
+        }
+
+        let user = null;
+        let userType = null;
+
+        // Find user from 3 models
+        user = await Admin.findOne({ email });
+        if (user) userType = "SUPER_ADMIN";
+
+        if (!user) {
+            user = await AdminRoleAdmin.findOne({ email });
+            if (user) userType = "ROLE_ADMIN";
+        }
+
+        if (!user) {
+            user = await TeamMember.findOne({ email });
+            if (user) userType = "TEAM_MEMBER";
+        }
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        // Generate OTP
+        const otp = Math.floor(1000 + Math.random() * 9000).toString();
+        const hashedOtp = await bcrypt.hash(otp, 10);
+
+        // Save OTP in the REAL USER model
+        user.otp = {
+            code: hashedOtp,
+            expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+            attemptsLeft: 5
+        };
+
+        await user.save();
+
+        // Send email
+        await sendEmail(
+            email,
+            "Password Reset OTP",
+            `<p>Your OTP: <b>${otp}</b></p>`
+        );
+
+        return res.status(200).json({
+            message: "OTP sent for password reset",
+            userType
+        });
+
+    } catch (err) {
+        console.error("sendForgotPasswordOtp error:", err);
+        return res.status(500).json({ message: "Failed to send reset OTP", error: err.message });
+    }
+};
+
+
 // 📌 Reset Admin Password with OTP (same behavior as user reset)
 export const resetAdminPasswordWithOtp = async (req, res) => {
-    // ✅ optional validation (you can use a separate adminResetPasswordWithOtpSchema if you want)
-    const { email, otp, newPassword } = req.body;
+    try {
+        const { email, otp, newPassword } = req.body;
 
-    const admin = await Admin.findOne({ email });
-    if (!admin) return res.status(404).json({ message: 'Admin not found' });
+        let user = null;
+        let userType = null;
 
-    // Check OTP exist
-    if (!admin.otp?.code) {
-        return res.status(400).json({ message: 'No OTP found for this admin' });
+        // 1️⃣ FIND USER
+        user = await Admin.findOne({ email });
+        if (user) userType = "SUPER_ADMIN";
+
+        if (!user) {
+            user = await AdminRoleAdmin.findOne({ email });
+            if (user) userType = "ROLE_ADMIN";
+        }
+
+        if (!user) {
+            user = await TeamMember.findOne({ email });
+            if (user) userType = "TEAM_MEMBER";
+        }
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        // 2️⃣ CHECK OTP
+        if (!user.otp?.code) {
+            return res.status(400).json({ message: "OTP not found. Request a new one." });
+        }
+
+        // 3️⃣ EXPIRY
+        if (new Date() > new Date(user.otp.expiresAt)) {
+            user.otp = undefined;
+            await user.save();
+            return res.status(400).json({ message: "OTP expired. Request a new one." });
+        }
+
+        // 4️⃣ ATTEMPTS
+        if (user.otp.attemptsLeft <= 0) {
+            user.otp = undefined;
+            await user.save();
+            return res.status(429).json({ message: "Too many wrong attempts. Request new OTP." });
+        }
+
+        // 5️⃣ MATCH OTP
+        const ok = await bcrypt.compare(otp, user.otp.code);
+
+        if (!ok) {
+            user.otp.attemptsLeft -= 1;
+            await user.save();
+            return res.status(401).json({
+                message: "Incorrect OTP",
+                attemptsLeft: user.otp.attemptsLeft
+            });
+        }
+
+        // 6️⃣ SUCCESS → RESET PASSWORD
+        user.password = newPassword;
+        user.otp = undefined;
+        user.otpRequests = [];
+        await user.save();
+
+        return res.status(200).json({
+            message: "Password reset successful",
+            userType,
+            id: user._id
+        });
+
+    } catch (err) {
+        console.error("resetPasswordWithOtp error:", err);
+        return res.status(500).json({ message: "Failed to reset password", error: err.message });
     }
-
-    // Check expiry
-    if (new Date() > new Date(admin.otp.expiresAt)) {
-        admin.otp = undefined;
-        await admin.save();
-        return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
-    }
-
-    // Attempts left
-    if (admin.otp.attemptsLeft <= 0) {
-        admin.otp = undefined;
-        await admin.save();
-        return res.status(403).json({ message: 'Too many incorrect attempts. Request a new OTP.' });
-    }
-
-    // Compare
-    const isValid = await bcrypt.compare(otp, admin.otp.code);
-    if (!isValid) {
-        admin.otp.attemptsLeft -= 1;
-        await admin.save();
-        return res.status(400).json({ message: 'Incorrect OTP', attemptsLeft: admin.otp.attemptsLeft });
-    }
-
-    // ✅ Success → reset password + clear OTP
-    admin.password = newPassword; // let the pre-save hook hash it    admin.otp = undefined;
-    admin.otpRequests = [];
-    await admin.save();
-
-    return res.status(200).json({ message: 'Password reset successful' });
 };
