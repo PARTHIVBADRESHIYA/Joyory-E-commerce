@@ -485,7 +485,11 @@ export const loginUnified = async (req, res) => {
                 return res.status(401).json({ success: false, message: 'Invalid credentials' });
             }
             const token = createToken({ id: superAdmin._id, type: 'SUPER_ADMIN' });
-            return res.status(200).json({ success: true, token, user: { id: superAdmin._id, name: superAdmin.name, email: superAdmin.email, type: 'SUPER_ADMIN' } });
+            return res.status(200).json({
+                success: true, token, user: {
+                    id: superAdmin._id, name: superAdmin.name, email: superAdmin.email, type: 'SUPER_ADMIN', permissions: "ALL" // ⭐ so front-end knows unlimited access
+                }
+            });
         }
 
         // 2) Role admin
@@ -493,7 +497,11 @@ export const loginUnified = async (req, res) => {
             const ok = await bcrypt.compare(password, roleAdmin.password);
             if (!ok) return res.status(401).json({ success: false, message: 'Invalid credentials' });
             const token = createToken({ id: roleAdmin._id, type: 'ADMIN_ROLE_ADMIN', role: roleAdmin.role?._id });
-            return res.status(200).json({ success: true, token, user: { id: roleAdmin._id, name: roleAdmin.name, email: roleAdmin.email, type: 'ADMIN_ROLE_ADMIN', role: roleAdmin.role } });
+            return res.status(200).json({
+                success: true, token, user: {
+                    id: roleAdmin._id, name: roleAdmin.name, email: roleAdmin.email, type: 'ADMIN_ROLE_ADMIN', role: roleAdmin.role, permissions: roleAdmin.role.permissions   // ⭐ add this
+                }
+            });
         }
 
         // 3) Team member
