@@ -1818,10 +1818,7 @@ export const getSingleProduct = async (req, res) => {
                                             $concatArrays: [
                                                 [
                                                     {
-                                                        product: {
-                                                            _id: product._id,
-                                                            name: product.name,
-                                                        },
+                                                        product: product._id,
                                                         viewedAt: new Date()
                                                     }
                                                 ],
@@ -1829,7 +1826,7 @@ export const getSingleProduct = async (req, res) => {
                                                     $filter: {
                                                         input: "$recentlyViewed",
                                                         as: "item",
-                                                        cond: { $ne: ["$$item.product._id", product._id] }
+                                                        cond: { $ne: ["$$item.product", product._id] }
                                                     }
                                                 }
                                             ]
@@ -1841,6 +1838,7 @@ export const getSingleProduct = async (req, res) => {
                         }
                     ]
                 );
+
             }
         } catch (trackErr) {
             console.error("Failed to track recently viewed:", trackErr);

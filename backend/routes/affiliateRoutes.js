@@ -147,7 +147,7 @@ router.get("/admin/users/:id", isAdmin, adminGetUserDetails);
 
 // Commissions
 router.get("/admin/commissions", isAdmin, adminGetCommissions);
-router.post("/admin/commissions/approve", isAdmin, adminApproveCommission);
+router.post("/admin/commissions/approvedddddddddd", isAdmin, adminApproveCommission);
 router.post("/admin/commissions/reject", isAdmin, adminRejectCommission);
 
 // Payouts
