@@ -86,6 +86,291 @@ export const resolveFormulationId = async (input) => {
     return formulationDoc._id;
 };
 
+// the add-product is complete 
+// const addProductController = async (req, res) => {
+//     try {
+//         const {
+//             name,
+//             variant,
+//             summary,
+//             description,
+//             ingredients,
+//             features,
+//             howToUse,
+//             price,
+//             buyingPrice,
+//             brand,
+//             category,
+//             categories,
+//             quantity,
+//             expiryDate,
+//             scheduledAt,
+//             productTags: rawTags,
+//             variants: rawVariants,
+//             thresholdValue: rawThresholdValue,
+//             formulation,
+//             seller,
+//         } = req.body;
+
+//         // ---------------- Basic Validations ----------------
+//         if (!name)
+//             return res.status(400).json({ message: "Product name is required" });
+
+//         const existingProduct = await Product.findOne({ name: name.trim() });
+//         if (existingProduct)
+//             return res.status(400).json({ message: `Product with name "${name}" already exists` });
+
+//         if (!category && (!categories || categories.length === 0)) {
+//             return res.status(400).json({ message: "Category is required" });
+//         }
+
+//         // ---------------- Handle Scheduling ----------------
+//         let isPublished = true;
+//         let scheduleDate = null;
+//         if (scheduledAt) {
+//             // User enters IST time (local)
+//             const parsedDateIST = moment.tz(scheduledAt, "YYYY-MM-DD HH:mm", "Asia/Kolkata");
+
+//             if (!parsedDateIST.isValid()) {
+//                 return res.status(400).json({ message: "❌ Invalid scheduledAt date format. Use YYYY-MM-DD HH:mm (IST)" });
+//             }
+
+//             // Convert IST to UTC before saving
+//             const parsedDateUTC = parsedDateIST.clone().tz("UTC").toDate();
+
+//             if (parsedDateUTC > new Date()) {
+//                 isPublished = false;
+//                 scheduleDate = parsedDateUTC; // ✅ saved in UTC
+//             }
+//         }
+
+//         // ---------------- Resolve Categories ----------------
+//         let finalCategories = categories && categories.length
+//             ? (Array.isArray(categories) ? categories : [categories])
+//             : [category];
+
+//         const resolvedCategories = [];
+//         for (let cat of finalCategories) {
+//             if (!cat) continue;
+//             const trimmed = String(cat).trim();
+//             if (mongoose.Types.ObjectId.isValid(trimmed)) {
+//                 resolvedCategories.push(trimmed);
+//             } else {
+//                 const foundCat = await Category.findOne({ name: { $regex: `^${trimmed}$`, $options: "i" } });
+//                 if (!foundCat)
+//                     return res.status(400).json({ message: `Category "${trimmed}" not found` });
+//                 resolvedCategories.push(foundCat._id);
+//             }
+//         }
+
+//         const foundCategories = await Category.find({ _id: { $in: resolvedCategories } });
+//         if (foundCategories.length !== resolvedCategories.length)
+//             return res.status(400).json({ message: "One or more category IDs are invalid" });
+
+//         // ---------------- Build Hierarchy ----------------
+//         const buildCategoryHierarchy = async (leafId) => {
+//             const hierarchy = [];
+//             let current = await Category.findById(leafId);
+//             while (current) {
+//                 hierarchy.unshift(current._id);
+//                 if (!current.parent) break;
+//                 current = await Category.findById(current.parent);
+//             }
+//             return hierarchy;
+//         };
+//         const categoryHierarchy = await buildCategoryHierarchy(resolvedCategories[0]);
+
+//         // ---------------- Parse Tags ----------------
+//         let productTags = [];
+//         try {
+//             productTags = rawTags
+//                 ? (typeof rawTags === "string" ? JSON.parse(rawTags) : rawTags)
+//                 : [];
+//         } catch {
+//             productTags = [];
+//         }
+
+//         // ---------------- Price Validations ----------------
+//         const parsedPrice = Number(price);
+//         const parsedBuyingPrice = Number(buyingPrice);
+//         // ---------------- Variants ----------------
+//         let variants = [];
+//         let shadeOptions = [];
+//         let colorOptions = [];
+//         let images = [];
+
+//         try {
+//             let variantArray = rawVariants
+//                 ? (typeof rawVariants === "string" ? JSON.parse(rawVariants) : rawVariants)
+//                 : [];
+
+//             if (variantArray.length > 0) {
+//                 // ✅ Variant Product Rules
+//                 if (quantity || rawThresholdValue || req.body.images || req.body.imageUrls) {
+//                     return res.status(400).json({
+//                         message: "❌ For variant products, do NOT provide global quantity, thresholdValue or images. Use variants only.",
+//                     });
+//                 }
+
+//                 // ✅ Validate all variants first
+//                 const skuSet = new Set();
+//                 for (let i = 0; i < variantArray.length; i++) {
+//                     const v = variantArray[i];
+//                     if (!v.sku) throw new Error(`Variant ${i + 1} is missing SKU`);
+//                     if (skuSet.has(v.sku))
+//                         throw new Error(`Duplicate SKU "${v.sku}" found`);
+//                     skuSet.add(v.sku);
+
+//                     if (v.stock === undefined || isNaN(Number(v.stock)))
+//                         throw new Error(`Variant ${v.sku} must have valid stock`);
+//                     if (v.thresholdValue === undefined || isNaN(Number(v.thresholdValue)))
+//                         throw new Error(`Variant ${v.sku} must have thresholdValue`);
+//                 }
+
+//                 // ✅ Upload variant images and build variant array
+//                 variants = await Promise.all(
+//                     variantArray.map(async (v, i) => {
+//                         const uploadedImages = [];
+//                         const variantFiles = req.files?.filter(
+//                             (f) => f.fieldname === `variants[${i}][images]`
+//                         ) || [];
+
+//                         for (const file of variantFiles) {
+//                             const result = await uploadToCloudinary(file.buffer, "products/variants", "image");
+//                             uploadedImages.push(result.secure_url);
+//                         }
+
+//                         const combinedImages = [
+//                             ...(Array.isArray(v.images) ? v.images : []),
+//                             ...uploadedImages,
+//                         ];
+
+//                         if (combinedImages.length === 0)
+//                             throw new Error(`Variant ${v.sku} must have at least one image`);
+
+//                         const brandDoc = await Brand.findById(brand);
+
+//                         return computeWarehouseStock({
+//                             ...v,
+//                             stockByWarehouse: Array.isArray(v.stockByWarehouse)
+//                                 ? v.stockByWarehouse
+//                                 : [],
+//                             sales: Number(v.sales) || 0,
+//                             thresholdValue: Number(v.thresholdValue),
+//                             discountedPrice:
+//                                 v.discountedPrice !== undefined
+//                                     ? Number(v.discountedPrice)
+//                                     : null,
+//                             images: combinedImages.slice(-8),
+//                             isActive: v.isActive !== false,
+//                             createdAt: new Date(),
+//                         }, brandDoc);
+
+//                     })
+//                 );
+
+//                 shadeOptions = variants.map((v) => v.shadeName).filter(Boolean);
+//                 colorOptions = variants.map((v) => v.hex).filter(Boolean);
+//             } else {
+//                 // ✅ Non-Variant Product Rules
+//                 if (quantity === undefined)
+//                     return res.status(400).json({
+//                         message: "❌ quantity is required for non-variant products",
+//                     });
+//                 if (rawThresholdValue === undefined)
+//                     return res.status(400).json({
+//                         message: "❌ thresholdValue is required for non-variant products",
+//                     });
+
+//                 // ✅ Upload global product images
+//                 const mainFiles = req.files?.filter((f) => f.fieldname === "images") || [];
+//                 for (const file of mainFiles) {
+//                     const result = await cloudinary.uploader.upload(file.path, {
+//                         folder: "products",
+//                     });
+//                     images.push(result.secure_url);
+//                 }
+
+//                 if (req.body.imageUrls) {
+//                     let urls =
+//                         typeof req.body.imageUrls === "string"
+//                             ? JSON.parse(req.body.imageUrls)
+//                             : req.body.imageUrls;
+//                     for (const url of urls) images.push(url);
+//                 }
+
+//                 if (images.length === 0)
+//                     return res.status(400).json({
+//                         message: "❌ Non-variant products must have at least one global image",
+//                     });
+//             }
+//         } catch (err) {
+//             console.error("❌ Variants parsing error:", err);
+//             return res.status(400).json({ message: err.message });
+//         }
+
+//         // ---------------- Compute Stock Status ----------------
+//         const totalQuantity =
+//             variants.length > 0
+//                 ? variants.reduce((sum, v) => sum + (v.stock || 0), 0)
+//                 : Number(quantity);
+
+//         let status =
+//             totalQuantity === 0
+//                 ? "Out of stock"
+//                 : totalQuantity < Number(rawThresholdValue)
+//                     ? "Low stock"
+//                     : "In-stock";
+
+//         // ---------------- Create Product ----------------
+//         const product = new Product({
+//             name,
+//             variant,
+//             summary,
+//             description,
+//             ingredients,
+//             features,
+//             howToUse,
+//             price: parsedPrice,
+//             buyingPrice: parsedBuyingPrice,
+//             quantity: variants.length > 0 ? undefined : Number(quantity),
+//             thresholdValue: variants.length > 0 ? undefined : Number(rawThresholdValue),
+//             expiryDate,
+//             images: variants.length > 0 ? undefined : images,
+//             brand,
+//             category: resolvedCategories[0],
+//             categories: resolvedCategories,
+//             categoryHierarchy,
+//             status,
+//             productTags,
+//             shadeOptions,
+//             colorOptions,
+//             variants,
+//             isPublished,
+//             scheduledAt: scheduleDate,
+//             seller: seller || null,
+//         });
+
+//         await product.save();
+
+//         // Clear cache for this product (and optionally global product lists)
+//         await clearProductCacheForId(product._id);
+
+//         return res.status(201).json({
+//             message: "✅ Product created successfully",
+//             product,
+//         });
+//     } catch (error) {
+//         console.error(
+//             "❌ Product placement error:",
+//             util.inspect(error, { showHidden: false, depth: null })
+//         );
+//         return res.status(500).json({
+//             message: "❌ Product placement failed",
+//             error: error.message,
+//         });
+//     }
+// };
 const addProductController = async (req, res) => {
     try {
         const {
@@ -101,12 +386,10 @@ const addProductController = async (req, res) => {
             brand,
             category,
             categories,
-            quantity,
             expiryDate,
             scheduledAt,
             productTags: rawTags,
             variants: rawVariants,
-            thresholdValue: rawThresholdValue,
             formulation,
             seller,
         } = req.body;
@@ -127,19 +410,17 @@ const addProductController = async (req, res) => {
         let isPublished = true;
         let scheduleDate = null;
         if (scheduledAt) {
-            // User enters IST time (local)
             const parsedDateIST = moment.tz(scheduledAt, "YYYY-MM-DD HH:mm", "Asia/Kolkata");
 
             if (!parsedDateIST.isValid()) {
                 return res.status(400).json({ message: "❌ Invalid scheduledAt date format. Use YYYY-MM-DD HH:mm (IST)" });
             }
 
-            // Convert IST to UTC before saving
             const parsedDateUTC = parsedDateIST.clone().tz("UTC").toDate();
 
             if (parsedDateUTC > new Date()) {
                 isPublished = false;
-                scheduleDate = parsedDateUTC; // ✅ saved in UTC
+                scheduleDate = parsedDateUTC;
             }
         }
 
@@ -192,6 +473,7 @@ const addProductController = async (req, res) => {
         // ---------------- Price Validations ----------------
         const parsedPrice = Number(price);
         const parsedBuyingPrice = Number(buyingPrice);
+
         // ---------------- Variants ----------------
         let variants = [];
         let shadeOptions = [];
@@ -205,11 +487,7 @@ const addProductController = async (req, res) => {
 
             if (variantArray.length > 0) {
                 // ✅ Variant Product Rules
-                if (quantity || rawThresholdValue || req.body.images || req.body.imageUrls) {
-                    return res.status(400).json({
-                        message: "❌ For variant products, do NOT provide global quantity, thresholdValue or images. Use variants only.",
-                    });
-                }
+                // Removed global quantity, thresholdValue, and images validation
 
                 // ✅ Validate all variants first
                 const skuSet = new Set();
@@ -270,39 +548,8 @@ const addProductController = async (req, res) => {
 
                 shadeOptions = variants.map((v) => v.shadeName).filter(Boolean);
                 colorOptions = variants.map((v) => v.hex).filter(Boolean);
-            } else {
-                // ✅ Non-Variant Product Rules
-                if (quantity === undefined)
-                    return res.status(400).json({
-                        message: "❌ quantity is required for non-variant products",
-                    });
-                if (rawThresholdValue === undefined)
-                    return res.status(400).json({
-                        message: "❌ thresholdValue is required for non-variant products",
-                    });
-
-                // ✅ Upload global product images
-                const mainFiles = req.files?.filter((f) => f.fieldname === "images") || [];
-                for (const file of mainFiles) {
-                    const result = await cloudinary.uploader.upload(file.path, {
-                        folder: "products",
-                    });
-                    images.push(result.secure_url);
-                }
-
-                if (req.body.imageUrls) {
-                    let urls =
-                        typeof req.body.imageUrls === "string"
-                            ? JSON.parse(req.body.imageUrls)
-                            : req.body.imageUrls;
-                    for (const url of urls) images.push(url);
-                }
-
-                if (images.length === 0)
-                    return res.status(400).json({
-                        message: "❌ Non-variant products must have at least one global image",
-                    });
             }
+
         } catch (err) {
             console.error("❌ Variants parsing error:", err);
             return res.status(400).json({ message: err.message });
@@ -312,12 +559,12 @@ const addProductController = async (req, res) => {
         const totalQuantity =
             variants.length > 0
                 ? variants.reduce((sum, v) => sum + (v.stock || 0), 0)
-                : Number(quantity);
+                : 0; // No global quantity
 
         let status =
             totalQuantity === 0
                 ? "Out of stock"
-                : totalQuantity < Number(rawThresholdValue)
+                : totalQuantity < 0
                     ? "Low stock"
                     : "In-stock";
 
@@ -332,10 +579,6 @@ const addProductController = async (req, res) => {
             howToUse,
             price: parsedPrice,
             buyingPrice: parsedBuyingPrice,
-            quantity: variants.length > 0 ? undefined : Number(quantity),
-            thresholdValue: variants.length > 0 ? undefined : Number(rawThresholdValue),
-            expiryDate,
-            images: variants.length > 0 ? undefined : images,
             brand,
             category: resolvedCategories[0],
             categories: resolvedCategories,
