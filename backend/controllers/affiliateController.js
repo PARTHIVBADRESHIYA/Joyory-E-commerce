@@ -1045,23 +1045,113 @@ export const adminGetPayoutHistory = async (req, res) => {
  */
 export const adminAffiliateSummary = async (req, res) => {
     try {
-        const totalUsers = await AffiliateUser.countDocuments();
-        const totalsAgg = await AffiliateEarning.aggregate([{ $group: { _id: null, total: { $sum: "$commission" } } }]);
-        const totalEarnings = totalsAgg[0]?.total || 0;
-        const pending = await AffiliateEarning.countDocuments({ status: "pending" });
-        const approved = await AffiliateEarning.countDocuments({ status: "approved" });
-        const paid = await AffiliateEarning.countDocuments({ status: "paid" });
+        // ---------- BASIC COUNTS ----------
+        const totalAffiliates = await AffiliateUser.countDocuments();
+        const activeAffiliates = await AffiliateUser.countDocuments({ isApproved: "true" });
+        const pendingApprovals = await AffiliateUser.countDocuments({ isApproved: "false" });
 
-        // top affiliates (by lifetimeEarnings)
-        const topAffiliates = await AffiliateUser.find().sort({ lifetimeEarnings: -1 }).limit(10).select("fullName email lifetimeEarnings clicks orders");
+        // ---------- TOTAL EARNINGS ----------
+        const totalEarningsAgg = await AffiliateEarning.aggregate([
+            { $group: { _id: null, total: { $sum: "$commission" }, } }
+        ]);
+        const totalEarnings = totalEarningsAgg[0]?.total || 0;
 
+        // ---------- TOTAL CLICKS / ORDERS / CONVERSION ----------
+        const perfAgg = await AffiliateUser.aggregate([
+            {
+                $group: {
+                    _id: null,
+                    totalClicks: { $sum: "$clicks" },
+                    totalOrders: { $sum: "$orders" },
+                    totalEarnings: { $sum: "$lifetimeEarnings" },
+                    affiliates: { $push: "$$ROOT" }
+                }
+            }
+        ]);
+
+        const totalClicks = perfAgg[0]?.totalClicks || 0;
+        const totalOrders = perfAgg[0]?.totalOrders || 0;
+        const conversionRate = totalClicks > 0 ? Number(((totalOrders / totalClicks) * 100).toFixed(1)) : 0;
+        const avgEarnings = totalAffiliates > 0 ? Math.round(totalEarnings / totalAffiliates) : 0;
+
+        // ---------- EARNINGS DISTRIBUTION ----------
+        const earningsDistribution = await AffiliateUser.find()
+            .select("fullName lifetimeEarnings email")
+            .sort({ lifetimeEarnings: -1 });
+
+        // ---------- TOP AFFILIATES PERFORMANCE TABLE ----------
+        const topAffiliates = await AffiliateUser.find()
+            .sort({ lifetimeEarnings: -1 })
+            .limit(10)
+            .select("fullName email clicks orders lifetimeEarnings");
+
+        const tableData = topAffiliates.map((x, idx) => ({
+            rank: idx + 1,
+            name: x.fullName,
+            email: x.email,
+            clicks: x.clicks,
+            orders: x.orders,
+            earnings: x.lifetimeEarnings,
+            conversion: x.clicks > 0 ? Number((x.orders / x.clicks * 100).toFixed(1)) : 0
+        }));
+
+        // ---------- PAID OUT ----------
+        const paidOut = await AffiliateEarning.aggregate([
+            { $match: { status: "paid" } },
+            { $group: { _id: null, total: { $sum: "$commission" } } }
+        ]);
+        const totalPaid = paidOut[0]?.total || 0;
+
+        // ---------- ACTIVE RATE ----------
+        const activeRate = totalAffiliates > 0
+            ? Number(((activeAffiliates / totalAffiliates) * 100).toFixed(1))
+            : 0;
+
+
+        // ---------- SEND FINAL RESPONSE ----------
         return res.status(200).json({
             success: true,
-            stats: { totalUsers, totalEarnings, pending, approved, paid },
-            topAffiliates
+
+            overviewCards: {
+                totalAffiliates,
+                totalEarnings,
+                pendingApprovals,
+                approvedAffiliates: activeAffiliates,
+                avgEarnings,
+                totalClicks,
+                totalOrders,
+                conversionRate
+            },
+
+            topAffiliateTable: tableData,
+
+            performanceMetrics: {
+                avgEarnings,
+                conversionRate,
+                totalClicks,
+                totalOrders,
+                earningsDistribution
+            },
+
+            affiliateOverview: {
+                totalAffiliates,
+                activeAffiliates,
+                pendingApprovals,
+                totalCommission: totalEarnings,
+                summary: `Your affiliate program has generated ₹${totalEarnings} from ${activeAffiliates} active affiliates. Top performers are driving ${totalClicks} clicks and ${totalOrders} conversions.`,
+            },
+
+            quickActionsStats: {
+                avgEarnings,
+                paidOut: totalPaid,
+                activeRate
+            },
+
+            lastUpdated: new Date()
         });
+
     } catch (err) {
-        console.error("adminAffiliateSummary error:", err);
+        console.error("adminAffiliateDashboard error:", err);
         return res.status(500).json({ success: false, message: "Server error" });
     }
 };
