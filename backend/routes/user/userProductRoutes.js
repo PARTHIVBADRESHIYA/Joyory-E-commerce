@@ -11,6 +11,7 @@ import {
     getFilterMetadata
 } from "../../controllers/user/userProductController.js";
 
+import {optionalAuth} from "../../middlewares/authMiddleware.js";
 import {
     productListRateLimiter,
     productDetailRateLimiter,
@@ -36,7 +37,7 @@ router.get("/top-sellers", getTopSellingProducts);
 router.get("/top-categories", getTopCategories);
 
 // ✅ Product by category
-router.get("/category/:slug/products", getProductsByCategory);
+router.get("/category/:slug/products",optionalAuth, getProductsByCategory);
 
 // ✅ Products by skin type (use a distinct prefix to avoid conflicts)
 router.get("/skintype/:slug", validate(productQuerySchema), getProductsBySkinType);
@@ -44,6 +45,7 @@ router.get("/skintype/:slug", validate(productQuerySchema), getProductsBySkinTyp
 // ✅ Single product details (dynamic routes last!)
 router.get(
     "/:idOrSlug",
+    optionalAuth,
     productDetailRateLimiter,
     validate(productDetailQuerySchema),
     getSingleProduct

@@ -112,6 +112,7 @@ const variantSchema = new mongoose.Schema({
     hex: { type: String },
     images: [{ type: String }],
     stock: { type: Number, default: 0 },
+    // ✅ Validation + required removed
     stockByWarehouse: {
         type: [
             {
@@ -126,13 +127,7 @@ const variantSchema = new mongoose.Schema({
                 }
             }
         ],
-        required: true, // 🔥 ENTIRE ARRAY REQUIRED
-        validate: {
-            validator: function (arr) {
-                return Array.isArray(arr) && arr.length > 0;
-            },
-            message: "stockByWarehouse must have at least one warehouse entry."
-        }
+        default: [] // optional
     },
 
     sales: { type: Number, default: 0 },

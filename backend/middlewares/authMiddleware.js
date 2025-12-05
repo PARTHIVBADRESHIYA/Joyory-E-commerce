@@ -8,6 +8,7 @@ import TeamMember from '../models/settings/admin/TeamMember.js';
 import AdminRoleAdmin from '../models/settings/admin/AdminRoleAdmin.js';
 import Order from '../models/Order.js';
 import Seller from "../models/sellers/Seller.js";
+import AffiliateUser from "../models/AffiliateUser.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key';
 if (!JWT_SECRET) throw new Error("JWT_SECRET is not defined in env");
@@ -77,6 +78,24 @@ export const authenticateSeller = async (req, res, next) => {
     }
 };
 
+export const affiliateAuth = async (req, res, next) => {
+    try {
+        const token = req.headers.authorization?.split(" ")[1];
+
+        if (!token) return res.status(401).json({ message: "No token provided" });
+
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+        const user = await AffiliateUser.findById(decoded.id);
+        if (!user) return res.status(404).json({ message: "Affiliate not found" });
+
+        req.affiliate = user;
+        next();
+
+    } catch (err) {
+        return res.status(401).json({ message: "Invalid token" });
+    }
+};
 
 // export const verifyAdminOrTeamMember = async (req, res, next) => {
 //     const token = req.headers.authorization?.split(' ')[1];

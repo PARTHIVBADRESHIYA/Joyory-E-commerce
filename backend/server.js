@@ -454,7 +454,6 @@ import discountRoutes from "./routes/discountRoutes.js";
 import promotionRoutes from "./routes/promotionRoutes.js";
 import reviewRoutes from "./routes/reviewRoutes.js";
 import analyticsRoutes from "./routes/analyticsRoutes.js";
-import affiliateRoutes from "./routes/affiliateRoutes.js";
 import blogRoutes from "./routes/blogRoutes.js";
 import supportRoutes from "./routes/supportRoutes.js";
 import campaignRoutes from "./routes/campaignRoutes.js";
@@ -492,6 +491,7 @@ import sellerCategoryRoutes from "./routes/sellers/sellerCategoryRoutes.js";
 import virtualTryOnRoutes from "./routes/virtualTryOnRoutes.js";
 import permissionsRoutes from "./routes/permissionsRoutes.js";
 import adminProfileRoutes from "./routes/adminProfileRoutes.js";
+import affiliateRoutes from "./routes/affiliateRoutes.js";
 // User side
 import userProductRoutes from "./routes/user/userProductRoutes.js";
 import userCartAndOrderRoutes from "./routes/user/userCartAndOrderRoutes.js";
@@ -615,7 +615,6 @@ app.use("/api/discounts", discountRoutes);
 app.use("/api/promotions", promotionRoutes);
 app.use("/api/reviews", reviewRoutes);
 app.use("/api/analytics", analyticsRoutes);
-app.use("/api/affiliates", affiliateRoutes);
 app.use("/api/blogs", blogRoutes);
 app.use("/api/support", supportRoutes);
 app.use("/api/campaign", campaignRoutes);
@@ -650,6 +649,8 @@ app.use("/api/seller-category", sellerCategoryRoutes);
 app.use("/api/vto", virtualTryOnRoutes);
 app.use("/api/permissions", permissionsRoutes);
 app.use("/api/admin/profile", adminProfileRoutes);
+app.use("/api/affiliate", affiliateRoutes);
+
 
 if ((process.env.SHIPPING_PROVIDER || "mock").toLowerCase() === "mock") {
     app.use("/api/shipping", mockShippingRoutes);

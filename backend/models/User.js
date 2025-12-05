@@ -74,8 +74,20 @@ const userSchema = new mongoose.Schema({
         enum: ['email', 'sms'],
         default: 'email'
     },
-    recentCategories: [{ type: mongoose.Schema.Types.Mixed }], // 👈 can store either ObjectId or String
-    recentProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: "Product" }],
+    conversionStats: {
+        addToCartCount: { type: Number, default: 0 },
+        checkoutCount: { type: Number, default: 0 },
+        orderCount: { type: Number, default: 0 }
+    },
+    recentlyViewed: [{
+        product: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
+        viewedAt: { type: Date, default: Date.now }
+    }],
+    recentCategoryViews: [{
+        category: mongoose.Schema.Types.Mixed,
+        viewedAt: Date
+    }]
+    ,
     savedRecommendations: [{ type: mongoose.Schema.Types.ObjectId, ref: "Product" }],
     lastRecommendationUpdate: { type: Date },
     wishlist: [
@@ -105,6 +117,16 @@ const userSchema = new mongoose.Schema({
         default: 'self' // signup default
     }
 }, { timestamps: true });
+
+userSchema.pre("save", function (next) {
+    if (Array.isArray(this.recentlyViewed)) {
+        this.recentlyViewed = this.recentlyViewed.filter(
+            v => v && v.product
+        );
+    }
+    next();
+});
+
 
 // userSchema.pre('save', async function (next) {
 //     if (!this.isModified('password')) return next();

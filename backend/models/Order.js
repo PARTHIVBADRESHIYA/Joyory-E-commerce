@@ -338,7 +338,12 @@ const orderSchema = new mongoose.Schema({
 
     discount: String,
     discountCode: String,
-    affiliate: { type: mongoose.Schema.Types.ObjectId, ref: "Affiliate" },
+    affiliate: {
+        slug: { type: String, default: null },
+        applied: { type: Boolean, default: false },
+        affiliateUser: { type: mongoose.Schema.Types.ObjectId, ref: "AffiliateUser", default: null },
+        affiliateLink: { type: String, default: null }
+    },
 
     shippingAddress: { type: Object },
 

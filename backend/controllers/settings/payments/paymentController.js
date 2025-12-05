@@ -1731,7 +1731,11 @@ import { createShiprocketOrder, cancelShiprocketShipment } from "../../../middle
 import { refundQueue } from "../../../middlewares/services/refundQueue.js";
 import { sendEmail } from "../../../middlewares/utils/emailService.js"; // ✅ assume you already have an email service
 import Product from '../../../models/Product.js';
-import Affiliate from '../../../models/Affiliate.js';
+import AffiliateUser from "../../../models/AffiliateUser.js";
+import AffiliateLink from "../../../models/AffiliateLink.js";
+import AffiliateEarning from "../../../models/AffiliateEarning.js";
+import AffiliatePayout from "../../../models/AffiliatePayout.js";
+import AffiliateOrder from "../../../models/AffiliateOrder.js";
 import mongoose from 'mongoose';
 import User from '../../../models/User.js';
 import Referral from '../../../models/Referral.js'; // ✅ You need to import this
@@ -2058,6 +2062,65 @@ export const verifyRazorpayPayment = async (req, res) => {
         order.orderStatus = "Awaiting Admin Confirmation";
         order.isDraft = false;   // <-- ADD THIS
         order.adminConfirmed = false;
+        /************************************
+ *  AFFILIATE SYSTEM TRIGGER POINT  *
+ ************************************/
+        if (order.affiliate?.slug && !order.affiliate?.applied) {
+
+            // 1️⃣ Find affiliate link using slug
+            const affiliateLink = await AffiliateLink.findOne({ slug: order.affiliate.slug });
+
+            if (affiliateLink) {
+
+                // 2️⃣ Find affiliate user from affiliateLink
+                const affiliateUser = await AffiliateUser.findById(affiliateLink.affiliateUser);
+
+                if (affiliateUser) {
+
+                    // 3️⃣ Commission calculation
+                    const commissionRate = affiliateUser.commissionRate || 10; // default 10%
+                    const commissionAmount = Math.round((order.amount * commissionRate) / 100);
+
+                    // 4️⃣ Create earning record
+                    await AffiliateEarning.create({
+                        affiliateUser: affiliateUser._id,
+                        affiliateLink: affiliateLink._id,
+
+                        orderId: order._id,
+                        orderNumber: order.orderNumber || order.orderId || "-",
+
+                        orderAmount: order.amount,
+                        commission: commissionAmount,
+                        status: "pending"
+                    });
+
+                    // 4B️⃣ Create affiliate order (IMPORTANT)
+                    await AffiliateOrder.create({
+                        affiliateUser: affiliateUser._id,
+                        affiliateLink: affiliateLink._id,
+
+                        orderId: order._id,
+                        commission: commissionAmount,
+                        orderValue: order.amount,
+                        status: "pending"
+                    });
+
+                    // 5️⃣ Update ORDER affiliate section
+                    order.affiliate.applied = true;
+                    order.affiliate.affiliateUser = affiliateUser._id;
+                    order.affiliate.affiliateLink = affiliateLink._id;
+
+                    // 6️⃣ Add pending commission to affiliate user
+                    affiliateUser.pendingCommission =
+                        (affiliateUser.pendingCommission || 0) + commissionAmount;
+
+                    await affiliateUser.save();
+                }
+            }
+        }
+
+
+
         if (shippingAddress) order.shippingAddress = shippingAddress;
         order.trackingHistory = order.trackingHistory || [];
         order.trackingHistory.push({ status: "Payment Captured", timestamp: new Date(), location: "Razorpay" });
@@ -2197,6 +2260,67 @@ export const confirmCodOrder = async (req, res) => {
         order.paid = false;
         order.paymentMethod = "COD";
         order.isDraft = false;   // <-- ADD THIS
+
+        /************************************
+     *  AFFILIATE SYSTEM TRIGGER POINT  *
+     ************************************/
+        if (order.affiliate?.slug && !order.affiliate?.applied) {
+
+            // 1️⃣ Find affiliate link using slug
+            const affiliateLink = await AffiliateLink.findOne({ slug: order.affiliate.slug });
+
+            if (affiliateLink) {
+
+                // 2️⃣ Find affiliate user from affiliateLink
+                const affiliateUser = await AffiliateUser.findById(affiliateLink.affiliateUser);
+
+                if (affiliateUser) {
+
+                    // 3️⃣ Commission calculation
+                    const commissionRate = affiliateUser.commissionRate || 10; // default 10%
+                    const commissionAmount = Math.round((order.amount * commissionRate) / 100);
+
+                    // 4️⃣ Create earning record
+                    await AffiliateEarning.create({
+                        affiliateUser: affiliateUser._id,
+                        affiliateLink: affiliateLink._id,
+
+                        orderId: order._id,
+                        orderNumber: order.orderNumber || order.orderId || "-",
+
+                        orderAmount: order.amount,
+                        commission: commissionAmount,
+                        status: "pending"
+                    });
+
+                    // 4B️⃣ Create affiliate order (IMPORTANT)
+                    await AffiliateOrder.create({
+                        affiliateUser: affiliateUser._id,
+                        affiliateLink: affiliateLink._id,
+
+                        orderId: order._id,
+                        commission: commissionAmount,
+                        orderValue: order.amount,
+                        status: "pending"
+                    });
+
+                    // 5️⃣ Update ORDER affiliate section
+                    order.affiliate.applied = true;
+                    order.affiliate.affiliateUser = affiliateUser._id;
+                    order.affiliate.affiliateLink = affiliateLink._id;
+
+                    // 6️⃣ Add pending commission to affiliate user
+                    affiliateUser.pendingCommission =
+                        (affiliateUser.pendingCommission || 0) + commissionAmount;
+
+                    await affiliateUser.save();
+                }
+            }
+        }
+
+
+
+
         order.trackingHistory.push({
             status: "COD Requested",
             timestamp: new Date(),
@@ -2308,6 +2432,65 @@ export const createWalletPayment = async (req, res) => {
             order.orderStatus = "Awaiting Admin Confirmation";
             order.isDraft = false;   // <-- ADD THIS
             order.adminConfirmed = false;
+
+            /************************************
+       *  AFFILIATE SYSTEM TRIGGER POINT  *
+       ************************************/
+            if (order.affiliate?.slug && !order.affiliate?.applied) {
+
+                // 1️⃣ Find affiliate link using slug
+                const affiliateLink = await AffiliateLink.findOne({ slug: order.affiliate.slug });
+
+                if (affiliateLink) {
+
+                    // 2️⃣ Find affiliate user from affiliateLink
+                    const affiliateUser = await AffiliateUser.findById(affiliateLink.affiliateUser);
+
+                    if (affiliateUser) {
+
+                        // 3️⃣ Commission calculation
+                        const commissionRate = affiliateUser.commissionRate || 10; // default 10%
+                        const commissionAmount = Math.round((order.amount * commissionRate) / 100);
+
+                        // 4️⃣ Create earning record
+                        await AffiliateEarning.create({
+                            affiliateUser: affiliateUser._id,
+                            affiliateLink: affiliateLink._id,
+
+                            orderId: order._id,
+                            orderNumber: order.orderNumber || order.orderId || "-",
+
+                            orderAmount: order.amount,
+                            commission: commissionAmount,
+                            status: "pending"
+                        });
+
+                        // 4B️⃣ Create affiliate order (IMPORTANT)
+                        await AffiliateOrder.create({
+                            affiliateUser: affiliateUser._id,
+                            affiliateLink: affiliateLink._id,
+
+                            orderId: order._id,
+                            commission: commissionAmount,
+                            orderValue: order.amount,
+                            status: "pending"
+                        });
+
+                        // 5️⃣ Update ORDER affiliate section
+                        order.affiliate.applied = true;
+                        order.affiliate.affiliateUser = affiliateUser._id;
+                        order.affiliate.affiliateLink = affiliateLink._id;
+
+                        // 6️⃣ Add pending commission to affiliate user
+                        affiliateUser.pendingCommission =
+                            (affiliateUser.pendingCommission || 0) + commissionAmount;
+
+                        await affiliateUser.save();
+                    }
+                }
+            }
+
+
             order.transactionId = `WALLET-${Date.now()}`;
 
             order.trackingHistory = order.trackingHistory || [];
@@ -2415,9 +2598,68 @@ export const createGiftCardPayment = async (req, res) => {
             order.paid = true;
             order.paymentStatus = "success";
             order.isDraft = false;   // <-- ADD THIS
-            order.transactionId = `GIFTCARD-${Date.now()}`;
-            order.orderStatus = "Awaiting Admin Confirmation";
             order.adminConfirmed = false;
+            order.orderStatus = "Awaiting Admin Confirmation";
+
+            /************************************
+    *  AFFILIATE SYSTEM TRIGGER POINT  *
+    ************************************/
+            if (order.affiliate?.slug && !order.affiliate?.applied) {
+
+                // 1️⃣ Find affiliate link using slug
+                const affiliateLink = await AffiliateLink.findOne({ slug: order.affiliate.slug });
+
+                if (affiliateLink) {
+
+                    // 2️⃣ Find affiliate user from affiliateLink
+                    const affiliateUser = await AffiliateUser.findById(affiliateLink.affiliateUser);
+
+                    if (affiliateUser) {
+
+                        // 3️⃣ Commission calculation
+                        const commissionRate = affiliateUser.commissionRate || 10; // default 10%
+                        const commissionAmount = Math.round((order.amount * commissionRate) / 100);
+
+                        // 4️⃣ Create earning record
+                        await AffiliateEarning.create({
+                            affiliateUser: affiliateUser._id,
+                            affiliateLink: affiliateLink._id,
+
+                            orderId: order._id,
+                            orderNumber: order.orderNumber || order.orderId || "-",
+
+                            orderAmount: order.amount,
+                            commission: commissionAmount,
+                            status: "pending"
+                        });
+
+                        // 4B️⃣ Create affiliate order (IMPORTANT)
+                        await AffiliateOrder.create({
+                            affiliateUser: affiliateUser._id,
+                            affiliateLink: affiliateLink._id,
+
+                            orderId: order._id,
+                            commission: commissionAmount,
+                            orderValue: order.amount,
+                            status: "pending"
+                        });
+
+                        // 5️⃣ Update ORDER affiliate section
+                        order.affiliate.applied = true;
+                        order.affiliate.affiliateUser = affiliateUser._id;
+                        order.affiliate.affiliateLink = affiliateLink._id;
+
+                        // 6️⃣ Add pending commission to affiliate user
+                        affiliateUser.pendingCommission =
+                            (affiliateUser.pendingCommission || 0) + commissionAmount;
+
+                        await affiliateUser.save();
+                    }
+                }
+            }
+
+
+            order.transactionId = `GIFTCARD-${Date.now()}`;
 
             order.trackingHistory = order.trackingHistory || [];
             order.trackingHistory.push(

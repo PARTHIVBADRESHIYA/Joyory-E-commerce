@@ -3,7 +3,6 @@ import mongoose from 'mongoose';
 import Order from '../models/Order.js';
 import Product from '../models/Product.js';
 import Payment from '../models/settings/payments/Payment.js';
-import Affiliate from '../models/Affiliate.js';
 import User from '../models/User.js';
 import { refundQueue } from "../middlewares/services/refundQueue.js";
 import { splitOrderForPersistence } from "../middlewares/services/orderSplit.js"; // ensure this exists and supports session (see notes)

@@ -1,43 +1,50 @@
-// import express from 'express';
-// import { applyAsAffiliate, generateLink, trackReferralClick, getAllAffiliates, updateAffiliateStatus, getPopularProducts, getProductActivity , trackCustomReferralClick} from '../controllers/affiliateController.js';
-// import { protect, isAdmin } from '../middlewares/authMiddleware.js';
-
-// const router = express.Router();
-
-// router.post('/apply', protect, applyAsAffiliate);
-// router.post('/generate-link', protect, generateLink);
-// router.get('/track', trackCustomReferralClick);
-// router.get('/track/:productId', trackReferralClick); // for product links
-// router.get('/admin/all', isAdmin, getAllAffiliates);
-// router.put('/admin/update/:id', isAdmin, updateAffiliateStatus);
-// router.get('/popular', isAdmin, getPopularProducts);
-// router.get('/activity', isAdmin, getProductActivity);
-
-
-// export default router;
-
-
-
-
-import express from 'express';
-import { protect, isAdmin } from '../middlewares/authMiddleware.js';
-import * as ctrl from '../controllers/affiliateController.js';
-import rateLimit from 'express-rate-limit';
-
+import express from "express";
+import {
+    affiliateSignup,
+    affiliateLogin,
+    createAffiliateLink,
+    getMyAffiliateLinks,
+    trackClick,
+    getAffiliateStats,
+    getAffiliateOrders,
+    getPayouts,
+    markCommissionPaid,
+    getPendingCommissions,
+    approveCommission,
+    rejectCommission,
+    payAffiliate,
+    getPayoutHistory,
+    adminAffiliateSummary
+} from "../controllers/affiliateController.js";
+import { affiliateAuth ,isAdmin} from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
+// Auth
+router.post("/signup", affiliateSignup);
+router.post("/login", affiliateLogin);
 
-const publicLimiter = rateLimit({ windowMs: 60 * 1000, max: 60 });
+// Protected Routes
+router.get("/orders", affiliateAuth, getAffiliateOrders);
+router.get("/payouts", affiliateAuth, getPayouts);
+router.put("/mark-paid", affiliateAuth, markCommissionPaid);
 
+router.get("/commissions/pending", isAdmin, getPendingCommissions);
+router.post("/commissions/approve", isAdmin, approveCommission);
+router.post("/commissions/reject", isAdmin, rejectCommission);
 
-router.post('/apply', protect, ctrl.applyAsAffiliate);
-router.put('/admin/update/:id', isAdmin, ctrl.updateAffiliateStatus);
-router.post('/generate-link', protect, ctrl.generateLink);
-router.get('/r/:shortCode', publicLimiter, ctrl.redirectShortLink); // public redirect
-router.get('/track/:productId', ctrl.trackProductClick);
-router.get('/admin/all', isAdmin, ctrl.getAllAffiliates);
-router.get('/admin/export', isAdmin, ctrl.exportAffiliatesCSV);
+router.post("/pay", isAdmin, payAffiliate);
 
+router.get("/payouts", isAdmin, getPayoutHistory);
 
-export default router; 
+router.get("/summary", isAdmin, adminAffiliateSummary);
+
+// Protected Routes
+router.post("/create-link", affiliateAuth, createAffiliateLink);
+router.get("/my-links", affiliateAuth, getMyAffiliateLinks);
+router.get("/stats", affiliateAuth, getAffiliateStats);
+
+// Public Link Redirect
+router.get("/aff/:slug", trackClick);
+
+export default router;
