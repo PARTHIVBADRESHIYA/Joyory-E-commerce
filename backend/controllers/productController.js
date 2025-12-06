@@ -1639,6 +1639,114 @@ const updateProductById = async (req, res) => {
 //         res.status(500).json({ message: 'Error fetching products', error });
 //     }
 // };
+// const getAllProducts = async (req, res) => {
+//     try {
+//         const query = req.query;
+//         const filter = {};
+
+//         // ------------------------- PAGINATION -------------------------
+//         const page = Number(query.page) || 1;
+//         const limit = Number(query.limit) || 12;
+//         const skip = (page - 1) * limit;
+
+//         // ------------------------- FILTERS -------------------------
+//         if (query.brand) filter.brand = { $in: query.brand.split(',') };
+
+//         if (query.category) {
+//             const categoryIds = query.category.split(',');
+
+//             const allCategoryIds = new Set(categoryIds);
+//             const fetchChildren = async (parentId) => {
+//                 const children = await Category.find({ parent: parentId }, '_id');
+//                 for (const child of children) {
+//                     if (!allCategoryIds.has(child._id.toString())) {
+//                         allCategoryIds.add(child._id.toString());
+//                         await fetchChildren(child._id);
+//                     }
+//                 }
+//             };
+
+//             for (const id of categoryIds) {
+//                 await fetchChildren(id);
+//             }
+
+//             filter.category = { $in: Array.from(allCategoryIds) };
+//         }
+
+//         if (query.shadeOptions) filter.shadeOptions = { $in: query.shadeOptions.split(',') };
+//         if (query.colorOptions) filter.colorOptions = { $in: query.colorOptions.split(',') };
+//         if (query.productTags) filter.productTags = { $in: query.productTags.split(',') };
+
+//         const dynamicFilters = [
+//             'preference', 'ingredients', 'benefits', 'concern', 'skinType',
+//             'makeupFinish', 'formulation', 'color', 'skinTone', 'gender', 'age', 'conscious'
+//         ];
+//         dynamicFilters.forEach(attr => {
+//             if (query[attr]) {
+//                 filter.productTags = { $in: query[attr].split(',') };
+//             }
+//         });
+
+//         if (query.minPrice || query.maxPrice) {
+//             filter.price = {};
+//             if (query.minPrice) filter.price.$gte = Number(query.minPrice);
+//             if (query.maxPrice) filter.price.$lte = Number(query.maxPrice);
+//         }
+
+//         // ------------------------- FETCH PRODUCTS -------------------------
+//         const total = await Product.countDocuments(filter);
+
+//         const products = await Product.find(filter)
+//             .sort({ createdAt: -1 })
+//             .skip(skip)
+//             .limit(limit)
+//             .populate('category', 'name')
+//             .lean();
+
+//         // ------------------------- FORMAT RESPONSE -------------------------
+//         const dashboardData = products.map((p) => {
+//             let image = null;
+
+//             // If product has variants → use first variant's first image
+//             if (p.variants?.length > 0 && p.variants[0].images?.length > 0) {
+//                 image = p.variants[0].images[0];
+//             }
+//             // Otherwise use normal product image
+//             else if (Array.isArray(p.images) && p.images.length > 0) {
+//                 image = p.images[0];
+//             }
+
+//             return {
+//                 _id: p._id,
+//                 name: p.name,
+//                 variant: p.variant,
+//                 image,
+//                 price: p.price,
+//                 discountedPrice: p.discountedPrice,
+//                 summary: p.summary || (p.description?.slice(0, 100) || ''),
+//                 ingredients: p.ingredients?.slice(0, 100),
+//                 sales: p.sales,
+//                 remaining: p.quantity,
+//                 status: p.status,
+//                 category: p.category?.name || '',
+//                 brand: p.brand,
+//             };
+//         });
+
+//         // ------------------------- RESPONSE -------------------------
+//         res.status(200).json({
+//             success: true,
+//             total,
+//             page,
+//             totalPages: Math.ceil(total / limit),
+//             count: dashboardData.length,
+//             products: dashboardData,
+//         });
+
+//     } catch (error) {
+//         res.status(500).json({ message: 'Error fetching products', error: error.message });
+//     }
+// };
 const getAllProducts = async (req, res) => {
     try {
         const query = req.query;
@@ -1654,8 +1762,8 @@ const getAllProducts = async (req, res) => {
 
         if (query.category) {
             const categoryIds = query.category.split(',');
-
             const allCategoryIds = new Set(categoryIds);
+
             const fetchChildren = async (parentId) => {
                 const children = await Category.find({ parent: parentId }, '_id');
                 for (const child of children) {
@@ -1705,31 +1813,58 @@ const getAllProducts = async (req, res) => {
 
         // ------------------------- FORMAT RESPONSE -------------------------
         const dashboardData = products.map((p) => {
-            let image = null;
 
-            // If product has variants → use first variant's first image
+            // Default product image
+            let image = null;
             if (p.variants?.length > 0 && p.variants[0].images?.length > 0) {
                 image = p.variants[0].images[0];
-            }
-            // Otherwise use normal product image
-            else if (Array.isArray(p.images) && p.images.length > 0) {
+            } else if (Array.isArray(p.images) && p.images.length > 0) {
                 image = p.images[0];
             }
+
+            const threshold = p.lowStockThreshold ?? 10;
+
+            // ---------------------- Variant Mapping WITH STOCK STATUS ----------------------
+            const variants = (p.variants || []).map(v => {
+                let stockStatus = "in_stock";
+
+                if (v.stock === 0) {
+                    stockStatus = "out_of_stock";
+                } else if (v.stock < threshold) {
+                    stockStatus = "few_left";
+                }
+
+                return {
+                    sku: v.sku,
+                    shadeName: v.shadeName,
+                    hex: v.hex,
+                    stock: v.stock ?? 0,
+                    stockStatus, // <-- NEW STOCK STATUS FIELD
+                    originalPrice: v.originalPrice,
+                    discountedPrice: v.displayPrice,
+                    discountAmount: v.discountAmount,
+                    image: v.images?.[0] || p.images?.[0] || null,
+                };
+            });
 
             return {
                 _id: p._id,
                 name: p.name,
-                variant: p.variant,
-                image,
+
+                image, 
+                brand: p.brand,
+                category: p.category?.name || '',
+
                 price: p.price,
                 discountedPrice: p.discountedPrice,
+
                 summary: p.summary || (p.description?.slice(0, 100) || ''),
                 ingredients: p.ingredients?.slice(0, 100),
+
                 sales: p.sales,
                 remaining: p.quantity,
-                status: p.status,
-                category: p.category?.name || '',
-                brand: p.brand,
+
+                variants
             };
         });
 
@@ -1744,7 +1879,10 @@ const getAllProducts = async (req, res) => {
         });
 
     } catch (error) {
-        res.status(500).json({ message: 'Error fetching products', error: error.message });
+        res.status(500).json({
+            message: 'Error fetching products',
+            error: error.message
+        });
     }
 };
 
