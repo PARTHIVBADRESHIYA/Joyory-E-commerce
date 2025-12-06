@@ -736,7 +736,7 @@ export const getAnalyticsDashboard = async (req, res) => {
         const prevStartMs = prevStart.toDate();
         const prevEndMs = prevEnd.toDate();
 
-    
+
         const [statsAgg] = await Order.aggregate([
             { $match: { isDraft: false } },
             {
@@ -873,6 +873,42 @@ export const getAnalyticsDashboard = async (req, res) => {
                         }
                     },
 
+                    // =============================
+                    // 🎁 GIFT CARD REVENUE
+                    // =============================
+                    giftCardRevenue: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $eq: ["$orderType", "Online"] },
+                                        { $eq: ["$paymentMethod", "GiftCard"] }
+                                    ]
+                                },
+                                "$amount",
+                                0
+                            ]
+                        }
+                    },
+
+                    // =============================
+                    // 👛 WALLET REVENUE
+                    // =============================
+                    walletRevenue: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $eq: ["$orderType", "Online"] },
+                                        { $eq: ["$paymentMethod", "Wallet"] }
+                                    ]
+                                },
+                                "$amount",
+                                0
+                            ]
+                        }
+                    },
+
                     discount: {
                         $first: {
                             $add: [
@@ -884,8 +920,7 @@ export const getAnalyticsDashboard = async (req, res) => {
                                 { $ifNull: ["$giftCardApplied.amount", 0] }
                             ]
                         }
-                    },
-                    giftCard: { $first: { $ifNull: ["$giftCard.amount", 0] } }
+                    }
                 }
             },
 
@@ -895,7 +930,10 @@ export const getAnalyticsDashboard = async (req, res) => {
                     totalUserPaidRevenue: { $sum: "$orderAmount" },
                     totalCompanyProductRevenue: { $sum: "$productRevenue" },
                     totalDiscountGiven: { $sum: "$discount" },
-                    totalGiftCardRevenue: { $sum: "$giftCard" },
+                    // NEW
+                    totalGiftCardRevenue: { $sum: "$giftCardRevenue" },
+                    totalWalletRevenue: { $sum: "$walletRevenue" },
+
                     totalCostOfGoodsSold: { $sum: "$productCost" },
                     countOrders: { $sum: 1 },
 
@@ -923,6 +961,7 @@ export const getAnalyticsDashboard = async (req, res) => {
             totalCompanyProductRevenue: revenueData.totalCompanyProductRevenue || 0,
             totalDiscountGiven: revenueData.totalDiscountGiven || 0,
             totalGiftCardRevenue: revenueData.totalGiftCardRevenue || 0,
+            totalWalletRevenue: revenueData.totalWalletRevenue || 0,
             totalCostOfGoodsSold: revenueData.totalCostOfGoodsSold || 0,
             countOrders: revenueData.countOrders || 0,
         };
@@ -980,7 +1019,7 @@ export const getAnalyticsDashboard = async (req, res) => {
             {
                 $facet: {
                     topProducts: [
-                        { 
+                        {
                             $group: {
                                 _id: "$products.variant._id",
                                 productId: { $first: "$products.productId" },
@@ -992,7 +1031,7 @@ export const getAnalyticsDashboard = async (req, res) => {
                         },
                         { $sort: { qtySold: -1 } },
                         { $limit: 10 },
-                        { 
+                        {
                             $project: {
                                 _id: 0, productName: 1, variantName: "$variant.name", sales: "$qtySold",
                                 price: "$variant.price", displayPrice: "$variant.displayPrice",
@@ -1001,7 +1040,7 @@ export const getAnalyticsDashboard = async (req, res) => {
                         }
                     ],
                     categoryMetrics: [
-                        { 
+                        {
                             $group: {
                                 _id: "$product.category",
                                 qtySold: { $sum: "$products.quantity" },
@@ -1009,7 +1048,7 @@ export const getAnalyticsDashboard = async (req, res) => {
                             }
                         },
                         {
-                            $lookup: { 
+                            $lookup: {
                                 from: getCollectionName(Category),
                                 localField: "_id",
                                 foreignField: "_id",
@@ -1017,13 +1056,13 @@ export const getAnalyticsDashboard = async (req, res) => {
                             }
                         },
                         { $unwind: "$category" },
-                        { 
+                        {
                             $project: { _id: 0, category: "$category.name", sales: "$qtySold", revenue: 1 }
                         },
                         { $sort: { qtySold: -1 } },
                     ],
                     brandMetrics: [
-                        { 
+                        {
                             $group: {
                                 _id: "$product.brand",
                                 qtySold: { $sum: "$products.quantity" },
@@ -1031,7 +1070,7 @@ export const getAnalyticsDashboard = async (req, res) => {
                             }
                         },
                         {
-                            $lookup: { 
+                            $lookup: {
                                 from: getCollectionName(Brand),
                                 localField: "_id",
                                 foreignField: "_id",
@@ -1039,7 +1078,7 @@ export const getAnalyticsDashboard = async (req, res) => {
                             }
                         },
                         { $unwind: "$brand" },
-                        { 
+                        {
                             $project: { _id: 0, brand: "$brand.name", sales: "$qtySold", revenue: 1 }
                         },
                         { $sort: { qtySold: -1 } },
@@ -1055,7 +1094,7 @@ export const getAnalyticsDashboard = async (req, res) => {
 
         const newUsersCount = await Order.distinct("user", {
             createdAt: { $gte: currentStartMs, $lte: currentEndMs }
-        }).then(users => users.filter(Boolean).length); 
+        }).then(users => users.filter(Boolean).length);
 
         const LOW_STOCK_THRESHOLD = 10;
         const stockAlerts = await Product.aggregate([
@@ -1128,6 +1167,7 @@ export const getAnalyticsDashboard = async (req, res) => {
                     companyProductRevenue: revenue.totalCompanyProductRevenue,
                     discountGiven: revenue.totalDiscountGiven,
                     giftCardRevenue: revenue.totalGiftCardRevenue,
+                    walletRevenue : revenue.totalWalletRevenue,
                     refundLoss: totalRefundLoss,
                     cancelledPaidLoss: paidCancelledLoss,
                     netRevenue
@@ -1144,6 +1184,7 @@ export const getAnalyticsDashboard = async (req, res) => {
                 companyProductRevenue: revenue.totalCompanyProductRevenue,
                 discounts: revenue.totalDiscountGiven,
                 giftCard: revenue.totalGiftCardRevenue,
+                walletRevenue : revenue.totalWalletRevenue,
                 refundLoss: totalRefundLoss,
                 cancelledPaidLoss: paidCancelledLoss,
                 netRevenue

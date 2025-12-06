@@ -107,7 +107,8 @@ import {
     adminPayAffiliate,
     adminGetPayoutHistory,
     adminAffiliateSummary,
-    adminApproveCommissionAndCreateOrder
+    adminCreateCommissionPayoutOrder,
+    verifyAffiliateCommissionPayment
 } from "../controllers/affiliateController.js";
 
 import { affiliateAuth, isAdmin } from "../middlewares/authMiddleware.js";
@@ -147,12 +148,13 @@ router.get("/admin/users/:id", isAdmin, adminGetUserDetails);
 
 // Commissions
 router.get("/admin/commissions", isAdmin, adminGetCommissions);
-router.post("/admin/commissions/approvedddddddddd", isAdmin, adminApproveCommission);
+router.post("/admin/commissions/approve", isAdmin, adminApproveCommission);
 router.post("/admin/commissions/reject", isAdmin, adminRejectCommission);
 
 // Payouts
 router.post("/admin/pay", isAdmin, adminPayAffiliate);
-router.post("/admin/commissions/approve", isAdmin, adminApproveCommissionAndCreateOrder);
+router.post("/admin/commissions/pay", isAdmin, adminCreateCommissionPayoutOrder);
+router.post("/admin/commissions/verify", isAdmin, verifyAffiliateCommissionPayment);   
 router.get("/admin/payouts", isAdmin, adminGetPayoutHistory);
 
 // Summary Dashboard

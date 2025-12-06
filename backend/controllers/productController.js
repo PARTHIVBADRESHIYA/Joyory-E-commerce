@@ -86,7 +86,7 @@ export const resolveFormulationId = async (input) => {
     return formulationDoc._id;
 };
 
-// the add-product is complete 
+// the add-product is complete with 5/12/2025
 // const addProductController = async (req, res) => {
 //     try {
 //         const {
@@ -371,6 +371,8 @@ export const resolveFormulationId = async (input) => {
 //         });
 //     }
 // };
+
+
 const addProductController = async (req, res) => {
     try {
         const {

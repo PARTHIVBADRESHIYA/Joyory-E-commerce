@@ -508,6 +508,7 @@
 
 // controllers/affiliateController.js
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import mongoose from "mongoose";
 
 import AffiliateUser from "../models/AffiliateUser.js";
@@ -516,9 +517,16 @@ import AffiliateEarning from "../models/AffiliateEarning.js";
 import AffiliateOrder from "../models/AffiliateOrder.js";
 import AffiliatePayout from "../models/AffiliatePayout.js";
 import Product from "../models/Product.js";
-
+import Razorpay from "razorpay";
+import { sendEmail } from "../middlewares/utils/emailService.js";
 const JWT_EXP = "7d";
 const makeToken = (id) => jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: JWT_EXP });
+
+const razorpay = new Razorpay({
+    key_id: process.env.RAZORPAY_KEY_ID,
+    key_secret: process.env.RAZORPAY_KEY_SECRET,
+});
+
 
 /**
  * Helper: safe number
@@ -529,7 +537,7 @@ const toNumber = (v) => {
 };
 
 /* ----------------------------------------
-   AFFILIATE -> AUTH
+AFFILIATE -> AUTH
 -----------------------------------------*/
 export const affiliateSignup = async (req, res) => {
     try {
@@ -911,39 +919,40 @@ export const adminGetCommissions = async (req, res) => {
  * POST /admin/commissions/approve
  * body: { earningId }
  */
-export const adminApproveCommission = async (req, res) => {
-    try {
-        const { earningId } = req.body;
-        if (!earningId) return res.status(400).json({ success: false, message: "earningId required" });
+// export const adminApproveCommission = async (req, res) => {
+//     try {
+//         const { earningId } = req.body;
+//         if (!earningId) return res.status(400).json({ success: false, message: "earningId required" });
 
-        const earning = await AffiliateEarning.findById(earningId);
-        if (!earning) return res.status(404).json({ success: false, message: "Earning not found" });
-        if (earning.status !== "pending") return res.status(400).json({ success: false, message: "Earning already processed" });
+//         const earning = await AffiliateEarning.findById(earningId);
+//         if (!earning) return res.status(404).json({ success: false, message: "Earning not found" });
+//         if (earning.status !== "pending") return res.status(400).json({ success: false, message: "Earning already processed" });
 
-        // mark earning approved
-        earning.status = "approved";
-        await earning.save();
+//         // mark earning approved
+//         earning.status = "approved";
+//         await earning.save();
 
-        // update affiliate user counters and wallet (increment wallet only on approve)
-        await AffiliateUser.findByIdAndUpdate(earning.affiliateUser, {
-            $inc: {
-                walletBalance: earning.commission,
-                totalCommission: earning.commission,
-                lifetimeEarnings: earning.commission,
-                orders: 1,
-                sales: earning.orderAmount
-            }
-        });
+//         // update affiliate user counters and wallet (increment wallet only on approve)
+//         await AffiliateUser.findByIdAndUpdate(earning.affiliateUser, {
+//             $inc: {
+//                 walletBalance: earning.commission,
+//                 totalCommission: earning.commission,
+//                 lifetimeEarnings: earning.commission,
+//                 orders: 1,
+//                 sales: earning.orderAmount
+//             }
+//         });
 
-        // update affiliateOrder status if exists
-        await AffiliateOrder.findOneAndUpdate({ orderId: earning.orderId }, { status: "confirmed" }).catch(() => null);
+//         // update affiliateOrder status if exists
+//         await AffiliateOrder.findOneAndUpdate({ orderId: earning.orderId }, { status: "confirmed" }).catch(() => null);
 
-        return res.status(200).json({ success: true, message: "Commission approved" });
-    } catch (err) {
-        console.error("adminApproveCommission error:", err);
-        return res.status(500).json({ success: false, message: "Server error" });
-    }
-};
+//         return res.status(200).json({ success: true, message: "Commission approved" });
+//     } catch (err) {
+//         console.error("adminApproveCommission error:", err);
+//         return res.status(500).json({ success: false, message: "Server error" });
+//     }
+// };
+
 
 /**
  * POST /admin/commissions/reject
@@ -1156,68 +1165,464 @@ export const adminAffiliateSummary = async (req, res) => {
     }
 };
 
-export const adminApproveCommissionAndCreateOrder = async (req, res) => {
+// export const adminApproveCommission = async (req, res) => {
+//     try {
+//         const { earningId } = req.body;
+//         if (!earningId)
+//             return res.status(400).json({ success: false, message: "earningId required" });
+
+//         const earning = await AffiliateEarning.findById(earningId);
+//         if (!earning)
+//             return res.status(404).json({ success: false, message: "Earning not found" });
+
+//         if (earning.status !== "pending")
+//             return res.status(400).json({ success: false, message: "Earning already processed" });
+
+//         // Approve earning
+//         earning.status = "approved";
+//         await earning.save();
+
+//         // Update affiliate user counters
+//         await AffiliateUser.findByIdAndUpdate(earning.affiliateUser, {
+//             $inc: {
+//                 walletBalance: earning.commission,
+//                 totalCommission: earning.commission,
+//                 lifetimeEarnings: earning.commission,
+//                 orders: 1,
+//                 sales: earning.orderAmount
+//             }
+//         });
+
+//         // Update affiliate order
+//         await AffiliateOrder.findOneAndUpdate(
+//             { orderId: earning.orderId },
+//             { status: "confirmed" }
+//         ).catch(() => null);
+
+//         return res.status(200).json({
+//             success: true,
+//             message: "Commission approved successfully"
+//         });
+
+//     } catch (err) {
+//         console.error("adminApproveCommission error:", err);
+//         return res.status(500).json({ success: false, message: "Server error" });
+//     }
+// };
+
+// export const adminCreateCommissionPayoutOrder = async (req, res) => {
+//     try {
+//         const { earningId } = req.body;
+//         if (!earningId)
+//             return res.status(400).json({ success: false, message: "earningId required" });
+
+//         const earning = await AffiliateEarning.findById(earningId);
+//         if (!earning)
+//             return res.status(404).json({ success: false, message: "Earning not found" });
+
+//         // Must be approved before user can pay
+//         if (earning.status !== "approved") {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "Commission MUST be approved first."
+//             });
+//         }
+
+//         const receipt = `affiliate_${earning.affiliateUser}_${Date.now()}`;
+
+//         // Create Razorpay order
+//         const order = await razorpay.orders.create({
+//             amount: earning.commission * 100,
+//             currency: "INR",
+//             receipt,
+//             notes: {
+//                 earningId,
+//                 affiliateUserId: earning.affiliateUser
+//             }
+//         });
+
+//         return res.status(200).json({
+//             success: true,
+//             message: "Razorpay order created",
+//             order
+//         });
+
+//     } catch (err) {
+//         console.error("adminCreateCommissionPayoutOrder:", err);
+//         return res.status(500).json({ success: false, message: "Server error" });
+//     }
+// };
+
+// export const verifyAffiliateCommissionPayment = async (req, res) => {
+//     try {
+//         const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+//         if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+//             return res.status(400).json({ success: false, message: "Invalid Razorpay payload" });
+//         }
+
+//         // -----------------------------
+//         // 1️⃣ VERIFY SIGNATURE
+//         // -----------------------------
+//         const body = razorpay_order_id + "|" + razorpay_payment_id;
+
+//         const expectedSignature = crypto
+//             .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+//             .update(body)
+//             .digest("hex");
+
+//         if (expectedSignature !== razorpay_signature) {
+//             return res.status(400).json({ success: false, message: "Payment verification failed" });
+//         }
+
+//         // -----------------------------
+//         // 2️⃣ FETCH ORDER DETAILS
+//         // -----------------------------
+//         const razorOrder = await razorpay.orders.fetch(razorpay_order_id);
+//         const commissionAmount = razorOrder.amount / 100;
+//         const notes = razorOrder.notes; // contains earningId + affiliateUserId
+
+//         if (!notes?.earningId || !notes?.affiliateUserId) {
+//             return res.status(400).json({ success: false, message: "Invalid order notes" });
+//         }
+
+//         const earningId = notes.earningId;
+//         const affiliateUserId = notes.affiliateUserId;
+
+//         // -----------------------------
+//         // 3️⃣ VALIDATE EARNING
+//         // -----------------------------
+//         const earning = await AffiliateEarning.findById(earningId);
+//         if (!earning) {
+//             return res.status(404).json({ success: false, message: "Affiliate earning not found" });
+//         }
+
+//         if (earning.status === "paid") {
+//             return res.status(200).json({
+//                 success: true,
+//                 message: "Earning already paid",
+//                 earning
+//             });
+//         }
+
+//         if (earning.status !== "approved") {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "Earning not approved yet"
+//             });
+//         }
+
+//         // -----------------------------
+//         // 4️⃣ MARK EARNING AS PAID
+//         // -----------------------------
+//         earning.status = "paid";
+//         earning.paymentId = razorpay_payment_id;
+//         earning.paidAt = new Date();
+//         await earning.save();
+
+//         // -----------------------------
+//         // 5️⃣ CREATE PAYOUT RECORD (you already have AffiliatePayout)
+//         // -----------------------------
+//         const payout = await AffiliatePayout.create({
+//             affiliateUser: affiliateUserId,
+//             amount: commissionAmount,
+//             method: "razorpay",
+//             note: `Commission paid via Razorpay ${razorpay_payment_id}`,
+//             earnings: [earningId]
+//         });
+
+//         // -----------------------------
+//         // 6️⃣ SEND NOTIFICATION (optional)
+//         // -----------------------------
+//         try {
+//             const user = await AffiliateUser.findById(affiliateUserId);
+//             if (user?.email) {
+//                 await sendEmail(
+//                     user.email,
+//                     "💸 Commission Payout Successful",
+//                     `
+//                         <h2>Hello ${user.fullName},</h2>
+//                         <p>Your commission payout of <b>₹${commissionAmount}</b> has been processed.</p>
+//                         <p><b>Payment ID:</b> ${razorpay_payment_id}</p>
+//                         <p><b>Order ID:</b> ${earning.orderId}</p>
+//                         <p><b>Date:</b> ${new Date().toDateString()}</p>
+//                         <br/>
+//                         <p>Keep earning with Joyory Affiliate Program 💰🔥</p>
+//                     `
+//                 );
+//             }
+//         } catch (emailErr) {
+//             console.error("Payout email failed:", emailErr.message);
+//         }
+
+//         // -----------------------------
+//         // 7️⃣ RETURN SUCCESS
+//         // -----------------------------
+//         return res.status(200).json({
+//             success: true,
+//             message: "Commission payout verified successfully",
+//             earning,
+//             payout
+//         });
+
+//     } catch (err) {
+//         console.error("verifyAffiliateCommissionPayment error:", err);
+//         return res.status(500).json({
+//             success: false,
+//             message: "Error verifying payout",
+//             error: err.message
+//         });
+//     }
+// };
+
+
+// controllers/affiliateController.js
+// (only the three controller functions below — keep your imports and razorpay instance)
+
+export const adminApproveCommission = async (req, res) => {
+    const session = await mongoose.startSession();
     try {
         const { earningId } = req.body;
-        if (!earningId) {
-            return res.status(400).json({ success: false, message: "earningId required" });
-        }
+        if (!earningId) return res.status(400).json({ success: false, message: "earningId required" });
 
+        let resultMessage = "Commission approved successfully";
+
+        await session.withTransaction(async () => {
+            // load earning inside transaction
+            const earning = await AffiliateEarning.findById(earningId).session(session);
+            if (!earning) throw { code: 404, message: "Earning not found" };
+
+            if (earning.status !== "pending") {
+                throw { code: 400, message: "Earning already processed or not pending" };
+            }
+
+            // Approve earning
+            earning.status = "approved";
+            await earning.save({ session });
+
+            // Update affiliate user counters (walletBalance increases on approve)
+            await AffiliateUser.findByIdAndUpdate(
+                earning.affiliateUser,
+                {
+                    $inc: {
+                        walletBalance: Number(earning.commission),
+                        totalCommission: Number(earning.commission),
+                        lifetimeEarnings: Number(earning.commission),
+                        orders: 1,
+                        sales: Number(earning.orderAmount)
+                    }
+                },
+                { session }
+            );
+
+            // Update any affiliateOrder record (if exists)
+            await AffiliateOrder.findOneAndUpdate(
+                { orderId: earning.orderId },
+                { status: "confirmed" },
+                { session }
+            ).catch(() => null);
+
+            // Optionally you can emit events or logs here
+        });
+
+        session.endSession();
+        return res.status(200).json({ success: true, message: resultMessage });
+
+    } catch (err) {
+        session.endSession();
+        if (err && err.code) return res.status(err.code).json({ success: false, message: err.message });
+        console.error("adminApproveCommission error:", err);
+        return res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+
+export const adminCreateCommissionPayoutOrder = async (req, res) => {
+    try {
+        const { earningId } = req.body;
+        if (!earningId) return res.status(400).json({ success: false, message: "earningId required" });
+
+        // fetch earning (read-only)
         const earning = await AffiliateEarning.findById(earningId);
         if (!earning) return res.status(404).json({ success: false, message: "Earning not found" });
 
-        if (earning.status !== "pending") {
-            return res.status(400).json({ success: false, message: "Earning already processed" });
+        // must be approved
+        if (earning.status !== "approved") {
+            return res.status(400).json({ success: false, message: "Commission MUST be approved first." });
         }
 
-        // -------------------
-        // Step 1: APPROVE EARNING
-        // -------------------
-        earning.status = "approved";
-        await earning.save();
+        const shortEarningId = earningId.toString().slice(-6); // last 6 chars of ObjectId
+        const random4 = Math.floor(1000 + Math.random() * 9000); // 4-digit code
+        const receipt = `AFF${shortEarningId}${random4}`; // < 40 chars always
 
-        await AffiliateUser.findByIdAndUpdate(earning.affiliateUser, {
-            $inc: {
-                walletBalance: earning.commission,
-                totalCommission: earning.commission,
-                lifetimeEarnings: earning.commission,
-                orders: 1,
-                sales: earning.orderAmount
-            }
-        });
-
-        await AffiliateOrder.findOneAndUpdate(
-            { orderId: earning.orderId },
-            { status: "confirmed" }
-        ).catch(() => null);
-
-        // -------------------
-        // Step 2: CREATE RAZORPAY ORDER FOR PAYOUT
-        // -------------------
-        const receipt = `affiliate_${earning.affiliateUser}_${Date.now()}`;
-
-        const razorpayOrder = await razorpay.orders.create({
-            amount: earning.commission * 100, // INR -> paise
+        // create razorpay order (amount in paise)
+        const order = await razorpay.orders.create({
+            amount: Math.round(Number(earning.commission) * 100),
             currency: "INR",
             receipt,
             notes: {
-                earningId,
-                affiliateUserId: earning.affiliateUser
+                earningId: earningId.toString(),
+                affiliateUserId: earning.affiliateUser.toString()
             }
         });
 
-        // -------------------
-        // Step 3: RETURN ORDER FOR FRONTEND PAYMENT POPUP
-        // -------------------
         return res.status(200).json({
             success: true,
-            message: "Commission approved. Razorpay order created.",
-            order: razorpayOrder
+            message: "Razorpay order created",
+            order
         });
 
     } catch (err) {
-        console.error("adminApproveCommissionAndCreateOrder error:", err);
+        console.error("adminCreateCommissionPayoutOrder:", err);
         return res.status(500).json({ success: false, message: "Server error" });
+    }
+};
+
+
+export const verifyAffiliateCommissionPayment = async (req, res) => {
+    const session = await mongoose.startSession();
+    try {
+        const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+        if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+            return res.status(400).json({ success: false, message: "Invalid Razorpay payload" });
+        }
+
+        // 1) Verify signature
+        const body = `${razorpay_order_id}|${razorpay_payment_id}`;
+        const expectedSignature = crypto.createHmac("sha256", process.env.RAZORPAY_KEY_SECRET).update(body).digest("hex");
+        if (expectedSignature !== razorpay_signature) {
+            return res.status(400).json({ success: false, message: "Payment verification failed (signature mismatch)" });
+        }
+
+        // 2) Fetch razorpay order (server-side)
+        const razorOrder = await razorpay.orders.fetch(razorpay_order_id);
+        if (!razorOrder) return res.status(400).json({ success: false, message: "Razorpay order not found" });
+
+        const commissionAmount = Number(razorOrder.amount) / 100;
+        const notes = razorOrder.notes || {};
+        const earningId = notes.earningId;
+        const affiliateUserId = notes.affiliateUserId;
+        if (!earningId || !affiliateUserId) {
+            return res.status(400).json({ success: false, message: "Invalid Razorpay notes" });
+        }
+
+        // 3) Transaction: check earning, check amounts, mark paid, create payout, decrement wallet
+        let responsePayload = {};
+        await session.withTransaction(async () => {
+            const earning = await AffiliateEarning.findById(earningId).session(session);
+            if (!earning) throw { code: 404, message: "Affiliate earning not found" };
+
+            // Idempotency: if already paid, return gracefully (no double processing)
+            if (earning.status === "paid") {
+                responsePayload = { alreadyPaid: true, earning };
+                return;
+            }
+
+            // ensure earning is approved before paying
+            if (earning.status !== "approved") throw { code: 400, message: "Earning must be approved before payout" };
+
+            // validate amounts — reject if mismatch (safety)
+            const earningCommission = Number(earning.commission);
+            if (Math.abs(earningCommission - commissionAmount) > 0.001) {
+                // mismatch, abort
+                throw {
+                    code: 400,
+                    message: `Amount mismatch: earning.commission=${earningCommission} but razorpay.amount=${commissionAmount}`
+                };
+            }
+
+            // mark earning paid
+            earning.status = "paid";
+            earning.paymentId = razorpay_payment_id;
+            earning.paidAt = new Date();
+            await earning.save({ session });
+
+            // create payout record (ties to earning)
+            const payout = await AffiliatePayout.create([{
+                affiliateUser: affiliateUserId,
+                amount: commissionAmount,
+                method: "razorpay",
+                note: `Commission paid via Razorpay ${razorpay_payment_id}`,
+                earnings: [earning._id]
+            }], { session });
+
+            // decrement user's walletBalance by paid amount (wallet represented unpaid commission)
+            await AffiliateUser.findByIdAndUpdate(affiliateUserId, {
+                $inc: { walletBalance: -commissionAmount }
+            }, { session });
+
+            // update affiliateOrder status to paid if you want
+            await AffiliateOrder.findOneAndUpdate(
+                { orderId: earning.orderId },
+                { status: "paid" },
+                { session }
+            ).catch(() => null);
+
+            responsePayload = { alreadyPaid: false, earning, payout: payout[0] };
+        }); // end transaction
+
+        session.endSession();
+
+        // If alreadyPaid true, return 200 with message (idempotent)
+        if (responsePayload.alreadyPaid) {
+            return res.status(200).json({
+                success: true,
+                message: "Earning already processed as paid",
+                earning: responsePayload.earning
+            });
+        }
+
+        // -----------------------------
+        // 7) SEND EMAIL (non-blocking, safe)
+        // -----------------------------
+        try {
+            const user = await AffiliateUser.findById(responsePayload.earning.affiliateUser);
+
+            if (user && user.email) {
+
+                const safeFullName = user.fullName?.replace(/[<>]/g, "") || "Affiliate";
+                const safePaymentId = razorpay_payment_id.replace(/[<>]/g, "");
+
+                const emailHtml = `
+            <div style="font-family:Arial, sans-serif; color:#333;">
+                <h2 style="color:#2b2b2b;">Hello ${safeFullName},</h2>
+                <p>Your affiliate commission payout has been successfully processed.</p>
+                
+                <p><b>Amount:</b> ₹${commissionAmount}</p>
+                <p><b>Payment ID:</b> ${safePaymentId}</p>
+                <p><b>Date:</b> ${new Date().toLocaleString()}</p>
+
+                <br/>
+                <p>Thank you for promoting Joyory! 🎉</p>
+                <p>- Joyory Affiliate Team</p>
+            </div>
+        `;
+
+                await sendEmail(
+                    user.email,
+                    "💸 Your Commission Payout is Successful!",
+                    emailHtml
+                );
+            }
+
+        } catch (emailErr) {
+            console.error("❌ Email sending failed:", emailErr?.message || emailErr);
+        }
+
+
+        return res.status(200).json({
+            success: true,
+            message: "Commission payout verified successfully",
+            earning: responsePayload.earning,
+            payout: responsePayload.payout
+        });
+
+    } catch (err) {
+        session.endSession();
+        if (err && err.code) return res.status(err.code).json({ success: false, message: err.message });
+        console.error("verifyAffiliateCommissionPayment error:", err);
+        return res.status(500).json({ success: false, message: "Error verifying payout", error: err.message || err });
     }
 };
 
