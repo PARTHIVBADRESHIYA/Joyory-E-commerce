@@ -684,13 +684,6 @@ export const getMyAffiliateLinks = async (req, res) => {
     }
 };
 
-/**
- * Public tracking endpoint: /aff/:slug
- * - increments counters
- * - saves cookie
- * - redirects to product or external url
- * - returns JSON when Accept: application/json (Postman)
- */
 export const trackClick = async (req, res) => {
     try {
         const { slug } = req.params;
@@ -1164,6 +1157,10 @@ export const adminAffiliateSummary = async (req, res) => {
         return res.status(500).json({ success: false, message: "Server error" });
     }
 };
+
+
+
+
 
 // export const adminApproveCommission = async (req, res) => {
 //     try {

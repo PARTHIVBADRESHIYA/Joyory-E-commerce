@@ -85,30 +85,30 @@
 
 import express from "express";
 import {
-    affiliateSignup,
-    affiliateLogin,
+   affiliateSignup,
+   affiliateLogin,
 
-    createAffiliateLink,
-    quickCreateAffiliateLink,
-    getMyAffiliateLinks,
-    trackClick,
+   createAffiliateLink,
+   quickCreateAffiliateLink,
+   getMyAffiliateLinks,
+   trackClick,
 
-    getAffiliateStats,
-    getAffiliateOrders,
-    getAffiliateEarnings,
-    getAffiliatePayouts,
+   getAffiliateStats,
+   getAffiliateOrders,
+   getAffiliateEarnings,
+   getAffiliatePayouts,
 
-    // admin
-    adminGetUsers,
-    adminGetUserDetails,
-    adminGetCommissions,
-    adminApproveCommission,
-    adminRejectCommission,
-    adminPayAffiliate,
-    adminGetPayoutHistory,
-    adminAffiliateSummary,
-    adminCreateCommissionPayoutOrder,
-    verifyAffiliateCommissionPayment
+   // admin
+   adminGetUsers,
+   adminGetUserDetails,
+   adminGetCommissions,
+   adminApproveCommission,
+   adminRejectCommission,
+   adminPayAffiliate,
+   adminGetPayoutHistory,
+   adminAffiliateSummary,
+   adminCreateCommissionPayoutOrder,
+   verifyAffiliateCommissionPayment
 } from "../controllers/affiliateController.js";
 
 import { affiliateAuth, isAdmin } from "../middlewares/authMiddleware.js";
@@ -154,7 +154,7 @@ router.post("/admin/commissions/reject", isAdmin, adminRejectCommission);
 // Payouts
 router.post("/admin/pay", isAdmin, adminPayAffiliate);
 router.post("/admin/commissions/pay", isAdmin, adminCreateCommissionPayoutOrder);
-router.post("/admin/commissions/verify", isAdmin, verifyAffiliateCommissionPayment);   
+router.post("/admin/commissions/verify", isAdmin, verifyAffiliateCommissionPayment);
 router.get("/admin/payouts", isAdmin, adminGetPayoutHistory);
 
 // Summary Dashboard
