@@ -763,13 +763,32 @@ export const getAnalyticsDashboard = async (req, res) => {
 
                                 totalRefundLoss: {
                                     $sum: {
-                                        $cond: [
-                                            { $and: [{ $eq: ["$orderStatus", deliveredStatus] }, { $in: ["$paymentStatus", ["refund_initiated", "refunded"]] }] },
-                                            { $ifNull: ["$refund.amount", 0] },
-                                            0
-                                        ]
+                                        $reduce: {
+                                            input: {
+                                                $cond: [
+                                                    { $isArray: "$refund" },
+                                                    "$refund",
+                                                    { $cond: [{ $gt: ["$refund", null] }, ["$refund"], []] }
+                                                ]
+                                            },
+                                            initialValue: 0,
+                                            in: {
+                                                $add: [
+                                                    "$$value",
+                                                    {
+                                                        $cond: [
+                                                            { $in: ["$$this.status", ["refund_requested", "refund_initiated", "refunded", "approved"]] },
+                                                            { $ifNull: ["$$this.amount", 0] },
+                                                            0
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        }
+
                                     }
-                                },
+                                }
+                                ,
 
                                 paidCancelledLoss: {
                                     $sum: {
@@ -778,12 +797,6 @@ export const getAnalyticsDashboard = async (req, res) => {
                                             "$amount",
                                             0
                                         ]
-                                    }
-                                },
-
-                                pendingRefundCount: {
-                                    $sum: {
-                                        $cond: [{ $in: ["$paymentStatus", ["refund_requested", "refund_initiated", "refund_processing"]] }, 1, 0]
                                     }
                                 },
                             }
@@ -820,7 +833,6 @@ export const getAnalyticsDashboard = async (req, res) => {
         const totalUserPaidAmount = current.totalUserPaidAmount || 0;
         const totalRefundLoss = current.totalRefundLoss || 0;
         const paidCancelledLoss = current.paidCancelledLoss || 0;
-        const pendingRefundCount = current.pendingRefundCount || 0;
 
         const prevTotalOrders = previous.totalOrders || 0;
         const prevCompletedOrders = previous.completedOrders || 0;
@@ -1167,14 +1179,14 @@ export const getAnalyticsDashboard = async (req, res) => {
                     companyProductRevenue: revenue.totalCompanyProductRevenue,
                     discountGiven: revenue.totalDiscountGiven,
                     giftCardRevenue: revenue.totalGiftCardRevenue,
-                    walletRevenue : revenue.totalWalletRevenue,
+                    walletRevenue: revenue.totalWalletRevenue,
                     refundLoss: totalRefundLoss,
                     cancelledPaidLoss: paidCancelledLoss,
                     netRevenue
                 },
                 metrics: {
                     AOV, AOC, uniqueCustomers, repeatCustomers: repeatCustomerCount,
-                    pendingRefunds: pendingRefundCount, newUsers: newUsersCount
+                     newUsers: newUsersCount
                 },
                 paymentSplit
             },
@@ -1184,7 +1196,7 @@ export const getAnalyticsDashboard = async (req, res) => {
                 companyProductRevenue: revenue.totalCompanyProductRevenue,
                 discounts: revenue.totalDiscountGiven,
                 giftCard: revenue.totalGiftCardRevenue,
-                walletRevenue : revenue.totalWalletRevenue,
+                walletRevenue: revenue.totalWalletRevenue,
                 refundLoss: totalRefundLoss,
                 cancelledPaidLoss: paidCancelledLoss,
                 netRevenue

@@ -1478,7 +1478,6 @@ export const adminCreateCommissionPayoutOrder = async (req, res) => {
     }
 };
 
-
 export const verifyAffiliateCommissionPayment = async (req, res) => {
     const session = await mongoose.startSession();
     try {
