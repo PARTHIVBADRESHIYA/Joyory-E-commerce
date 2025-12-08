@@ -543,8 +543,7 @@ async function handleCart(cart, product, variants, qty) {
 // };
 
 // Module-level tiny caches
-let _promoCache = { data: null, ts: 0, ttl: 5000 };   // 5s
-let _couponCache = { data: null, ts: 0, ttl: 5000 };  // 5s
+
 
 // export const getCartSummary = async (req, res) => {
 //   try {
@@ -1280,10 +1279,109 @@ let _couponCache = { data: null, ts: 0, ttl: 5000 };  // 5s
 //   }
 // };
 
+// --- CACHES / TTLs ---
+let _promoCache = { data: null, ts: 0, ttl: 5000 };   // existing (kept)
+let _couponCache = { data: null, ts: 0, ttl: 5000 };  // existing (kept)
 
+const PRODUCT_CACHE_TTL = 300;        // 5 minutes for raw product doc
+const ENRICHED_PRODUCT_TTL = 20;      // 20 seconds for enriched product (max-speed)
+const PROMO_CACHE_TTL = 20;           // 20s promo cache in redis layer
+const COUPON_CACHE_TTL = 20;          // 20s coupon cache in redis layer
+const CART_CACHE_TTL = 60;            // 60s cart snapshot cache
+
+// ---------- helper: get raw product from cache/db ----------
+async function getCachedProduct(productId) {
+  if (!productId) return null;
+  const key = `prod:${productId}`;
+  try {
+    const cached = await redis.get(key);
+    if (cached) return JSON.parse(cached);
+  } catch (e) {
+    // swallow redis parse errors and fallback to DB
+    console.error("redis.get prod failed", e);
+  }
+
+  const doc = await Product.findById(productId).lean();
+  if (doc) {
+    try {
+      await redis.set(key, JSON.stringify(doc), "EX", PRODUCT_CACHE_TTL);
+    } catch (e) {
+      console.error("redis.set prod failed", e);
+    }
+  }
+  return doc;
+}
+
+// batch fetch raw products (redis-first)
+async function getMultipleProducts(ids = []) {
+  if (!ids || !ids.length) return [];
+  // fetch in parallel
+  const proms = ids.map(id => getCachedProduct(id));
+  return Promise.all(proms);
+}
+
+// ---------- helper: get enriched product (cache per promoHash) ----------
+async function getEnrichedProduct(product, promoHash, activePromotions) {
+  if (!product) return null;
+  const id = String(product._id);
+  const key = `enriched:product:${id}:${promoHash || "nopromo"}`;
+
+  try {
+    const cached = await redis.get(key);
+    if (cached) return JSON.parse(cached);
+  } catch (e) {
+    console.error("redis.get enriched failed", e);
+  }
+
+  // enrich synchronously using your function
+  // NOTE: enrichProductWithStockAndOptions is synchronous in your code
+  let enriched;
+  try {
+    enriched = enrichProductWithStockAndOptions(product, activePromotions || []);
+  } catch (err) {
+    // fallback to a minimal enriched structure preserving fields
+    console.error("enrichProductWithStockAndOptions error:", err);
+    enriched = {
+      ...product,
+      variants: product.variants?.map(v => ({
+        ...v,
+        originalPrice: Number(v.mrp ?? v.price ?? product.mrp ?? product.price ?? 0),
+        displayPrice: Number(v.discountedPrice ?? v.price ?? product.price ?? 0),
+        discountPercent: 0,
+        discountAmount: 0,
+      })) || [],
+      selectedVariant: product.variants?.[0] || null,
+    };
+  }
+
+  try {
+    await redis.set(key, JSON.stringify(enriched), "EX", ENRICHED_PRODUCT_TTL);
+  } catch (e) {
+    console.error("redis.set enriched failed", e);
+  }
+  return enriched;
+}
+
+// ---------- small util to hash promotions (stable) ----------
+function promoHashFromPromos(promos = []) {
+  try {
+    // Use promo ids + updatedAt if available to make key sensitive to changes
+    const arr = (promos || []).map(p => {
+      const id = p._id ? String(p._id) : JSON.stringify(p);
+      const t = p.updatedAt ? String(new Date(p.updatedAt).getTime()) : (p.ts || "");
+      return id + ":" + t;
+    });
+    const raw = arr.sort().join("|");
+    return crypto.createHash("md5").update(raw || "").digest("hex");
+  } catch (err) {
+    return "nopromohash";
+  }
+}
+
+// ---------- MAIN optimized controller (drop-in) ----------
 export const getCartSummary = async (req, res) => {
   try {
-    // -------------------- Redis request cache --------------------
+    // -------------------- Redis snapshot cache --------------------
     const cartKeySnapshot = (() => {
       try {
         const cartItemsSnapshot = (req.user && req.user._id && req.user.cart)
@@ -1298,16 +1396,14 @@ export const getCartSummary = async (req, res) => {
             sku: i.selectedVariant?.sku || null,
           }));
 
-        const keyObj = {
+        return JSON.stringify({
           userId: req.user?._id ? String(req.user._id) : null,
           sessionId: req.sessionID || null,
           items: cartItemsSnapshot,
           q: {
             discount: req.query.discount || null,
           },
-        };
-
-        return JSON.stringify(keyObj);
+        });
       } catch {
         return null;
       }
@@ -1320,13 +1416,13 @@ export const getCartSummary = async (req, res) => {
 
     const redisKey = `cart:${req.user?._id || req.sessionID}:${snapshotHash}`;
 
-    // Try single redis GET (fast path)
+    // Try fast path: return cached cart snapshot
     try {
       const cached = await redis.get(redisKey);
       if (cached) return res.status(200).json(JSON.parse(cached));
     } catch (err) {
       console.error("Redis get failed:", err);
-      // continue — degrade gracefully
+      // degrade gracefully
     }
 
     // -------------------- Determine Cart Source --------------------
@@ -1336,7 +1432,6 @@ export const getCartSummary = async (req, res) => {
     if (req.user && req.user._id) {
       const user = await User.findById(req.user._id).select("cart").lean();
       if (!user) return res.status(404).json({ message: "User not found" });
-
       cartSource = (user.cart || []).filter(item => item && item.product);
     } else if (req.session?.guestCart?.length) {
       isGuest = true;
@@ -1358,27 +1453,32 @@ export const getCartSummary = async (req, res) => {
       selectedVariant: i.selectedVariant || null,
     }));
 
+    // Normalize SKU case to avoid mismatches during applyPromotions
+    itemsInput.forEach(i => {
+      if (i.selectedVariant && i.selectedVariant.sku) {
+        i.selectedVariant.sku = String(i.selectedVariant.sku).trim().toLowerCase();
+      }
+    });
+
     // Precompute product id list for parallel DB ops
     const productIds = validCartItems.map(i => String(i.product?._id || i.product));
     const uniqueIds = [...new Set(productIds)];
 
-    // -------------------- Kick off parallel loads --------------------
-    // We must not change helper functions (applyPromotions / validateDiscountForCartInternal / enrichProductWithStockAndOptions).
-    // But we can run their callers in parallel where safe to reduce latency.
+    // -------------------- Kick off parallel loads (optimized) --------------------
+    // don't change helpers — we call them as-is
     const applyPromotionsPromise = applyPromotions(itemsInput, {
       userContext: req.user ? { isNewUser: req.user.isNewUser } : {},
     });
 
-    // load coupons (cached) — attempt to use _couponCache if fresh
+    // Coupon docs (cache layer)
     const loadCouponsPromise = (async () => {
       try {
-        const nowTS = Date.now();
-        if (_couponCache.data && nowTS - _couponCache.ts < (_couponCache.ttl || 5000)) {
+        const now = Date.now();
+        if (_couponCache.data && now - _couponCache.ts < (_couponCache.ttl || COUPON_CACHE_TTL * 1000)) {
           return _couponCache.data;
         }
         const docs = await Discount.find({ status: "Active" }).lean();
-        // slightly longer TTL to reduce DB pressure while remaining fresh
-        _couponCache = { data: docs, ts: Date.now(), ttl: 30000 };
+        _couponCache = { data: docs, ts: Date.now(), ttl: COUPON_CACHE_TTL * 1000 };
         return docs;
       } catch (err) {
         console.error("Failed to load coupons:", err);
@@ -1386,11 +1486,11 @@ export const getCartSummary = async (req, res) => {
       }
     })();
 
-    // load active promotions for enrichment (cached)
+    // Promotions (cache layer)
     const loadActivePromotionsPromise = (async () => {
       try {
         const now = Date.now();
-        if (_promoCache.data && now - _promoCache.ts < (_promoCache.ttl || 5000)) {
+        if (_promoCache.data && now - _promoCache.ts < (_promoCache.ttl || PROMO_CACHE_TTL * 1000)) {
           return _promoCache.data;
         }
         const dbNow = new Date();
@@ -1399,8 +1499,7 @@ export const getCartSummary = async (req, res) => {
           startDate: { $lte: dbNow },
           endDate: { $gte: dbNow },
         }).lean();
-        // slightly longer TTL than before so we don't hammer DB for every request
-        _promoCache = { data: promos, ts: Date.now(), ttl: 30000 };
+        _promoCache = { data: promos, ts: Date.now(), ttl: PROMO_CACHE_TTL * 1000 };
         return promos;
       } catch (err) {
         console.error("Failed to load promotions:", err);
@@ -1408,19 +1507,10 @@ export const getCartSummary = async (req, res) => {
       }
     })();
 
-    // preload products once
-    const loadProductsPromise = (async () => {
-      try {
-        if (!uniqueIds.length) return [];
-        const prods = await Product.find({ _id: { $in: uniqueIds } }).lean();
-        return prods;
-      } catch (err) {
-        console.error("Failed to preload products:", err);
-        return [];
-      }
-    })();
+    // Raw products loaded via redis-first helper
+    const loadProductsPromise = getMultipleProducts(uniqueIds);
 
-    // Await the applyPromotions result AND the other preloads in parallel
+    // Run heavy loads in parallel
     const [promoResult, allDiscountDocs, activePromotions, allProducts] = await Promise.all([
       applyPromotionsPromise,
       loadCouponsPromise,
@@ -1428,10 +1518,9 @@ export const getCartSummary = async (req, res) => {
       loadProductsPromise,
     ]);
 
-    // applyPromotions result kept same as before
     const { items: promoItems, summary, appliedPromotions } = promoResult || { items: [], summary: {}, appliedPromotions: [] };
 
-    // -------------------- Coupons Evaluation --------------------
+    // -------------------- Coupons Evaluation (unchanged logic) --------------------
     let applicableCoupons = [],
       inapplicableCoupons = [],
       appliedCoupon = null,
@@ -1446,12 +1535,9 @@ export const getCartSummary = async (req, res) => {
         }));
 
       if (nonPromoItemsInput.length && Array.isArray(allDiscountDocs) && allDiscountDocs.length) {
-        // validate all coupons in parallel (same as original behavior but with preloaded discount docs)
         const couponsChecked = await Promise.all(
           allDiscountDocs.map(async d => {
             try {
-              if (!nonPromoItemsInput.length) throw new Error("No items");
-
               await validateDiscountForCartInternal({
                 code: d.code,
                 cart: nonPromoItemsInput,
@@ -1503,7 +1589,6 @@ export const getCartSummary = async (req, res) => {
           }
         }
       } else {
-        // no coupon docs or no non-promo items
         applicableCoupons = [];
         inapplicableCoupons = Array.isArray(allDiscountDocs) ? allDiscountDocs.map(d => ({
           code: d.code,
@@ -1516,17 +1601,27 @@ export const getCartSummary = async (req, res) => {
       }
     }
 
-    // -------------------- Preload all products -> productMap --------------------
-    const productMap = new Map((allProducts || []).map(p => [String(p._id), p]));
+    // -------------------- Enrich products (cached per promotion state) --------------------
+    const promoHash = promoHashFromPromos(activePromotions || []);
 
-    // -------------------- Build Final Cart (synchronous map — no await inside) --------------------
-    const round2 = n => Math.round(n * 100) / 100;
+    // allProducts may contain nulls for missing; ensure clean list
+    const rawProducts = (allProducts || []).filter(Boolean);
+
+    // Pre-enrich all products in parallel (caches per promoHash)
+    const enrichedPromises = rawProducts.map(p => getEnrichedProduct(p, promoHash, activePromotions || []));
+    const enrichedProducts = await Promise.all(enrichedPromises);
+
+    // Build product map from enriched products (keep ids as strings)
+    const productMap = new Map((enrichedProducts || []).filter(Boolean).map(p => [String(p._id), p]));
+
+    // -------------------- Build Final Cart (synchronous mapping) --------------------
+    const round2 = n => Math.round((Number(n) || 0) * 100) / 100;
 
     const finalCart = validCartItems.map(item => {
       const productIdStr = String(item.product?._id || item.product);
       const productFromDB = productMap.get(productIdStr);
 
-      // ---------- FIX: product deleted ----------
+      // product removed
       if (!productFromDB) {
         return {
           _id: item._id,
@@ -1551,14 +1646,10 @@ export const getCartSummary = async (req, res) => {
         };
       }
 
-      // reuse your helper (synchronous) to enrich with promotions
-      const enriched = enrichProductWithStockAndOptions(productFromDB, activePromotions);
-
+      const enriched = productFromDB; // already enriched
       const enrichedVariant =
         enriched.variants.find(
-          v =>
-            String(v.sku).trim().toLowerCase() ===
-            String(item.selectedVariant?.sku || "").trim().toLowerCase()
+          v => String(v.sku || "").trim().toLowerCase() === String(item.selectedVariant?.sku || "").trim().toLowerCase()
         ) || enriched.variants[0];
 
       const stock = enrichedVariant.stock ?? 0;
@@ -1587,10 +1678,7 @@ export const getCartSummary = async (req, res) => {
           sku: enrichedVariant.sku,
           shadeName: enrichedVariant.shadeName,
           hex: enrichedVariant.hex,
-          image:
-            enrichedVariant.images?.[0] ||
-            productFromDB.images?.[0] ||
-            null,
+          image: enrichedVariant.images?.[0] || productFromDB.images?.[0] || null,
           stock,
           originalPrice: enrichedVariant.originalPrice,
           discountedPrice: enrichedVariant.displayPrice,
@@ -1662,9 +1750,9 @@ export const getCartSummary = async (req, res) => {
       isGuest,
     };
 
-    // Cache the final response (short TTL as before)
+    // Cache the final response (longer TTL)
     try {
-      await redis.set(redisKey, JSON.stringify(responseData), "EX", 20);
+      await redis.set(redisKey, JSON.stringify(responseData), "EX", CART_CACHE_TTL);
     } catch (err) {
       console.error("Redis set failed:", err);
     }
@@ -1678,3 +1766,402 @@ export const getCartSummary = async (req, res) => {
     });
   }
 };
+
+
+// export const getCartSummary = async (req, res) => {
+//   try {
+//     // -------------------- Redis request cache --------------------
+//     const cartKeySnapshot = (() => {
+//       try {
+//         const cartItemsSnapshot = (req.user && req.user._id && req.user.cart)
+//           ? req.user.cart.map(i => ({
+//             product: String(i.product?._id || i.product),
+//             qty: i.quantity,
+//             sku: i.selectedVariant?.sku || null,
+//           }))
+//           : (req.session?.guestCart || []).map(i => ({
+//             product: String(i.product),
+//             qty: i.quantity,
+//             sku: i.selectedVariant?.sku || null,
+//           }));
+
+//         const keyObj = {
+//           userId: req.user?._id ? String(req.user._id) : null,
+//           sessionId: req.sessionID || null,
+//           items: cartItemsSnapshot,
+//           q: {
+//             discount: req.query.discount || null,
+//           },
+//         };
+
+//         return JSON.stringify(keyObj);
+//       } catch {
+//         return null;
+//       }
+//     })();
+
+//     const snapshotHash = crypto
+//       .createHash("md5")
+//       .update(cartKeySnapshot || "")
+//       .digest("hex");
+
+//     const redisKey = `cart:${req.user?._id || req.sessionID}:${snapshotHash}`;
+
+//     // Try single redis GET (fast path)
+//     try {
+//       const cached = await redis.get(redisKey);
+//       if (cached) return res.status(200).json(JSON.parse(cached));
+//     } catch (err) {
+//       console.error("Redis get failed:", err);
+//       // continue — degrade gracefully
+//     }
+
+//     // -------------------- Determine Cart Source --------------------
+//     let cartSource;
+//     let isGuest = false;
+
+//     if (req.user && req.user._id) {
+//       const user = await User.findById(req.user._id).select("cart").lean();
+//       if (!user) return res.status(404).json({ message: "User not found" });
+
+//       cartSource = (user.cart || []).filter(item => item && item.product);
+//     } else if (req.session?.guestCart?.length) {
+//       isGuest = true;
+//       cartSource = req.session.guestCart;
+//     } else {
+//       return res.status(400).json({ message: "Cart is empty" });
+//     }
+
+//     if (!cartSource.length) {
+//       return res.status(400).json({ message: "Cart is empty" });
+//     }
+
+//     const validCartItems = cartSource;
+
+//     // -------------------- Build itemsInput for promotions --------------------
+//     const itemsInput = validCartItems.map(i => ({
+//       productId: String(i.product?._id || i.product),
+//       qty: i.quantity,
+//       selectedVariant: i.selectedVariant || null,
+//     }));
+
+//     // Precompute product id list for parallel DB ops
+//     const productIds = validCartItems.map(i => String(i.product?._id || i.product));
+//     const uniqueIds = [...new Set(productIds)];
+
+//     // -------------------- Kick off parallel loads --------------------
+//     // We must not change helper functions (applyPromotions / validateDiscountForCartInternal / enrichProductWithStockAndOptions).
+//     // But we can run their callers in parallel where safe to reduce latency.
+//     const applyPromotionsPromise = applyPromotions(itemsInput, {
+//       userContext: req.user ? { isNewUser: req.user.isNewUser } : {},
+//     });
+
+//     // load coupons (cached) — attempt to use _couponCache if fresh
+//     const loadCouponsPromise = (async () => {
+//       try {
+//         const nowTS = Date.now();
+//         if (_couponCache.data && nowTS - _couponCache.ts < (_couponCache.ttl || 5000)) {
+//           return _couponCache.data;
+//         }
+//         const docs = await Discount.find({ status: "Active" }).lean();
+//         // slightly longer TTL to reduce DB pressure while remaining fresh
+//         _couponCache = { data: docs, ts: Date.now(), ttl: 30000 };
+//         return docs;
+//       } catch (err) {
+//         console.error("Failed to load coupons:", err);
+//         return [];
+//       }
+//     })();
+
+//     // load active promotions for enrichment (cached)
+//     const loadActivePromotionsPromise = (async () => {
+//       try {
+//         const now = Date.now();
+//         if (_promoCache.data && now - _promoCache.ts < (_promoCache.ttl || 5000)) {
+//           return _promoCache.data;
+//         }
+//         const dbNow = new Date();
+//         const promos = await Promotion.find({
+//           status: "active",
+//           startDate: { $lte: dbNow },
+//           endDate: { $gte: dbNow },
+//         }).lean();
+//         // slightly longer TTL than before so we don't hammer DB for every request
+//         _promoCache = { data: promos, ts: Date.now(), ttl: 30000 };
+//         return promos;
+//       } catch (err) {
+//         console.error("Failed to load promotions:", err);
+//         return [];
+//       }
+//     })();
+
+//     // preload products once
+//     const loadProductsPromise = (async () => {
+//       try {
+//         if (!uniqueIds.length) return [];
+//         const prods = await Product.find({ _id: { $in: uniqueIds } }).lean();
+//         return prods;
+//       } catch (err) {
+//         console.error("Failed to preload products:", err);
+//         return [];
+//       }
+//     })();
+
+//     // Await the applyPromotions result AND the other preloads in parallel
+//     const [promoResult, allDiscountDocs, activePromotions, allProducts] = await Promise.all([
+//       applyPromotionsPromise,
+//       loadCouponsPromise,
+//       loadActivePromotionsPromise,
+//       loadProductsPromise,
+//     ]);
+
+//     // applyPromotions result kept same as before
+//     const { items: promoItems, summary, appliedPromotions } = promoResult || { items: [], summary: {}, appliedPromotions: [] };
+
+//     // -------------------- Coupons Evaluation --------------------
+//     let applicableCoupons = [],
+//       inapplicableCoupons = [],
+//       appliedCoupon = null,
+//       discountFromCoupon = 0;
+
+//     if (req.user && req.user._id) {
+//       const nonPromoItemsInput = (promoItems || [])
+//         .filter(i => !i.discounts?.length)
+//         .map(i => ({
+//           productId: i.productId,
+//           qty: i.qty,
+//         }));
+
+//       if (nonPromoItemsInput.length && Array.isArray(allDiscountDocs) && allDiscountDocs.length) {
+//         // validate all coupons in parallel (same as original behavior but with preloaded discount docs)
+//         const couponsChecked = await Promise.all(
+//           allDiscountDocs.map(async d => {
+//             try {
+//               if (!nonPromoItemsInput.length) throw new Error("No items");
+
+//               await validateDiscountForCartInternal({
+//                 code: d.code,
+//                 cart: nonPromoItemsInput,
+//                 userId: req.user._id,
+//               });
+
+//               return {
+//                 code: d.code,
+//                 label: d.name,
+//                 type: d.type,
+//                 value: d.value,
+//                 status: "Applicable",
+//                 message: `Apply code ${d.code}`,
+//               };
+//             } catch {
+//               return {
+//                 code: d.code,
+//                 label: d.name,
+//                 type: d.type,
+//                 value: d.value,
+//                 status: "Not applicable",
+//                 message: "Not valid for current cart",
+//               };
+//             }
+//           })
+//         );
+
+//         applicableCoupons = couponsChecked.filter(c => c.status === "Applicable");
+//         inapplicableCoupons = couponsChecked.filter(c => c.status !== "Applicable");
+
+//         if (req.query.discount && nonPromoItemsInput.length) {
+//           try {
+//             const result = await validateDiscountForCartInternal({
+//               code: req.query.discount.trim(),
+//               cart: nonPromoItemsInput,
+//               userId: req.user._id,
+//             });
+
+//             const CAP = result.discount.maxCap || 500;
+//             discountFromCoupon = Math.min(result.priced.discountAmount, CAP);
+
+//             appliedCoupon = {
+//               code: result.discount.code,
+//               discount: discountFromCoupon,
+//             };
+//           } catch {
+//             appliedCoupon = null;
+//             discountFromCoupon = 0;
+//           }
+//         }
+//       } else {
+//         // no coupon docs or no non-promo items
+//         applicableCoupons = [];
+//         inapplicableCoupons = Array.isArray(allDiscountDocs) ? allDiscountDocs.map(d => ({
+//           code: d.code,
+//           label: d.name,
+//           type: d.type,
+//           value: d.value,
+//           status: "Not applicable",
+//           message: "Not valid for current cart",
+//         })) : [];
+//       }
+//     }
+
+//     // -------------------- Preload all products -> productMap --------------------
+//     const productMap = new Map((allProducts || []).map(p => [String(p._id), p]));
+
+//     // -------------------- Build Final Cart (synchronous map — no await inside) --------------------
+//     const round2 = n => Math.round(n * 100) / 100;
+
+//     const finalCart = validCartItems.map(item => {
+//       const productIdStr = String(item.product?._id || item.product);
+//       const productFromDB = productMap.get(productIdStr);
+
+//       // ---------- FIX: product deleted ----------
+//       if (!productFromDB) {
+//         return {
+//           _id: item._id,
+//           product: null,
+//           name: "Product unavailable",
+//           quantity: item.quantity || 1,
+//           stockStatus: "deleted",
+//           stockMessage: "❌ This product was removed by admin.",
+//           canCheckout: false,
+//           variant: {
+//             sku: item.selectedVariant?.sku || null,
+//             shadeName: null,
+//             hex: null,
+//             image: null,
+//             stock: 0,
+//             originalPrice: 0,
+//             discountedPrice: 0,
+//             displayPrice: 0,
+//             discountPercent: 0,
+//             discountAmount: 0,
+//           },
+//         };
+//       }
+
+//       // reuse your helper (synchronous) to enrich with promotions
+//       const enriched = enrichProductWithStockAndOptions(productFromDB, activePromotions);
+
+//       const enrichedVariant =
+//         enriched.variants.find(
+//           v =>
+//             String(v.sku).trim().toLowerCase() ===
+//             String(item.selectedVariant?.sku || "").trim().toLowerCase()
+//         ) || enriched.variants[0];
+
+//       const stock = enrichedVariant.stock ?? 0;
+//       let stockStatus = "in_stock";
+//       let stockMessage = "";
+
+//       if (stock <= 0) {
+//         stockStatus = "out_of_stock";
+//         stockMessage = "⚠️ This item is currently out of stock.";
+//       } else if (stock < item.quantity) {
+//         stockStatus = "limited_stock";
+//         stockMessage = `Only ${stock} left in stock.`;
+//       }
+
+//       return {
+//         _id: item._id,
+//         product: productFromDB._id,
+//         name: enrichedVariant.shadeName
+//           ? `${productFromDB.name} - ${enrichedVariant.shadeName}`
+//           : productFromDB.name,
+//         quantity: item.quantity || 1,
+//         stockStatus,
+//         stockMessage,
+//         canCheckout: stock > 0 && stock >= item.quantity,
+//         variant: {
+//           sku: enrichedVariant.sku,
+//           shadeName: enrichedVariant.shadeName,
+//           hex: enrichedVariant.hex,
+//           image:
+//             enrichedVariant.images?.[0] ||
+//             productFromDB.images?.[0] ||
+//             null,
+//           stock,
+//           originalPrice: enrichedVariant.originalPrice,
+//           discountedPrice: enrichedVariant.displayPrice,
+//           displayPrice: enrichedVariant.displayPrice,
+//           discountPercent: enrichedVariant.discountPercent,
+//           discountAmount: enrichedVariant.discountAmount,
+//         },
+//       };
+//     });
+
+//     // -------------------- Price Calculation --------------------
+//     const activeItems = finalCart.filter(i => i.stockStatus !== "deleted");
+
+//     const bagMrp = round2(
+//       activeItems.reduce((sum, i) => sum + (i.variant.originalPrice || 0) * i.quantity, 0)
+//     );
+
+//     const bagPayable = round2(
+//       activeItems.reduce((sum, i) => sum + (i.variant.displayPrice || 0) * i.quantity, 0)
+//     );
+
+//     const totalSavings = round2(
+//       bagMrp - bagPayable + discountFromCoupon
+//     );
+
+//     let grandTotal = round2(bagPayable - discountFromCoupon);
+
+//     // -------------------- Shipping --------------------
+//     const SHIPPING_CHARGE = 70;
+//     const FREE_SHIPPING_THRESHOLD = 499;
+
+//     let shippingCharge = 0;
+//     let shippingMessage = "";
+
+//     if (summary.freeShipping) {
+//       shippingCharge = 0;
+//       shippingMessage = "🚚 Free shipping via promotion!";
+//     } else if (grandTotal >= FREE_SHIPPING_THRESHOLD) {
+//       shippingCharge = 0;
+//       shippingMessage = "🎉 Free shipping on your order!";
+//     } else {
+//       shippingCharge = SHIPPING_CHARGE;
+//       const amountToFree = round2(FREE_SHIPPING_THRESHOLD - grandTotal);
+//       shippingMessage = `📦 Add ₹${amountToFree} more for free shipping!`;
+//       grandTotal += SHIPPING_CHARGE;
+//     }
+
+//     // -------------------- Final Response --------------------
+//     const responseData = {
+//       cart: finalCart,
+//       priceDetails: {
+//         bagMrp,
+//         totalSavings,
+//         bagDiscount: round2(bagMrp - bagPayable),
+//         autoDiscount: round2(bagMrp - bagPayable),
+//         couponDiscount: round2(discountFromCoupon),
+//         shippingCharge: round2(shippingCharge),
+//         shippingMessage,
+//         payable: grandTotal,
+//         promoFreeShipping: !!summary.freeShipping,
+//         savingsMessage:
+//           totalSavings > 0 ? `🎉 You saved ₹${totalSavings} on this order!` : "",
+//       },
+//       appliedCoupon,
+//       appliedPromotions,
+//       applicableCoupons,
+//       inapplicableCoupons,
+//       grandTotal,
+//       isGuest,
+//     };
+
+//     // Cache the final response (short TTL as before)
+//     try {
+//       await redis.set(redisKey, JSON.stringify(responseData), "EX", 20);
+//     } catch (err) {
+//       console.error("Redis set failed:", err);
+//     }
+
+//     return res.json(responseData);
+//   } catch (error) {
+//     console.error("❌ getCartSummary error:", error);
+//     return res.status(500).json({
+//       message: "Failed to get cart summary",
+//       error: error.message,
+//     });
+//   }
+// };
