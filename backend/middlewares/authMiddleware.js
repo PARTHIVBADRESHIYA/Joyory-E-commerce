@@ -1,6 +1,6 @@
+import "../config/env.js";
+
 import mongoose from 'mongoose';
-import dotenv from 'dotenv';
-dotenv.config();
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import Admin from '../models/Admin.js';

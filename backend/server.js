@@ -417,9 +417,8 @@
 
 
 
+import "./config/env.js";
 
-import dotenv from "dotenv";
-dotenv.config();
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
@@ -437,7 +436,6 @@ import "./middlewares/utils/cron/cleanUpOrders.js";
 // import "./middlewares/utils/cron/shiprocketRetry.js";
 import { startTrackingJob } from "./middlewares/utils/cron/shiprocketTrackingJob.js";
 import "./middlewares/utils/cron/autoPayout.js";
-import { createRedisConnection } from "./middlewares/services/redisConnection.js";
 
 // ================= START CRON JOBS =================
 startTrackingJob();
@@ -510,7 +508,6 @@ import userWalletRoutes from "./routes/user/userWalletRoutes.js";
 connectDB();
 
 const app = express();
-const { connection } = createRedisConnection();
 
 app.set("trust proxy", 1);
 

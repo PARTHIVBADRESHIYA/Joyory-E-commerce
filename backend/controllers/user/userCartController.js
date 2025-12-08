@@ -11,7 +11,7 @@ import { calculateVariantPrices } from "../../middlewares/services/promotionHelp
 import Promotion from "../../models/Promotion.js";
 import { getPseudoVariant } from "../../middlewares/utils/recommendationService.js";
 import { enrichProductWithStockAndOptions, enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
-import redis from "../../middlewares/utils/redis.js";
+import { getRedis } from "../../middlewares/utils/redis.js";
 import crypto from "crypto";
 
 
@@ -1292,6 +1292,9 @@ const CART_CACHE_TTL = 60;            // 60s cart snapshot cache
 // ---------- helper: get raw product from cache/db ----------
 async function getCachedProduct(productId) {
   if (!productId) return null;
+
+  const redis = getRedis();   // 🔥 REQUIRED
+
   const key = `prod:${productId}`;
   try {
     const cached = await redis.get(key);
@@ -1323,6 +1326,8 @@ async function getMultipleProducts(ids = []) {
 // ---------- helper: get enriched product (cache per promoHash) ----------
 async function getEnrichedProduct(product, promoHash, activePromotions) {
   if (!product) return null;
+  const redis = getRedis();  // 🔥 REQUIRED
+
   const id = String(product._id);
   const key = `enriched:product:${id}:${promoHash || "nopromo"}`;
 
@@ -1381,6 +1386,9 @@ function promoHashFromPromos(promos = []) {
 // ---------- MAIN optimized controller (drop-in) ----------
 export const getCartSummary = async (req, res) => {
   try {
+
+    const redis = getRedis();  // 🔥 REQUIRED FIX
+
     // -------------------- Redis snapshot cache --------------------
     const cartKeySnapshot = (() => {
       try {
@@ -1413,6 +1421,7 @@ export const getCartSummary = async (req, res) => {
       .createHash("md5")
       .update(cartKeySnapshot || "")
       .digest("hex");
+
 
     const redisKey = `cart:${req.user?._id || req.sessionID}:${snapshotHash}`;
 

@@ -293,13 +293,14 @@ import {
     isObjectId,
 } from "../../controllers/user/userPromotionController.js";
 import { enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
-import redis from "../../middlewares/utils/redis.js"; // ✅ Added Redis
+import {getRedis} from "../../middlewares/utils/redis.js"; // ✅ Added Redis
 
 export const applyPromotions = async (itemsInput, ctx = {}) => {
     try {
         if (!Array.isArray(itemsInput)) {
             throw new Error("applyPromotions: itemsInput must be an array of cart items");
         }
+        const redis = getRedis();  // 🔥 REQUIRED
 
         /* ---------------------------------------------------------
          🔥 PROMO CACHE (5 seconds TTL)

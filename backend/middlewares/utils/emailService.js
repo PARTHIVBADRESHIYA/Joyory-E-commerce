@@ -165,9 +165,10 @@
 
 
 // sendEmail.js
+import "../../config/env.js";
+
 import fetch from "node-fetch";
-import dotenv from "dotenv";
-dotenv.config();
+
 
 /**
  * Send email via ZeptoMail REST API

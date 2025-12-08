@@ -1719,6 +1719,7 @@
 
 
 
+import "../../../config/env.js";
 
 import validator from "validator";
 import Payment from '../../../models/settings/payments/Payment.js';
@@ -1742,7 +1743,6 @@ import Referral from '../../../models/Referral.js'; // ✅ You need to import th
 import Razorpay from "razorpay";
 import crypto from "crypto";
 import axios from 'axios';
-import dotenv from "dotenv";
 
 import cloudinary from '../../../middlewares/utils/cloudinary.js';
 import { determineOccasions, craftMessage } from "../../../middlewares/services/ecardService.js";
@@ -1751,7 +1751,6 @@ import { generateInvoice } from "../../../middlewares/services/invoiceService.js
 import { splitOrderForPersistence } from '../../../middlewares/services/orderSplit.js'; // or correct path
 import { shiprocketQueue } from "../../../middlewares/services/shiprocketQueue.js";
 
-dotenv.config();
 
 
 export const razorpay = new Razorpay({

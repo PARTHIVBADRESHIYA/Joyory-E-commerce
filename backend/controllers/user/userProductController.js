@@ -1090,7 +1090,7 @@ import Formulation from "../../models/shade/Formulation.js";
 import Category from '../../models/Category.js';
 import { getDescendantCategoryIds } from '../../middlewares/utils/categoryUtils.js';
 import { getRecommendations } from '../../middlewares/utils/recommendationService.js';
-import redis from '../../middlewares/utils/redis.js';
+import { getRedis } from '../../middlewares/utils/redis.js';
 import { PRODUCT_CACHE_VERSION } from '../../middlewares/utils/cacheUtils.js';
 import { enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
 import mongoose from 'mongoose';
@@ -1119,6 +1119,7 @@ export const buildOptions = (product) => {
 export const getFilterMetadata = async (req, res) => {
 
     try {
+        const redis = getRedis();  // 🔥 REQUIRED
         const redisKey = `filters:${JSON.stringify(req.query)}`;
         const cached = await redis.get(redisKey);
         if (cached) {
@@ -1382,6 +1383,7 @@ export const normalizeImages = (images = []) => {
 
 export const getAllProducts = async (req, res) => {
     try {
+        const redis = getRedis();  // 🔥 REQUIRED
         // 🔹 Build Redis cache key
         const redisKey = `allProducts:${JSON.stringify(req.query)}`;
         const cached = await redis.get(redisKey);
@@ -1533,6 +1535,8 @@ export const getAllProducts = async (req, res) => {
 export const getProductsByCategory = async (req, res) => {
     try {
         const slug = req.params.slug.toLowerCase();
+
+        const redis = getRedis();  // 🔥 REQUIRED 
         // 🔥 Redis Cache Key
         const redisKey = `cat:${slug}:${JSON.stringify(req.query)}`;
 
@@ -1763,8 +1767,9 @@ export const getSingleProduct = async (req, res) => {
         const { idOrSlug } = req.params; // works for both slug or id
         // 🔥 Redis Key
         const variant = req.query.variant ?? "*"; // explicitly handle undefined
-        const redisKey = `prod:${PRODUCT_CACHE_VERSION}:${idOrSlug}:${variant}`;
 
+        const redis = getRedis();  // 🔥 REQUIRED
+        const redisKey = `prod:${PRODUCT_CACHE_VERSION}:${idOrSlug}:${variant}`;
         // 🔥 Return cached version
         const cached = await redis.get(redisKey);
         if (cached) {

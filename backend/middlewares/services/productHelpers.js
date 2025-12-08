@@ -306,7 +306,7 @@ import Review from "../../models/Review.js";
 import { buildOptions, normalizeImages } from "../../controllers/user/userProductController.js";
 import { calculateVariantPrices } from "../../middlewares/services/promotionHelper.js";
 import { getPseudoVariant } from "../utils/recommendationService.js";
-import redis from "../utils/redis.js";
+import { getRedis } from "../utils/redis.js";
 
 // Cache TTLs (shorter to reflect promo expiry quickly)
 const PRODUCT_PROMO_TTL = 5; // 5 seconds for promo freshness
@@ -438,6 +438,8 @@ export const enrichProductWithStockAndOptions = (product, promotions = []) => {
 };
 
 export const enrichProductsUnified = async (products, promotions = [], options = {}) => {
+    const redis = getRedis();     // 🔥 FIX
+
     const list = Array.isArray(products) ? products : [products];
     const productIds = list.map(p => p._id.toString());
 

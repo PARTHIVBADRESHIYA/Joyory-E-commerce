@@ -1,5 +1,5 @@
 import Product from "../models/Product.js";
-import redis from '../middlewares/utils/redis.js';
+import { getRedis } from '../middlewares/utils/redis.js';
 import { normalizeFilters } from '../controllers/user/userProductController.js';
 import Promotion from "../models/Promotion.js";
 import { enrichProductsUnified } from "../middlewares/services/productHelpers.js";
@@ -139,6 +139,7 @@ export const getAllVTOProducts = async (req, res) => {
 
 export const getAllVTOEnabledProducts = async (req, res) => {
     try {
+        const redis = getRedis();   // <-- 🔥 IMPORTANT
         const redisKey = `vtoProducts:${JSON.stringify(req.query)}`;
         const cached = await redis.get(redisKey);
 

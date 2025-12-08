@@ -6,7 +6,7 @@ import Brand from "../../models/Brand.js";
 import User from "../../models/User.js";
 import Promotion from "../../models/Promotion.js";
 import SkinType from "../../models/SkinType.js";
-import redis from "../../middlewares/utils/redis.js";
+import { getRedis } from "../../middlewares/utils/redis.js";
 // 🔹 helpers (same as category controller)
 import { enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
 import { normalizeFilters, applyDynamicFilters, normalizeImages } from "../../controllers/user/userProductController.js";
@@ -243,9 +243,12 @@ export const getBrandCategoryProducts = async (req, res) => {
         const { brandSlug, categorySlug } = req.params;
         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
 
+
         // ---------------------------------------------
         // 🔥 CACHED VERSION — EXACTLY LIKE CATEGORY API
         // ---------------------------------------------
+        const redis = getRedis();   // <-- 🔥 IMPORTANT
+
         const redisKey = `brandCat:${brandSlug}:${categorySlug}:${page}:${limit}:${sort}:${JSON.stringify(queryFilters)}`;
 
         const cached = await redis.get(redisKey);
@@ -378,6 +381,7 @@ export const getBrandLanding = async (req, res) => {
         // ---------------------------------------------
         // 🔥 CACHED VERSION
         // ---------------------------------------------
+        const redis = getRedis();   // <-- 🔥 IMPORTANT
         const redisKey = `brandLanding:${brandSlug}:${page}:${limit}:${sort}:${JSON.stringify(queryFilters)}`;
 
         const cached = await redis.get(redisKey);

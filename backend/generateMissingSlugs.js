@@ -1,11 +1,10 @@
 // scripts/generateMissingSlugs.js
+import "./config/env.js";
 
 import mongoose from "mongoose";
-import dotenv from "dotenv";
 import Product from "./models/Product.js";
 import { generateUniqueSlug } from "./middlewares/utils/slug.js";
 
-dotenv.config();
 
 async function generateSlugsForExistingProducts() {
     try {

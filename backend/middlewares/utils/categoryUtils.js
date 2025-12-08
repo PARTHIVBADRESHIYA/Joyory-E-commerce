@@ -85,7 +85,7 @@
 // utils/categoryUtils.js
 import Category from '../../models/Category.js';
 import mongoose from 'mongoose';
-import redis from './redis.js'; // your Redis instance
+import {getRedis} from './redis.js'; // your Redis instance
 
 /**
  * Build category hierarchy from a flat list
@@ -132,6 +132,7 @@ export const buildCategoryHierarchy = (categories, maxDepth = Infinity) => {
 export const getDescendantCategoryIds = async (categoryId) => {
     if (!mongoose.Types.ObjectId.isValid(categoryId)) return [];
 
+    const redis = getRedis();  // 🔥 REQUIRED
     const redisKey = `categoryDescendants:${categoryId}`;
     const cached = await redis.get(redisKey);
     if (cached) {
@@ -170,6 +171,8 @@ export const getDescendantCategoryIds = async (categoryId) => {
  */
 export const getCategoryFallbackChain = async (categoryDoc) => {
     if (!categoryDoc?._id) return [];
+
+    const redis = getRedis();  // 🔥 REQUIRED
 
     const redisKey = `categoryFallbackChain:${categoryDoc._id}`;
     const cached = await redis.get(redisKey);

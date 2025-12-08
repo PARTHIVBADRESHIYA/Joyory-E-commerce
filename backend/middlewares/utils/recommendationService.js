@@ -378,7 +378,7 @@ import { buildOptions, normalizeImages } from "../../controllers/user/userProduc
 import { getCategoryFallbackChain } from "../../middlewares/utils/categoryUtils.js";
 import { calculateVariantPrices } from "../../middlewares/services/promotionHelper.js";
 import { enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
-import redis from "../utils/redis.js";
+import { getRedis } from "../utils/redis.js";
 
 /**
  * Pseudo variant helper
@@ -467,6 +467,7 @@ export const formatProductCard = async (product, promotions = []) => {
  * Active promotions ⚡ cache 5 mins
  */
 const getActivePromotions = async () => {
+    const redis = getRedis();
     const redisKey = "activePromotions";
     const cached = await redis.get(redisKey);
     if (cached) return JSON.parse(cached);
@@ -486,6 +487,7 @@ const getActivePromotions = async () => {
  * Trending products ⚡ cache top 50
  */
 const getTrendingProducts = async (limit) => {
+    const redis = getRedis();
     const redisKey = `trendingProducts:top50`;
     const cached = await redis.get(redisKey);
     let trending = [];

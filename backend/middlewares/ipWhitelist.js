@@ -1,6 +1,6 @@
 // middlewares/ipWhitelist.js
-import dotenv from 'dotenv';
-dotenv.config();
+import "../config/env.js";
+
 
 // ✅ Define this helper function before using it
 const normalizeIP = ip => ip?.replace(/^::ffff:/, '').trim();

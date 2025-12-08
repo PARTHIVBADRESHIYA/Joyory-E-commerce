@@ -1,11 +1,12 @@
 // workers/shiprocketWorker.js
-import dotenv from "dotenv";
+import "../../config/env.js";
+
 import mongoose from "mongoose";
 import { shiprocketQueue } from "../../middlewares/services/shiprocketQueue.js";
 import { createShiprocketOrder } from "../../middlewares/services/shiprocket.js";
 import Order from "../../models/Order.js";
 
-dotenv.config();
+
 
 // ✅ MongoDB connection (for worker)
 mongoose

@@ -1,5 +1,5 @@
 // src/middlewares/utils/cacheUtils.js
-import redis from '../../middlewares/utils/redis.js'; // adjust path
+import { getRedis } from '../../middlewares/utils/redis.js'; // adjust path
 
 // Bump this when you change API response shape
 export const PRODUCT_CACHE_VERSION = "v1"; // change to v2, v3 when you add/remove fields
@@ -10,6 +10,7 @@ const makeProductKeyPattern = (productIdOrSlug = "*", variant = "*") =>
 
 // Production-safe deletion using SCAN (non-blocking)
 async function scanDel(pattern) {
+    const redis = getRedis();   // 🔥 FIX ADDED
     if (!redis) return;
     try {
         const stream = redis.scanStream({ match: pattern, count: 500 });
@@ -44,12 +45,14 @@ async function scanDel(pattern) {
 }
 
 export const clearProductCacheForId = async (productIdOrSlug) => {
+    const redis = getRedis();   // 🔥 FIX ADDED
     if (!redis) return 0;
     const pattern = makeProductKeyPattern(productIdOrSlug, "*");
     return await scanDel(pattern);
 };
 
 export const clearAllProductCaches = async () => {
+    const redis = getRedis();   // 🔥 FIX ADDED
     if (!redis) return 0;
     // delete any product related keys across versions
     const pattern = `prod:*:*:*`;

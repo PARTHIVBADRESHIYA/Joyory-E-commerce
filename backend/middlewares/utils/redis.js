@@ -1,5 +1,10 @@
 import { createRedisConnection } from "../../middlewares/services/redisConnection.js";
 
-const redis = createRedisConnection(false);
+let redis;
 
-export default redis;
+export const getRedis = () => {
+    if (!redis) {
+        redis = createRedisConnection(false);
+    }
+    return redis;
+};

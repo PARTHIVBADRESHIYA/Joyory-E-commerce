@@ -376,7 +376,7 @@ import mongoose from "mongoose";
 import { normalizeFilters, applyDynamicFilters } from "../../controllers/user/userProductController.js";
 import { applyPromotions } from "../../middlewares/services/promotionEngine.js";
 import { enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
-import redis from "../../middlewares/utils/redis.js";
+import { getRedis } from "../../middlewares/utils/redis.js";
 
 const ObjectId = mongoose.Types.ObjectId; // ✅ Fix for ReferenceError
 
@@ -457,6 +457,8 @@ export const bestTierForQty = (tiers, qty) =>
 
 export const getActivePromotionsForUsers = async (req, res) => {
     try {
+        const redis = getRedis();  // 🔥 REQUIRED
+
         const now = new Date();
         const section = (req.query.section || "all").toString().toLowerCase();
         // allowed: 'product', 'banner', 'offers', 'all'
@@ -812,6 +814,7 @@ export const getActivePromotionsForUsers = async (req, res) => {
 // };
 export const getPromotionProducts = async (req, res) => {
     try {
+        const redis = getRedis();  // 🔥 REQUIRED
         const { id } = req.params;
         if (!isObjectId(id)) {
             return res.status(400).json({ message: "Invalid promotion id" });
