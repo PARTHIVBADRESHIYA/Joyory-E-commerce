@@ -1851,7 +1851,7 @@ const getAllProducts = async (req, res) => {
                 _id: p._id,
                 name: p.name,
 
-                image, 
+                image,
                 brand: p.brand,
                 category: p.category?.name || '',
 
