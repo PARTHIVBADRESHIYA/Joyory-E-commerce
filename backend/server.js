@@ -436,6 +436,7 @@ import "./middlewares/utils/cron/cleanUpOrders.js";
 // import "./middlewares/utils/cron/shiprocketRetry.js";
 import { startTrackingJob } from "./middlewares/utils/cron/shiprocketTrackingJob.js";
 import "./middlewares/utils/cron/autoPayout.js";
+import "./middlewares/utils/cron/returnCron.js";
 
 // ================= START CRON JOBS =================
 startTrackingJob();
@@ -490,6 +491,7 @@ import virtualTryOnRoutes from "./routes/virtualTryOnRoutes.js";
 import permissionsRoutes from "./routes/permissionsRoutes.js";
 import adminProfileRoutes from "./routes/adminProfileRoutes.js";
 import affiliateRoutes from "./routes/affiliateRoutes.js";
+import returnRoutes from "./routes/returnRoutes.js";
 // User side
 import userProductRoutes from "./routes/user/userProductRoutes.js";
 import userCartAndOrderRoutes from "./routes/user/userCartAndOrderRoutes.js";
@@ -647,6 +649,7 @@ app.use("/api/vto", virtualTryOnRoutes);
 app.use("/api/permissions", permissionsRoutes);
 app.use("/api/admin/profile", adminProfileRoutes);
 app.use("/api/affiliate", affiliateRoutes);
+app.use("/api/returns", returnRoutes);
 
 
 if ((process.env.SHIPPING_PROVIDER || "mock").toLowerCase() === "mock") {

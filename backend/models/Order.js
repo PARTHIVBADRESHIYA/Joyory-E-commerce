@@ -208,7 +208,171 @@
 // export default mongoose.model('Order', orderSchema);
 
 
+
+
+// models/Order.js
 import mongoose from 'mongoose';
+
+const ReturnItemSchema = new mongoose.Schema({
+    productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product", required: true },
+    quantity: { type: Number, required: true },
+
+    variant: {
+        sku: String,
+        shadeName: String,
+        hex: String,
+    },
+
+    reason: { type: String, required: true },
+    reasonDescription: String,
+
+    images: {
+        type: [String],
+        validate: v => v.length > 0,
+        required: true     // 🔥 REQUIRED Images
+    },
+
+    condition: {
+        type: String,
+        enum: ["Unopened", "Opened - Unused", "Used", "Damaged"],
+        default: "Unopened"
+    },
+
+    status: {
+        type: String,
+        enum: [
+            "requested",
+            "approved",
+            "rejected",
+            "pickup_scheduled",
+            "picked_up",
+            "in_transit",
+            "received",
+            "qc_passed",
+            "qc_failed",
+            "processed",
+            "refunded",
+            "replaced"
+        ],
+        default: "requested"
+    },
+
+    refundAmount: Number,
+
+    pickupSchedule: {
+        date: Date,
+        timeSlot: String,
+        awb: String,
+        courier: String,
+        trackingUrl: String,
+    },
+
+    receivedAt: Date,
+    processedAt: Date,
+}, { timestamps: true });
+
+const ShipmentReturnSchema = new mongoose.Schema({
+
+    shipmentId: {
+        type: mongoose.Schema.Types.ObjectId,
+        required: true
+    },
+
+    returnType: {
+        type: String,
+        enum: ["return", "replace", "exchange"],
+        required: true
+    },
+
+    items: {
+        type: [ReturnItemSchema],
+        validate: v => v.length > 0,
+        required: true              // 🔥 Must have return items
+    },
+
+    overallStatus: {
+        type: String,
+        enum: [
+            "requested",
+            "pending_approval",
+            "approved",
+            "pickup_scheduled",
+            "picked_up",
+            "in_transit",
+            "received_at_warehouse",
+            "quality_check",
+            "approved_for_refund",
+            "approved_for_replacement",
+            "rejected",
+            "refund_initiated",
+            "refunded",
+            "replacement_shipped",
+            "replacement_delivered",
+            "cancelled"
+        ],
+        default: "requested"
+    },
+
+    reason: String,
+    description: String,
+
+    requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    requestedAt: { type: Date, default: Date.now },
+
+    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Admin" },
+    approvedAt: Date,
+
+    rejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Admin" },
+    rejectedAt: Date,
+
+    adminRejectionReason: String,
+
+    refund: {
+        amount: Number,
+        method: {
+            type: String,
+            enum: ["original", "wallet", "voucher", "bank_transfer", "upi"],
+            default: "original"
+        },
+        status: {
+            type: String,
+            enum: ["pending", "initiated", "processing", "completed", "failed"],
+            default: "pending"
+        },
+        gatewayRefundId: String,
+        refundedAt: Date,
+        notes: String,
+    },
+
+    qualityCheck: {
+        checkedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Admin" },
+        checkedAt: Date,
+        condition: String,
+        notes: String,
+        images: [String],
+    },
+
+    pickupDetails: {
+        awb: String,
+        courier: String,
+        trackingUrl: String,
+        scheduledDate: Date,
+        pickedUpAt: Date,
+        pickupAddress: Object,
+    },
+
+    auditTrail: [{
+        status: String,
+        action: String,
+        performedBy: { type: mongoose.Schema.Types.ObjectId, refPath: "auditTrail.performedByModel" },
+        performedByModel: { type: String, enum: ["User", "Admin"] },
+        timestamp: { type: Date, default: Date.now },
+        notes: String,
+        metadata: Object,
+    }],
+
+    receivedAt: Date,
+}, { timestamps: true });
 
 const RefundSchema = new mongoose.Schema({
     amount: Number,
@@ -275,7 +439,10 @@ const ShipmentSchema = new mongoose.Schema({
             location: String,
             description: String
         }
-    ]
+    ],
+    // ⭐ SHIPMENT-WISE RETURNS HERE
+    returns: [ShipmentReturnSchema]
+
 });
 
 const orderSchema = new mongoose.Schema({
@@ -411,6 +578,24 @@ const orderSchema = new mongoose.Schema({
         }
     ],
 
+    returnRequest: {
+        type: {
+            type: String, enum: ["return", "replace"],
+        },
+        reason: String,
+        description: String,
+        images: [String],  // URLs of uploaded images
+        requestedAt: Date,
+        status: {
+            type: String,
+            enum: ["pending", "approved", "rejected", "completed"],
+            default: "pending"
+        },
+        adminNote: String,
+        approvedAt: Date,
+        completedAt: Date,
+    },
+
     trackingHistory: [
         {
             status: String,
@@ -433,7 +618,29 @@ const orderSchema = new mongoose.Schema({
     },
     // Replace the single shipment field with:
     shipments: [ShipmentSchema],
-    primary_shipment: { type: mongoose.Schema.Types.ObjectId } // reference to main shipment
+    primary_shipment: { type: mongoose.Schema.Types.ObjectId },// reference to main shipment,
+
+
+    returnPolicy: {
+        applicable: { type: Boolean, default: true },
+        days: { type: Number, default: 7 },
+        eligibleUntil: Date,
+        conditions: [String], // e.g., ["Unopened", "Original Packaging", "Invoice Required"]
+    },
+
+    shipments: [ShipmentSchema],    // now includes returns internally
+
+    // Track return eligibility
+    isReturnable: { type: Boolean, default: true },
+    returnWindowEnd: Date,
+
+    // Analytics
+    returnStats: {
+        totalReturns: { type: Number, default: 0 },
+        totalRefunds: { type: Number, default: 0 },
+        totalReplacements: { type: Number, default: 0 },
+        avgProcessingTime: Number, // in hours
+    },
 
 }, { timestamps: true });
 

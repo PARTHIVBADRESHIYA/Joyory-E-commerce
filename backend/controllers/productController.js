@@ -393,6 +393,7 @@ const addProductController = async (req, res) => {
             productTags: rawTags,
             variants: rawVariants,
             formulation,
+            skinType,          // <-- add this
             seller,
         } = req.body;
 
@@ -461,6 +462,40 @@ const addProductController = async (req, res) => {
             return hierarchy;
         };
         const categoryHierarchy = await buildCategoryHierarchy(resolvedCategories[0]);
+
+        // ---------------- Parse Formulation ----------------
+        let finalFormulation = null;
+        if (formulation) {
+            finalFormulation = mongoose.Types.ObjectId.isValid(formulation) ? formulation : null;
+        }
+
+        // ---------------- Parse Skin Types ----------------
+        let skinTypesArray = [];
+        if (req.body.skinTypes) {
+            try {
+                if (typeof req.body.skinTypes === "string") {
+                    skinTypesArray = JSON.parse(req.body.skinTypes);
+                } else if (Array.isArray(req.body.skinTypes)) {
+                    skinTypesArray = req.body.skinTypes;
+                } else {
+                    skinTypesArray = [req.body.skinTypes];
+                }
+            } catch {
+                skinTypesArray = [req.body.skinTypes]; // fallback for single string
+            }
+
+            // Only keep valid ObjectIds
+            skinTypesArray = skinTypesArray.filter(id => mongoose.Types.ObjectId.isValid(id));
+        }
+
+        // ---------------- Parse Expiry Date ----------------
+        let finalExpiryDate = null;
+        if (expiryDate) {
+            const parsedDate = new Date(expiryDate);
+            if (!isNaN(parsedDate)) {
+                finalExpiryDate = parsedDate;
+            }
+        }
 
         // ---------------- Parse Tags ----------------
         let productTags = [];
@@ -593,6 +628,9 @@ const addProductController = async (req, res) => {
             isPublished,
             scheduledAt: scheduleDate,
             seller: seller || null,
+            formulation: finalFormulation,    // ✅ properly stored
+            skinTypes: skinTypesArray,        // ✅ properly stored
+            expiryDate: finalExpiryDate       // ✅ properly stored
         });
 
         await product.save();

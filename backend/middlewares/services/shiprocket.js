@@ -1005,3 +1005,131 @@ export async function validatePincodeServiceability(pincode, cod = true) {
         throw new Error("Failed to validate pincode via Shiprocket");
     }
 }
+
+
+
+// export async function createShiprocketReturnOrder(returnData) {
+//     const token = await getShiprocketToken();
+
+//     try {
+//         const response = await axios({
+//             url: "https://apiv2.shiprocket.in/v1/external/orders/create/adhoc",
+//             method: "POST",
+//             data: returnData,
+//             headers: { 
+//                 Authorization: `Bearer ${token}`,
+//                 'Content-Type': 'application/json'
+//             }
+//         });
+
+//         return response.data;
+//     } catch (error) {
+//         console.error("Shiprocket return order creation failed:", error.response?.data || error.message);
+//         throw new Error(`Shiprocket API Error: ${error.message}`);
+//     }
+// }
+// Cancel pickup
+export async function cancelPickup(shiprocketOrderId) {
+    const token = await getShiprocketToken();
+
+    try {
+        const response = await axios({
+            url: "https://apiv2.shiprocket.in/v1/external/orders/cancel/pickup",
+            method: "POST",
+            data: {
+                shipment_id: [shiprocketOrderId]
+            },
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        return response.data;
+    } catch (error) {
+        console.error("Shiprocket pickup cancellation failed:", error.response?.data || error.message);
+        throw new Error(`Shiprocket API Error: ${error.message}`);
+    }
+}
+
+
+
+export const createShiprocketReturnOrder = async (order, returnRequest) => {
+    const token = await getShiprocketToken();
+
+    const SA = order.shippingAddress || {};
+    if (!SA.addressLine1 || !SA.city || !SA.state || !SA.pincode) {
+        throw new Error("Invalid shipping address for return pickup");
+    }
+
+    // USER PICKUP ADDRESS (Shiprocket collects from user)
+    const pickup = {
+        pickup_customer_name: order.user?.name || "Customer",
+        pickup_last_name: "",
+        pickup_address: SA.addressLine1,
+        pickup_city: SA.city,
+        pickup_state: SA.state,
+        pickup_country: "India",
+        pickup_pincode: SA.pincode,
+        pickup_email: order.user?.email || "no-reply@joyory.com",
+        pickup_phone: SA.phone || order.user?.phone || "0000000000",
+    };
+
+    // WAREHOUSE RETURN DESTINATION (your address)
+    const W = JSON.parse(process.env.WAREHOUSE_JSON);
+
+    const shipping = {
+        shipping_customer_name: W.name,
+        shipping_last_name: "",
+        shipping_address: W.address,
+        shipping_city: W.city,
+        shipping_state: W.state,
+        shipping_country: W.country,
+        shipping_pincode: W.pincode,
+        shipping_email: "support@joyory.com",
+        shipping_phone: W.phone,
+    };
+
+    // RETURN ITEMS
+    const order_items = returnRequest.items.map(it => ({
+        name: it.variant?.name || "Returned Product",
+        sku: it.variant?.sku || `NO-SKU-${it.productId}`,
+        units: it.quantity,
+        selling_price: 0,
+    }));
+
+    // FINAL PAYLOAD (FLAT KEYS — CORRECT FORMAT)
+    const payload = {
+        order_id: `RET-${order.orderId || order._id}-${returnRequest._id}`.slice(0, 48),
+        order_date: new Date().toISOString().slice(0, 19).replace("T", " "),
+        pickup_location: process.env.SHIPROCKET_PICKUP || "Primary",
+
+        ...pickup,     // spread — Shiprocket wants flat keys
+        ...shipping,   // spread — Shiprocket wants flat keys
+
+        order_items,
+        payment_method: "Prepaid",
+        sub_total: 0,
+
+        length: 10,
+        breadth: 10,
+        height: 10,
+        weight: Math.max(0.1, order_items.length * 0.2),
+    };
+
+    const res = await shiprocketRequest(
+        "https://apiv2.shiprocket.in/v1/external/orders/create/return",
+        "post",
+        payload,
+        token
+    );
+
+    return {
+        shipment_id: res.data?.shipment_id,
+        shiprocket_order_id: res.data?.order_id
+    };
+};
+
+
+  
+
