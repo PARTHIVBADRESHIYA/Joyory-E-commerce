@@ -272,107 +272,122 @@ const ReturnItemSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 const ShipmentReturnSchema = new mongoose.Schema({
+    // Shiprocket return order id
+    shiprocketOrderId: { type: String },
 
-    shipmentId: {
-        type: mongoose.Schema.Types.ObjectId,
-        required: true
-    },
+    // Shiprocket return shipment id
+    shipmentId: { type: String },
+    shipment_id: { type: String }, // keep snake_case support
 
-    returnType: {
-        type: String,
-        enum: ["return", "replace", "exchange"],
-        required: true
-    },
-
-    items: {
-        type: [ReturnItemSchema],
-        validate: v => v.length > 0,
-        required: true              // 🔥 Must have return items
-    },
+    // AWB & tracking
+    awb_code: { type: String },
+    courier_name: { type: String },
+    tracking_url: { type: String },
 
     overallStatus: {
         type: String,
         enum: [
             "requested",
-            "pending_approval",
             "approved",
             "pickup_scheduled",
             "picked_up",
             "in_transit",
-            "received_at_warehouse",
-            "quality_check",
-            "approved_for_refund",
-            "approved_for_replacement",
-            "rejected",
+            "delivered_to_warehouse",
+            "qc_passed",
+            "qc_failed",
             "refund_initiated",
             "refunded",
-            "replacement_shipped",
-            "replacement_delivered",
             "cancelled"
         ],
-        default: "requested"
+        default: "pickup_scheduled"
     },
 
-    reason: String,
-    description: String,
+    // Pickup side (customer)
+    pickupDetails: {
+        name: String,
+        address: String,
+        city: String,
+        state: String,
+        pincode: String,
+        phone: String,
+        email: String
+    },
 
-    requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-    requestedAt: { type: Date, default: Date.now },
+    // Warehouse receiving address
+    warehouse_details: {
+        name: String,
+        address: String,
+        city: String,
+        state: String,
+        pincode: String,
+        phone: String,
+        email: String
+    },
 
-    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Admin" },
-    approvedAt: Date,
+    // Returned items list
+    items: [
+        {
+            productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
+            quantity: Number,
+            variant: Object,
+            reason: String,
+            reasonDescription: String,
+            images: [String],
+            condition: String,
+        }
+    ],
 
-    rejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Admin" },
-    rejectedAt: Date,
+    // Return timeline (SR events)
+    trackingHistory: [
+        {
+            status: String,
+            timestamp: Date,
+            location: String,
+            description: String
+        }
+    ],
 
-    adminRejectionReason: String,
+    // Quality check results after warehouse receives
+    qc: {
+        checkedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Admin" },
+        checkedAt: Date,
+        notes: String,
+        images: [String],
+        status: { type: String, enum: ["passed", "failed"] }
+    },
 
+    // Refund
     refund: {
         amount: Number,
-        method: {
-            type: String,
-            enum: ["original", "wallet", "voucher", "bank_transfer", "upi"],
-            default: "original"
-        },
         status: {
             type: String,
             enum: ["pending", "initiated", "processing", "completed", "failed"],
             default: "pending"
         },
         gatewayRefundId: String,
-        refundedAt: Date,
-        notes: String,
+        refundedAt: Date
     },
 
-    qualityCheck: {
-        checkedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Admin" },
-        checkedAt: Date,
-        condition: String,
-        notes: String,
-        images: [String],
-    },
+    // Admin/User actions log
+    auditTrail: [
+        {
+            status: String,
+            action: String,
+            timestamp: { type: Date, default: Date.now },
+            performedBy: { type: mongoose.Schema.Types.ObjectId },
+            performedByModel: { type: String, enum: ["User", "Admin"] },
+            notes: String,
+            metadata: Object
+        }
+    ],
 
-    pickupDetails: {
-        awb: String,
-        courier: String,
-        trackingUrl: String,
-        scheduledDate: Date,
-        pickedUpAt: Date,
-        pickupAddress: Object,
-    },
-
-    auditTrail: [{
-        status: String,
-        action: String,
-        performedBy: { type: mongoose.Schema.Types.ObjectId, refPath: "auditTrail.performedByModel" },
-        performedByModel: { type: String, enum: ["User", "Admin"] },
-        timestamp: { type: Date, default: Date.now },
-        notes: String,
-        metadata: Object,
-    }],
-
-    receivedAt: Date,
+    createdAt: { type: Date, default: Date.now },
+    requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    requestedAt: Date,
+    reason: String,
+    description: String
 }, { timestamps: true });
+
 
 const RefundSchema = new mongoose.Schema({
     amount: Number,
@@ -407,22 +422,66 @@ const CancellationSchema = new mongoose.Schema({
     allowed: { type: Boolean, default: true }
 }, { _id: false });
 
-const ShipmentSchema = new mongoose.Schema({
-    warehouseCode: String,              // NEW
-    pickup_location: String,            // NEW
-    pickup_address_id: String,          // NEW
-    shiprocket_order_id: String,        // NEW
+// const ShipmentSchema = new mongoose.Schema({
+//     warehouseCode: String,              // NEW
+//     pickup_location: String,            // NEW
+//     pickup_address_id: String,          // NEW
+//     shiprocket_order_id: String,        // NEW
 
-    shipment_id: String,
+//     shipment_id: String,
+//     awb_code: String,
+//     courier_company_id: String,
+//     courier_name: String,
+//     tracking_url: String,
+//     status: { type: String, default: "Created" },
+//     assignedAt: { type: Date, default: Date.now },
+//     deliveredAt: { type: Date, default: null },
+//     expected_delivery: { type: Date, default: null },
+
+//     products: [
+//         {
+//             productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
+//             quantity: Number,
+//             price: Number,
+//             variant: Object
+//         }
+//     ],
+
+//     trackingHistory: [
+//         {
+//             status: String,
+//             timestamp: { type: Date, default: Date.now },
+//             location: String,
+//             description: String
+//         }
+//     ],
+//     // ⭐ SHIPMENT-WISE RETURNS HERE
+//     returns: [ShipmentReturnSchema]
+
+// });
+const ShipmentSchema = new mongoose.Schema({
+    // 🔥 FORWARD SHIPMENT DETAILS
+    type: { type: String, enum: ["forward"], default: "forward" },
+
+    warehouseCode: String,
+    pickup_location: String,
+    pickup_address_id: String,
+
+    shiprocket_order_id: String,  // SR Order ID
+    shipment_id: String,          // SR Shipment ID
     awb_code: String,
     courier_company_id: String,
     courier_name: String,
     tracking_url: String,
-    status: { type: String, default: "Created" },
-    assignedAt: { type: Date, default: Date.now },
-    deliveredAt: { type: Date, default: null },
-    expected_delivery: { type: Date, default: null },
 
+    status: { type: String, default: "Created" },
+
+    assignedAt: Date,
+    shippedAt: Date,
+    deliveredAt: Date,
+    expected_delivery: Date,
+
+    // Items in this shipment
     products: [
         {
             productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
@@ -432,15 +491,16 @@ const ShipmentSchema = new mongoose.Schema({
         }
     ],
 
+    // 🔥 Timeline for forward shipment
     trackingHistory: [
         {
             status: String,
-            timestamp: { type: Date, default: Date.now },
+            timestamp: Date,
             location: String,
             description: String
         }
     ],
-    // ⭐ SHIPMENT-WISE RETURNS HERE
+
     returns: [ShipmentReturnSchema]
 
 });
@@ -627,9 +687,6 @@ const orderSchema = new mongoose.Schema({
         eligibleUntil: Date,
         conditions: [String], // e.g., ["Unopened", "Original Packaging", "Invoice Required"]
     },
-
-    shipments: [ShipmentSchema],    // now includes returns internally
-
     // Track return eligibility
     isReturnable: { type: Boolean, default: true },
     returnWindowEnd: Date,
