@@ -24,7 +24,7 @@ const router = express.Router();
 // ⭐ User requests a shipment return
 // Images are uploaded as images_<productId> → dynamic keys
 router.post(
-    "/request/:shipmentId",
+    "/request/:shipment_id",
     protect,
     uploadRefund.any(),
     requestShipmentReturn
@@ -34,10 +34,10 @@ router.post(
 router.get("/my", protect, getMyShipmentReturns);
 
 // Get shipment return details
-router.get("/details/:shipmentId/:returnId", protect, getShipmentReturnDetails);
+router.get("/details/:shipment_id/:returnId", protect, getShipmentReturnDetails);
 
 // Cancel shipment return
-router.put("/cancel/:shipmentId/:returnId", protect, cancelShipmentReturn);
+router.put("/cancel/:shipment_id/:returnId", protect, cancelShipmentReturn);
 
 
 /*
@@ -48,7 +48,7 @@ router.put("/cancel/:shipmentId/:returnId", protect, cancelShipmentReturn);
 
 // ⭐ Admin approves shipment return & creates Shiprocket return order
 router.put(
-    "/admin/approve/:shipmentId/:returnId",
+    "/admin/approve/:shipment_id/:returnId",
     protect,
     isAdmin,
     approveShipmentReturn
@@ -56,7 +56,7 @@ router.put(
 
 // ❌ Admin rejects shipment return
 router.put(
-    "/admin/reject/:shipmentId/:returnId",
+    "/admin/reject/:shipment_id/:returnId",
     protect,
     isAdmin,
     rejectShipmentReturn
@@ -64,7 +64,7 @@ router.put(
 
 // Mark shipment return received and trigger refund
 router.put(
-    "/admin/mark-received/:shipmentId/:returnId",
+    "/admin/mark-received/:shipment_id/:returnId",
     protect,
     isAdmin,
     markShipmentReturnReceived

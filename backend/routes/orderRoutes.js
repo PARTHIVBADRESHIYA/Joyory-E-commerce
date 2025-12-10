@@ -7,8 +7,7 @@ const router = express.Router();
 
 router.get('/admin/orders', isAdmin, checkPermission('orders:view'),
     adminListOrders);
-router.put('/admin/orders/:id/confirm', checkPermission('orders:update'),
-    isAdmin, adminConfirmOrder);
+router.put('/admin/orders/:id/confirm', adminConfirmOrder);
 router.put('/admin/orders/:id/cancel', isAdmin, checkPermission('orders:cancel'),
     adminCancelOrder);
 router.get('/refund-requests', isAdmin, checkPermission('orders:refund'),

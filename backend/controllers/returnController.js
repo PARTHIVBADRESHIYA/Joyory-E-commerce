@@ -3799,28 +3799,166 @@ const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 // ---------------------- USER ENDPOINTS ----------------------
 
 // Request Return by Shipment
+// export const requestShipmentReturn = async (req, res) => {
+//     try {
+//         const userId = req.user._id;
+//         const { shipment_id } = req.params;
+//         const { items, reason, reasonDescription = "" } = req.body;
+
+//         if (!isValidId(shipment_id)) {
+//             return res.status(400).json({ success: false, message: "Invalid shipment_id" });
+//         }
+
+//         // 1️⃣ Find order containing this shipment
+//         const order = await Order.findOne({ "shipments._id": shipment_id });
+//         if (!order) return res.status(404).json({ success: false, message: "Shipment not found" });
+
+//         const shipment = order.shipments.id(shipment_id);
+//         if (!shipment) return res.status(404).json({ success: false, message: "Shipment not found" });
+
+//         if (order.user.toString() !== userId.toString()) {
+//             return res.status(403).json({ success: false, message: "Not your shipment" });
+//         }
+
+//         // 2️⃣ Return window
+//         const deliveredAt = shipment.deliveredAt || order.updatedAt;
+//         const diffDays = Math.floor((new Date() - new Date(deliveredAt)) / (1000 * 60 * 60 * 24));
+//         if (diffDays > (order.returnPolicy?.days || 7)) {
+//             return res.status(400).json({ success: false, message: `Return window expired (${order.returnPolicy?.days || 7} days)` });
+//         }
+
+//         // 3️⃣ Validate items
+//         if (!Array.isArray(items) || items.length === 0) {
+//             return res.status(400).json({ success: false, message: "Items are required" });
+//         }
+
+//         const validatedItems = [];
+
+//         for (const item of items) {
+//             const { productId, quantity, variant, condition } = item;
+
+//             if (!isValidId(productId)) {
+//                 return res.status(400).json({ success: false, message: `Invalid productId: ${productId}` });
+//             }
+
+//             const found = shipment.products.find(p => {
+//                 if (!p) return false;
+//                 if (variant) {
+//                     return p.productId.toString() === productId && p.variant?.sku === variant.sku;
+//                 }
+//                 return p.productId.toString() === productId;
+//             });
+
+//             if (!found) return res.status(400).json({ success: false, message: "Some items not found in shipment" });
+//             if (quantity > found.quantity) return res.status(400).json({ success: false, message: "Invalid quantity requested" });
+
+//             // Check if return already exists for this product
+//             const alreadyRequested = shipment.returns?.some(r =>
+//                 r.items.some(i =>
+//                     i.productId.toString() === productId &&
+//                     (!variant || (i.variant?.sku === variant.sku)) &&
+//                     ["requested", "approved", "received_at_warehouse"].includes(i.status)
+//                 )
+//             );
+
+//             if (alreadyRequested) {
+//                 return res.status(400).json({
+//                     success: false,
+//                     message: `Return for product ${productId} already requested in this shipment.`
+//                 });
+//             }
+
+//             // Upload images if available
+//             let uploadedImages = [];
+//             if (req.files && req.files[`images_${productId}`]) {
+//                 const imgFiles = req.files[`images_${productId}`];
+//                 for (const img of imgFiles) {
+//                     const result = await uploadToCloudinary(img.buffer, `returns/${shipment_id}/${productId}`);
+//                     uploadedImages.push(result.secure_url || result);
+//                 }
+//             }
+
+//             validatedItems.push({
+//                 _id: new mongoose.Types.ObjectId(),
+//                 productId,
+//                 quantity,
+//                 ...(variant ? { variant } : {}),
+//                 reason,
+//                 reasonDescription,
+//                 images: uploadedImages,
+//                 status: "requested",
+//                 condition: condition || "Unopened"
+//             });
+//         }
+
+//         // 4️⃣ Create shipment return entry
+//         const returnEntry = {
+//             returnType: "return",
+//             items: validatedItems,
+//             overallStatus: "requested",
+//             reason,
+//             description: reasonDescription,
+//             requestedBy: userId,
+//             requestedAt: new Date(),
+//             returnWindowValid: true,
+//             returnByDate: new Date(new Date(deliveredAt).getTime() + (order.returnPolicy?.days || 7) * 86400000),
+//         };
+
+//         shipment.returns = shipment.returns || [];
+//         shipment.returns.push(returnEntry);
+
+//         await order.save();
+
+//         // 5️⃣ Send confirmation email
+//         if (order.user?.email) {
+//             await sendEmail(
+//                 order.user.email,
+//                 `Return Request Received - Shipment ${shipment.shipment_id}`,
+//                 `<h3>Hi ${order.user.name || ""},</h3>
+//                 <p>Your return request for Shipment #${shipment.shipment_id} has been received by our team.</p>
+//                 <p>Reason: ${reason}</p>
+//                 <p>We will review it shortly. You can track the status in your account.</p>
+//                 <br/>
+//                 <p>Thank you,<br/>Joyory Team</p>`
+//             );
+//         }
+
+//         return res.status(201).json({
+//             success: true,
+//             message: "Shipment return request submitted successfully",
+//             returnId: returnEntry._id,
+//             data: returnEntry
+//         });
+
+//     } catch (err) {
+//         console.error(err);
+//         return res.status(500).json({ success: false, message: "Something went wrong", error: err.message });
+//     }
+// };
 export const requestShipmentReturn = async (req, res) => {
     try {
         const userId = req.user._id;
-        const { shipmentId } = req.params;
+        const { shipment_id } = req.params; // Shiprocket shipment_id
         const { items, reason, reasonDescription = "" } = req.body;
 
-        if (!isValidId(shipmentId)) {
-            return res.status(400).json({ success: false, message: "Invalid shipmentId" });
+        if (!shipment_id) {
+            return res.status(400).json({ success: false, message: "shipment_id is required" });
         }
 
-        // 1️⃣ Find order containing this shipment
-        const order = await Order.findOne({ "shipments._id": shipmentId });
+        // 1️⃣ Find order containing this shipment by Shiprocket shipment_id
+        const order = await Order.findOne({ "shipments.shipment_id": shipment_id });
         if (!order) return res.status(404).json({ success: false, message: "Shipment not found" });
 
-        const shipment = order.shipments.id(shipmentId);
+        // Find the shipment object
+        const shipment = order.shipments.find(s => s.shipment_id === shipment_id);
         if (!shipment) return res.status(404).json({ success: false, message: "Shipment not found" });
 
+        // Ensure user owns this order
         if (order.user.toString() !== userId.toString()) {
             return res.status(403).json({ success: false, message: "Not your shipment" });
         }
 
-        // 2️⃣ Return window
+        // 2️⃣ Check return window
         const deliveredAt = shipment.deliveredAt || order.updatedAt;
         const diffDays = Math.floor((new Date() - new Date(deliveredAt)) / (1000 * 60 * 60 * 24));
         if (diffDays > (order.returnPolicy?.days || 7)) {
@@ -3837,15 +3975,11 @@ export const requestShipmentReturn = async (req, res) => {
         for (const item of items) {
             const { productId, quantity, variant, condition } = item;
 
-            if (!isValidId(productId)) {
-                return res.status(400).json({ success: false, message: `Invalid productId: ${productId}` });
-            }
+            if (!productId) return res.status(400).json({ success: false, message: `Invalid productId` });
 
             const found = shipment.products.find(p => {
                 if (!p) return false;
-                if (variant) {
-                    return p.productId.toString() === productId && p.variant?.sku === variant.sku;
-                }
+                if (variant) return p.productId.toString() === productId && p.variant?.sku === variant.sku;
                 return p.productId.toString() === productId;
             });
 
@@ -3873,7 +4007,7 @@ export const requestShipmentReturn = async (req, res) => {
             if (req.files && req.files[`images_${productId}`]) {
                 const imgFiles = req.files[`images_${productId}`];
                 for (const img of imgFiles) {
-                    const result = await uploadToCloudinary(img.buffer, `returns/${shipmentId}/${productId}`);
+                    const result = await uploadToCloudinary(img.buffer, `returns/${shipment_id}/${productId}`);
                     uploadedImages.push(result.secure_url || result);
                 }
             }
@@ -3949,7 +4083,7 @@ export const getMyShipmentReturns = async (req, res) => {
             for (const s of o.shipments) {
                 if (!s.returns?.length) continue;
                 for (const r of s.returns) {
-                    flattened.push({ shipmentId: s._id, shipmentCode: s.shipment_id, return: r });
+                    flattened.push({ shipment_id: s._id, shipmentCode: s.shipment_id, return: r });
                 }
             }
         }
@@ -3964,22 +4098,22 @@ export const getMyShipmentReturns = async (req, res) => {
 // Get shipment return details
 export const getShipmentReturnDetails = async (req, res) => {
     try {
-        const { shipmentId, returnId } = req.params;
-        if (!isValidId(shipmentId) || !isValidId(returnId)) {
-            return res.status(400).json({ success: false, message: "Invalid shipmentId or returnId" });
+        const { shipment_id, returnId } = req.params;
+        if (!isValidId(shipment_id) || !isValidId(returnId)) {
+            return res.status(400).json({ success: false, message: "Invalid shipment_id or returnId" });
         }
 
-        const order = await Order.findOne({ "shipments._id": shipmentId }).populate("user", "name email");
+        const order = await Order.findOne({ "shipments._id": shipment_id }).populate("user", "name email");
         if (!order) return res.status(404).json({ success: false, message: "Shipment not found" });
 
-        const shipment = order.shipments.id(shipmentId);
+        const shipment = order.shipments.id(shipment_id);
         const ret = shipment.returns.id(returnId);
         if (!ret) return res.status(404).json({ success: false, message: "Return not found" });
 
         if (req.user && req.user._id && order.user._id.toString() !== req.user._id.toString() && !(req.admin && req.admin._id))
             return res.status(403).json({ success: false, message: "Not authorized" });
 
-        return res.json({ success: true, data: { shipmentId: shipment._id, shipmentCode: shipment.shipment_id, return: ret } });
+        return res.json({ success: true, data: { shipment_id: shipment._id, shipmentCode: shipment.shipment_id, return: ret } });
     } catch (err) {
         console.error(err);
         return res.status(500).json({ success: false, message: err.message });
@@ -3990,16 +4124,16 @@ export const getShipmentReturnDetails = async (req, res) => {
 export const cancelShipmentReturn = async (req, res) => {
     try {
         const userId = req.user._id;
-        const { shipmentId, returnId } = req.params;
+        const { shipment_id, returnId } = req.params;
 
-        if (!isValidId(shipmentId) || !isValidId(returnId)) {
-            return res.status(400).json({ success: false, message: "Invalid shipmentId or returnId" });
+        if (!isValidId(shipment_id) || !isValidId(returnId)) {
+            return res.status(400).json({ success: false, message: "Invalid shipment_id or returnId" });
         }
 
-        const order = await Order.findOne({ "shipments._id": shipmentId });
+        const order = await Order.findOne({ "shipments._id": shipment_id });
         if (!order) return res.status(404).json({ success: false, message: "Shipment not found" });
 
-        const shipment = order.shipments.id(shipmentId);
+        const shipment = order.shipments.id(shipment_id);
         if (!shipment) return res.status(404).json({ success: false, message: "Shipment not found" });
 
         if (order.user.toString() !== userId.toString()) {
@@ -4042,29 +4176,39 @@ export const cancelShipmentReturn = async (req, res) => {
 // Approve shipment return
 export const approveShipmentReturn = async (req, res) => {
     try {
-        const { shipmentId, returnId } = req.params;
+        const { shipment_id, returnId } = req.params;
 
-        if (!isValidId(shipmentId) || !isValidId(returnId)) {
-            return res.status(400).json({ success: false, message: "Invalid shipmentId or returnId" });
-        }
-
-        const order = await Order.findOne({ "shipments._id": shipmentId }).populate("user");
+        // Fetch the order containing this shipment by shipment_id
+        const order = await Order.findOne({ "shipments.shipment_id": shipment_id }).populate("user");
         if (!order) return res.status(404).json({ success: false, message: "Shipment not found" });
 
-        const shipment = order.shipments.id(shipmentId);
+        // Find shipment by shipment_id
+        const shipment = order.shipments.find(s => s.shipment_id === shipment_id);
+        if (!shipment) return res.status(404).json({ success: false, message: "Shipment not found" });
+
+        // Find the return inside this shipment
         const ret = shipment.returns.id(returnId);
         if (!ret) return res.status(404).json({ success: false, message: "Return not found" });
-        if (ret.overallStatus !== "requested") return res.status(400).json({ success: false, message: "Already processed" });
 
-        // Shiprocket
+        // Check if return is already processed
+        if (ret.overallStatus !== "requested") {
+            return res.status(400).json({ success: false, message: "Return already processed" });
+        }
+
+        // Create Shiprocket return order
         let shiprocketResult;
         try {
             shiprocketResult = await createShiprocketReturnOrder(order, ret);
         } catch (err) {
             console.error("[Shiprocket Error]", err.message);
-            return res.status(422).json({ success: false, message: "Failed to create Shiprocket return order", error: err.message });
+            return res.status(422).json({
+                success: false,
+                message: "Failed to create Shiprocket return order",
+                error: err.message
+            });
         }
 
+        // Update return status & audit trail
         ret.overallStatus = "approved";
         ret.auditTrail.push({
             status: "approved",
@@ -4076,6 +4220,7 @@ export const approveShipmentReturn = async (req, res) => {
 
         await order.save();
 
+        // Notify user via email
         if (order.user?.email) {
             await sendEmail(
                 order.user.email,
@@ -4084,7 +4229,12 @@ export const approveShipmentReturn = async (req, res) => {
             );
         }
 
-        return res.json({ success: true, message: "Return approved successfully", shiprocket: shiprocketResult });
+        return res.json({
+            success: true,
+            message: "Return approved successfully",
+            shiprocket: shiprocketResult
+        });
+
     } catch (err) {
         console.error(err);
         return res.status(500).json({ success: false, message: err.message });
@@ -4094,16 +4244,16 @@ export const approveShipmentReturn = async (req, res) => {
 // Mark shipment return received and trigger refund
 export const markShipmentReturnReceived = async (req, res) => {
     try {
-        const { shipmentId, returnId } = req.params;
+        const { shipment_id, returnId } = req.params;
 
-        if (!isValidId(shipmentId) || !isValidId(returnId)) {
-            return res.status(400).json({ success: false, message: "Invalid shipmentId or returnId" });
+        if (!isValidId(shipment_id) || !isValidId(returnId)) {
+            return res.status(400).json({ success: false, message: "Invalid shipment_id or returnId" });
         }
 
-        const order = await Order.findOne({ "shipments._id": shipmentId });
+        const order = await Order.findOne({ "shipments._id": shipment_id });
         if (!order) return res.status(404).json({ success: false, message: "Shipment not found" });
 
-        const shipment = order.shipments.id(shipmentId);
+        const shipment = order.shipments.id(shipment_id);
         const ret = shipment.returns.id(returnId);
         if (!ret) return res.status(404).json({ success: false, message: "Return not found" });
 
@@ -4124,7 +4274,7 @@ export const markShipmentReturnReceived = async (req, res) => {
 
         await order.save();
 
-        await addRefundJob(order._id, { shipmentId: shipment._id, returnId: ret._id, amount: ret.refund?.amount || order.amount });
+        await addRefundJob(order._id, { shipment_id: shipment._id, returnId: ret._id, amount: ret.refund?.amount || order.amount });
 
         if (order.user?.email) {
             await sendEmail(
@@ -4144,17 +4294,17 @@ export const markShipmentReturnReceived = async (req, res) => {
 // Reject shipment return
 export const rejectShipmentReturn = async (req, res) => {
     try {
-        const { shipmentId, returnId } = req.params;
+        const { shipment_id, returnId } = req.params;
         const { reason } = req.body;
 
-        if (!isValidId(shipmentId) || !isValidId(returnId)) {
-            return res.status(400).json({ success: false, message: "Invalid shipmentId or returnId" });
+        if (!isValidId(shipment_id) || !isValidId(returnId)) {
+            return res.status(400).json({ success: false, message: "Invalid shipment_id or returnId" });
         }
 
-        const order = await Order.findOne({ "shipments._id": shipmentId }).populate("user");
+        const order = await Order.findOne({ "shipments._id": shipment_id }).populate("user");
         if (!order) return res.status(404).json({ success: false, message: "Shipment not found" });
 
-        const shipment = order.shipments.id(shipmentId);
+        const shipment = order.shipments.id(shipment_id);
         const ret = shipment.returns.id(returnId);
         if (!ret) return res.status(404).json({ success: false, message: "Return not found" });
         if (ret.overallStatus !== "requested") return res.status(400).json({ success: false, message: "Already processed" });

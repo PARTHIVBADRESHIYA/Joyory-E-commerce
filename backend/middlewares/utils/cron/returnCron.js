@@ -506,9 +506,6 @@ import Order from "../../../models/Order.js";
 import { getShiprocketToken } from "../../services/shiprocket.js";
 import { addRefundJob } from "../../services/refundQueue.js";
 
-/**
- * Helper: safely read shiprocket response for AWB & courier & tracking_url
- */
 function parseShipmentShowResponse(root) {
     // root is usually res.data.data or res.data
     // Shiprocket shapes vary; try common locations
@@ -537,9 +534,6 @@ function parseShipmentShowResponse(root) {
     return { awb, courier, tracking_url, root: sr };
 }
 
-/**
- * CRON 1 → Find returns (inside shipments[].returns) that don't have AWB yet and try to fetch AWB
- */
 async function trackReturnAWBAssignment() {
     console.log("🔄 Return AWB Tracking Cron Running...");
 
@@ -663,9 +657,6 @@ async function trackReturnAWBAssignment() {
     }
 }
 
-/**
- * CRON 2 → Fetch timeline for returns which have AWB and are not final
- */
 async function trackReturnTimeline() {
     console.log("📍 Return Timeline Tracker Running...");
 
@@ -801,9 +792,6 @@ async function trackReturnTimeline() {
     }
 }
 
-/**
- * Trigger refund - adapted to nested shipments.returns structure
- */
 async function triggerReturnRefund(order, shipment, ret) {
     console.log(`💸 Triggering Refund for Return ${ret._id}`);
 
@@ -857,12 +845,9 @@ async function triggerReturnRefund(order, shipment, ret) {
     }
 }
 
-/**
- * Entrypoint to start both crons
- */
 export function startReturnTrackingCron() {
     // CRON 1 → Return AWB Assignment (runs every minute)
-    cron.schedule("* * * * *", () => {
+    cron.schedule("30 * * * * *", () => {
         console.log("🔥 Return Cron 1 → AWB Assignment");
         trackReturnAWBAssignment().catch(err => console.error("Return Cron1 Error:", err));
     }, {
@@ -871,7 +856,7 @@ export function startReturnTrackingCron() {
     });
 
     // CRON 2 → Return Timeline Tracking (runs every 2 minutes)
-    cron.schedule("*/2 * * * *", () => {
+    cron.schedule("0 1-59/2 * * * *", () => {
         console.log("📍 Return Cron 2 → Timeline Tracking");
         trackReturnTimeline().catch(err => console.error("Return Cron2 Error:", err));
     }, {
