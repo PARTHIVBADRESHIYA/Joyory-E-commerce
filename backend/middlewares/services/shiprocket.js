@@ -404,6 +404,7 @@ import { allocateWarehousesForOrder } from "../utils/warehouseAllocator.js"; // 
 let shiprocketToken = null;
 let tokenExpiry = null;
 
+
 const DEBUG_SHIPROCKET = process.env.DEBUG_SHIPROCKET === "true";
 function logDebug(...args) {
     if (DEBUG_SHIPROCKET) console.log("[Shiprocket Debug]", ...args);
@@ -1129,24 +1130,230 @@ export async function cancelPickup(shiprocketOrderId) {
 //         shiprocket_order_id: res.data?.order_id
 //     };
 // };
-export const createShiprocketReturnOrder = async (order, returnRequest) => {
-    // order: full Mongoose doc (not just id)
-    // returnRequest: object containing items[], _id (return request id), optional shipment_id to tie to
+// export const createShiprocketReturnOrder = async (order, returnRequest) => {
+//     // order: full Mongoose doc (not just id)
+//     // returnRequest: object containing items[], _id (return request id), optional shipment_id to tie to
 
+//     if (!order) throw new Error("Order document is required");
+//     if (!returnRequest || !Array.isArray(returnRequest.items) || returnRequest.items.length === 0) {
+//         throw new Error("Invalid returnRequest: items required");
+//     }
+
+//     const token = await getShiprocketToken();
+//     if (!token) throw new Error("Unable to get Shiprocket token");
+
+//     // Safely read shipping address (try multiple common shapes)
+//     const SA = order.shippingAddress || {};
+//     const addressLine1 = SA.addressLine1 || SA.address || SA.address_line1 || "";
+//     const city = SA.city || SA.town || "";
+//     const state = SA.state || SA.region || "";
+//     const pincode = SA.pincode || SA.pin || SA.zip || "";
+//     const phone = SA.phone || SA.mobile || order.user?.phone || "0000000000";
+//     const email = order.user?.email || SA.email || "no-reply@yourdomain.com";
+
+//     if (!addressLine1 || !city || !state || !pincode) {
+//         throw new Error("Invalid shipping address for return pickup");
+//     }
+
+//     // Pickup (customer)
+//     const pickup = {
+//         pickup_customer_name: `${order.user?.name || "Customer"}`.slice(0, 50),
+//         pickup_last_name: "",
+//         pickup_address: addressLine1,
+//         pickup_city: city,
+//         pickup_state: state,
+//         pickup_country: "India",
+//         pickup_pincode: pincode,
+//         pickup_email: email,
+//         pickup_phone: phone,
+//     };
+
+//     // Warehouse destination (your return warehouse)
+//     let W;
+//     try {
+//         W = JSON.parse(process.env.WAREHOUSE_JSON);
+//     } catch (err) {
+//         throw new Error("Invalid WAREHOUSE_JSON env var");
+//     }
+
+//     const shipping = {
+//         shipping_customer_name: W?.name || "Warehouse",
+//         shipping_last_name: "",
+//         shipping_address: W?.address || "",
+//         shipping_city: W?.city || "",
+//         shipping_state: W?.state || "",
+//         shipping_country: W?.country || "India",
+//         shipping_pincode: W?.pincode || "",
+//         shipping_email: W?.email || "support@yourdomain.com",
+//         shipping_phone: W?.phone || "",
+//     };
+
+//     // Items payload for Shiprocket
+//     const order_items = returnRequest.items.map((it) => ({
+//         name: it.variant?.name || "Returned Product",
+//         sku: it.variant?.sku || `NO-SKU-${it.productId}`,
+//         units: it.quantity || 1,
+//         selling_price: 0, // returns typically have 0 price
+//     }));
+
+//     // Build order_id for shiprocket (max length defensive)
+//     const baseOrderId = `${order.orderId || order._id}`.toString();
+//     const rsRid = `${returnRequest._id || new mongoose.Types.ObjectId()}`.toString();
+//     const order_id = `RET-${baseOrderId}-${rsRid}`.slice(0, 48);
+
+//     // Payload — use flat keys as Shiprocket expects
+//     const payload = {
+//         order_id,
+//         order_date: new Date().toISOString().slice(0, 19).replace("T", " "),
+//         pickup_location: process.env.SHIPROCKET_PICKUP || "Primary",
+
+//         // pickup (flat)
+//         ...pickup,
+
+//         // shipping (warehouse)
+//         ...shipping,
+
+//         order_items,
+//         payment_method: "Prepaid",
+//         sub_total: 0,
+
+//         length: 10,
+//         breadth: 10,
+//         height: 10,
+//         weight: Math.max(0.1, order_items.length * 0.2),
+//     };
+
+//     try {
+//         const res = await shiprocketRequest(
+//             "https://apiv2.shiprocket.in/v1/external/orders/create/return",
+//             "post",
+//             payload,
+//             token
+//         );
+
+//         // Defensive parsing of response (Shiprocket shapes vary)
+//         const data = res?.data ?? {};
+//         // Sometimes the API nests under data.data
+//         const payloadResp = data.data ?? data;
+
+//         const shiprocketOrderId = payloadResp?.id || payloadResp?.order_id || payloadResp?.shiprocket_order_id || null;
+//         const shipmentId = payloadResp?.shipment_id || payloadResp?.shipmentId || payloadResp?.id || null;
+
+//         // If Shiprocket didn't give shipment_id immediately, still create record and expect cron to fill AWB later
+//         if (!shipmentId) {
+//             // log full response and continue — Shiprocket may return created order without shipment id immediately
+//             console.warn("createShiprocketReturnOrder: no shipment_id from Shiprocket response", JSON.stringify(data).slice(0, 2000));
+//         }
+
+//         // Build return object matching your ShipmentReturnSchema
+//         const now = new Date();
+//         const returnDoc = {
+//             _id: new mongoose.Types.ObjectId(),
+//             shipmentId: shipmentId || null,              // matches ShipmentReturnSchema
+//             shiprocketOrderId: shiprocketOrderId || null,
+//             shipment_id: shipmentId || null,             // keep both if you sometimes read snake_case
+//             awb_code: null,
+//             courier_name: null,
+//             tracking_url: null,
+//             overallStatus: "pickup_scheduled",           // use enum values from schema
+//             pickupDetails: {
+//                 name: pickup.pickup_customer_name,
+//                 address: pickup.pickup_address,
+//                 city: pickup.pickup_city,
+//                 state: pickup.pickup_state,
+//                 pincode: pickup.pickup_pincode,
+//                 phone: pickup.pickup_phone,
+//                 email: pickup.pickup_email,
+//             },
+//             warehouse_details: {
+//                 name: shipping.shipping_customer_name,
+//                 address: shipping.shipping_address,
+//                 city: shipping.shipping_city,
+//                 state: shipping.shipping_state,
+//                 pincode: shipping.shipping_pincode,
+//                 phone: shipping.shipping_phone,
+//                 email: shipping.shipping_email,
+//             },
+//             items: returnRequest.items,
+//             auditTrail: [
+//                 {
+//                     status: "pickup_scheduled",
+//                     action: "return_created",
+//                     performedBy: null,
+//                     performedByModel: "Admin", // must match enum ["User","Admin"] if used
+//                     notes: "Return order created in Shiprocket",
+//                     timestamp: now,
+//                 },
+//             ],
+//             createdAt: now,
+//             requestedBy: returnRequest.requestedBy || order.user?._id || null,
+//             requestedAt: returnRequest.requestedAt || now,
+//             reason: returnRequest.reason || "",
+//             description: returnRequest.description || "",
+//         };
+
+//         // Attach the returnDoc into the appropriate shipment inside order
+//         // Decide which shipment to attach to:
+//         let shipmentIndex = -1;
+//         if (returnRequest.shipment_id) {
+//             shipmentIndex = order.shipments.findIndex(s => s.shipment_id === returnRequest.shipment_id || s.shipmentId === returnRequest.shipment_id);
+//         }
+//         if (shipmentIndex === -1 && order.primary_shipment) {
+//             shipmentIndex = order.shipments.findIndex(s => s._id?.toString() === order.primary_shipment?.toString() || s._id?.toString() === `${order.primary_shipment}`);
+//         }
+//         // fallback to first shipment
+//         if (shipmentIndex === -1) shipmentIndex = 0;
+
+//         if (!order.shipments || order.shipments.length === 0) {
+//             // If there are no shipments, create a basic shipment record to hold the return
+//             order.shipments = [{
+//                 shipment_id: shipmentId || `gen-${new mongoose.Types.ObjectId()}`,
+//                 products: [],
+//                 trackingHistory: [],
+//                 returns: [returnDoc]
+//             }];
+//         } else {
+//             // ensure returns array exists
+//             order.shipments[shipmentIndex].returns = order.shipments[shipmentIndex].returns || [];
+//             order.shipments[shipmentIndex].returns.push(returnDoc);
+//         }
+
+//         // increment returnStats
+//         order.returnStats = order.returnStats || {};
+//         order.returnStats.totalReturns = (order.returnStats.totalReturns || 0) + 1;
+
+//         // Save order (persist return)
+//         await order.save();
+
+//         console.log(`✅ Shiprocket return order created: shipmentId=${shipmentId} | order_id=${shiprocketOrderId}`);
+
+//         // return the created document for further use
+//         return returnDoc;
+
+//     } catch (err) {
+//         console.error("❌ Shiprocket return order creation failed:", err?.response?.data || err.message || err);
+//         // rethrow for controller to handle
+//         throw err;
+//     }
+// };
+
+
+export const createShiprocketReturnOrder = async (order, returnRequest) => {
     if (!order) throw new Error("Order document is required");
     if (!returnRequest || !Array.isArray(returnRequest.items) || returnRequest.items.length === 0) {
         throw new Error("Invalid returnRequest: items required");
     }
 
+    // Defensive token fetch
     const token = await getShiprocketToken();
     if (!token) throw new Error("Unable to get Shiprocket token");
 
-    // Safely read shipping address (try multiple common shapes)
+    // Normalize shipping address (customer pickup)
     const SA = order.shippingAddress || {};
     const addressLine1 = SA.addressLine1 || SA.address || SA.address_line1 || "";
     const city = SA.city || SA.town || "";
     const state = SA.state || SA.region || "";
-    const pincode = SA.pincode || SA.pin || SA.zip || "";
+    const pincode = (SA.pincode || SA.pin || SA.zip || "") + "";
     const phone = SA.phone || SA.mobile || order.user?.phone || "0000000000";
     const email = order.user?.email || SA.email || "no-reply@yourdomain.com";
 
@@ -1167,12 +1374,14 @@ export const createShiprocketReturnOrder = async (order, returnRequest) => {
         pickup_phone: phone,
     };
 
-    // Warehouse destination (your return warehouse)
-    let W;
+    // Warehouse destination (your return warehouse) - env JSON expected
+    let W = {};
     try {
-        W = JSON.parse(process.env.WAREHOUSE_JSON);
+        W = JSON.parse(process.env.WAREHOUSE_JSON || "{}");
     } catch (err) {
-        throw new Error("Invalid WAREHOUSE_JSON env var");
+        // If env not set, proceed with blank warehouse fields but log
+        console.warn("createShiprocketReturnOrder: WAREHOUSE_JSON parse failed, using defaults");
+        W = {};
     }
 
     const shipping = {
@@ -1187,35 +1396,31 @@ export const createShiprocketReturnOrder = async (order, returnRequest) => {
         shipping_phone: W?.phone || "",
     };
 
-    // Items payload for Shiprocket
+    // Build order_items for Shiprocket (returns usually have 0 price)
     const order_items = returnRequest.items.map((it) => ({
-        name: it.variant?.name || "Returned Product",
+        name: it.variant?.name || it.name || "Returned Product",
         sku: it.variant?.sku || `NO-SKU-${it.productId}`,
-        units: it.quantity || 1,
-        selling_price: 0, // returns typically have 0 price
+        units: Number(it.quantity || 1),
+        selling_price: 0,
     }));
 
-    // Build order_id for shiprocket (max length defensive)
     const baseOrderId = `${order.orderId || order._id}`.toString();
     const rsRid = `${returnRequest._id || new mongoose.Types.ObjectId()}`.toString();
     const order_id = `RET-${baseOrderId}-${rsRid}`.slice(0, 48);
 
-    // Payload — use flat keys as Shiprocket expects
     const payload = {
         order_id,
         order_date: new Date().toISOString().slice(0, 19).replace("T", " "),
         pickup_location: process.env.SHIPROCKET_PICKUP || "Primary",
 
-        // pickup (flat)
+        // pickup flattened (Shiprocket expects flat keys)
         ...pickup,
-
-        // shipping (warehouse)
+        // shipping flattened
         ...shipping,
 
         order_items,
         payment_method: "Prepaid",
         sub_total: 0,
-
         length: 10,
         breadth: 10,
         height: 10,
@@ -1230,31 +1435,34 @@ export const createShiprocketReturnOrder = async (order, returnRequest) => {
             token
         );
 
-        // Defensive parsing of response (Shiprocket shapes vary)
         const data = res?.data ?? {};
-        // Sometimes the API nests under data.data
         const payloadResp = data.data ?? data;
 
-        const shiprocketOrderId = payloadResp?.id || payloadResp?.order_id || payloadResp?.shiprocket_order_id || null;
-        const shipmentId = payloadResp?.shipment_id || payloadResp?.shipmentId || payloadResp?.id || null;
+        // Normalized fields (defensive)
+        const shiprocketOrderId =
+            payloadResp?.id || payloadResp?.order_id || payloadResp?.shiprocket_order_id || null;
+        const shipmentId =
+            payloadResp?.shipment_id || payloadResp?.shipmentId || payloadResp?.id || null;
 
-        // If Shiprocket didn't give shipment_id immediately, still create record and expect cron to fill AWB later
         if (!shipmentId) {
-            // log full response and continue — Shiprocket may return created order without shipment id immediately
-            console.warn("createShiprocketReturnOrder: no shipment_id from Shiprocket response", JSON.stringify(data).slice(0, 2000));
+            console.warn(
+                "createShiprocketReturnOrder: Shiprocket did not return shipment_id immediately (this is acceptable). Response head: ",
+                JSON.stringify(payloadResp).slice(0, 2000)
+            );
         }
 
-        // Build return object matching your ShipmentReturnSchema
+        // Build return sub-document following forward flow field names
         const now = new Date();
         const returnDoc = {
             _id: new mongoose.Types.ObjectId(),
-            shipmentId: shipmentId || null,              // matches ShipmentReturnSchema
-            shiprocketOrderId: shiprocketOrderId || null,
-            shipment_id: shipmentId || null,             // keep both if you sometimes read snake_case
+            // fields aligned with forward flow
+            shiprocket_order_id: shiprocketOrderId || null,
+            shipment_id: shipmentId || null,
             awb_code: null,
             courier_name: null,
             tracking_url: null,
-            overallStatus: "pickup_scheduled",           // use enum values from schema
+            status: "Awaiting Pickup", // matches forward shipment initial status
+            assignedAt: now, // mark when return doc was created (for threshold queries)
             pickupDetails: {
                 name: pickup.pickup_customer_name,
                 address: pickup.pickup_address,
@@ -1274,45 +1482,64 @@ export const createShiprocketReturnOrder = async (order, returnRequest) => {
                 email: shipping.shipping_email,
             },
             items: returnRequest.items,
+            trackingHistory: [
+                {
+                    status: "Return Created",
+                    timestamp: now,
+                    location: "System",
+                    description: `Return request ${returnRequest._id || rsRid} created`
+                }
+            ],
             auditTrail: [
                 {
-                    status: "pickup_scheduled",
+                    status: "Awaiting Pickup",
                     action: "return_created",
-                    performedBy: null,
-                    performedByModel: "Admin", // must match enum ["User","Admin"] if used
-                    notes: "Return order created in Shiprocket",
-                    timestamp: now,
-                },
+                    performedBy: returnRequest.requestedBy || order.user?._id || null,
+                    performedByModel: returnRequest.requestedBy ? "User" : "Admin",
+                    notes: "Return order created and return request saved",
+                    timestamp: now
+                }
             ],
+            refund: {
+                amount: 0,
+                status: null,
+                initiatedAt: null
+            },
             createdAt: now,
             requestedBy: returnRequest.requestedBy || order.user?._id || null,
             requestedAt: returnRequest.requestedAt || now,
             reason: returnRequest.reason || "",
-            description: returnRequest.description || "",
+            description: returnRequest.description || ""
         };
 
-        // Attach the returnDoc into the appropriate shipment inside order
-        // Decide which shipment to attach to:
+        // Attach returnDoc into an existing shipment (prefer matching shipment by id, else primary_shipment, else first shipment)
         let shipmentIndex = -1;
         if (returnRequest.shipment_id) {
-            shipmentIndex = order.shipments.findIndex(s => s.shipment_id === returnRequest.shipment_id || s.shipmentId === returnRequest.shipment_id);
+            shipmentIndex = order.shipments.findIndex(
+                s =>
+                    String(s.shipment_id) === String(returnRequest.shipment_id) ||
+                    String(s.shipmentId) === String(returnRequest.shipment_id) ||
+                    String(s._id) === String(returnRequest.shipment_id)
+            );
         }
         if (shipmentIndex === -1 && order.primary_shipment) {
-            shipmentIndex = order.shipments.findIndex(s => s._id?.toString() === order.primary_shipment?.toString() || s._id?.toString() === `${order.primary_shipment}`);
+            shipmentIndex = order.shipments.findIndex(
+                s => String(s._id) === String(order.primary_shipment) || String(s._id) === String(order.primary_shipment)
+            );
         }
-        // fallback to first shipment
-        if (shipmentIndex === -1) shipmentIndex = 0;
+        if (shipmentIndex === -1) shipmentIndex = 0; // fallback to first shipment
 
         if (!order.shipments || order.shipments.length === 0) {
-            // If there are no shipments, create a basic shipment record to hold the return
-            order.shipments = [{
-                shipment_id: shipmentId || `gen-${new mongoose.Types.ObjectId()}`,
-                products: [],
-                trackingHistory: [],
-                returns: [returnDoc]
-            }];
+            // create minimal shipment to hold return
+            order.shipments = [
+                {
+                    shipment_id: shipmentId || `gen-${new mongoose.Types.ObjectId()}`,
+                    products: [],
+                    trackingHistory: [],
+                    returns: [returnDoc]
+                }
+            ];
         } else {
-            // ensure returns array exists
             order.shipments[shipmentIndex].returns = order.shipments[shipmentIndex].returns || [];
             order.shipments[shipmentIndex].returns.push(returnDoc);
         }
@@ -1321,19 +1548,27 @@ export const createShiprocketReturnOrder = async (order, returnRequest) => {
         order.returnStats = order.returnStats || {};
         order.returnStats.totalReturns = (order.returnStats.totalReturns || 0) + 1;
 
-        // Save order (persist return)
+        // Persist
         await order.save();
 
-        console.log(`✅ Shiprocket return order created: shipmentId=${shipmentId} | order_id=${shiprocketOrderId}`);
+        console.log(
+            `✅ Shiprocket return order created: shipmentId=${shipmentId} | shiprocketOrderId=${shiprocketOrderId}`
+        );
 
-        // return the created document for further use
+        // Optional: trigger immediate single-check to accelerate AWB assignment if helper exists
+        try {
+            const srId = shiprocketOrderId || shipmentId;
+            if (srId && typeof checkSingleShiprocketOrderAndSave === "function") {
+                await checkSingleShiprocketOrderAndSave(srId);
+            }
+        } catch (e) {
+            // non-blocking
+            console.warn("Immediate return AWB check failed (non-blocking):", e.message || e);
+        }
+
         return returnDoc;
-
     } catch (err) {
         console.error("❌ Shiprocket return order creation failed:", err?.response?.data || err.message || err);
-        // rethrow for controller to handle
         throw err;
     }
 };
-
-

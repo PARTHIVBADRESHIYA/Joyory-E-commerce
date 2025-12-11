@@ -1,131 +1,132 @@
-// import mongoose from "mongoose";
-// import axios from "axios";
-// import path from "path";
-// import dotenv from "dotenv";
-// import { fileURLToPath } from "url";
-
-// import Order from "./models/Order.js";
-// import { getShiprocketToken } from "./middlewares/services/shiprocket.js";
-
-// const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// dotenv.config({ path: path.join(__dirname, ".env") });
-
-// async function fetchFullTimeline() {
-//     try {
-//         console.log("🔥 Connecting to DB…");
-//         await mongoose.connect(process.env.MONGO_URI);
-
-//         console.log("🔑 Fetching Shiprocket token…");
-//         const token = await getShiprocketToken();
-
-//         // GET all shipments which have AWB assigned
-//         const orders = await Order.find({
-//             "shipments.awb_code": { $exists: true, $ne: "" }
-//         });
-
-//         console.log(`🔍 Found ${orders.length} orders with shipments`);
-
-//         for (const order of orders) {
-//             for (const shipment of order.shipments) {
-//                 if (!shipment.awb_code) continue;
-
-//                 console.log(`\n🚚 Fetching timeline for AWB: ${shipment.awb_code}`);
-
-//                 try {
-//                     const url = `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${shipment.awb_code}`;
-
-//                     const response = await axios.get(url, {
-//                         headers: { Authorization: `Bearer ${token}` }
-//                     });
-
-//                     const data = response.data;
-
-//                     if (!data.tracking_data) {
-//                         console.log("⚠️ No tracking data found");
-//                         continue;
-//                     }
-
-//                     const events = data.tracking_data.shipment_track_activities || [];
-
-//                     // Convert to your DB format
-//                     shipment.trackingHistory = events.map(ev => ({
-//                         status: ev.activity,
-//                         timestamp: new Date(ev.date),
-//                         location: ev.location || "N/A",
-//                         description: ev.activity
-//                     }));
-
-//                     // Update status
-//                     if (data.tracking_data.shipment_status) {
-//                         shipment.status = data.tracking_data.shipment_status;
-//                     }
-
-//                     console.log(`✅ Timeline updated for ${shipment.awb_code}`);
-//                 } catch (err) {
-//                     console.log("❌ Failed:", err.response?.data || err.message);
-//                 }
-//             }
-
-//             await order.save();
-//         }
-
-//         console.log("\n🎉 DONE — All timelines updated!");
-//         process.exit(0);
-//     } catch (err) {
-//         console.error("❌ ERROR:", err);
-//         process.exit(1);
-//     }
-// }
-
-// fetchFullTimeline();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+// fetch-full-timeline.js
 import mongoose from "mongoose";
-import Comment from "./models/Comment.js";
+import axios from "axios";
+import path from "path";
+import dotenv from "dotenv";
+import { fileURLToPath } from "url";
 
-await mongoose.connect("mongodb+srv://parthivbadreshiya:parthiv12345@cluster0.silkevx.mongodb.net/joyory?retryWrites=true&w=majority&appName=Cluster0");
+import Order from "./models/Order.js";
+import { getShiprocketToken } from "./middlewares/services/shiprocket.js";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, ".env") });
 
-const id = "692a9880910aa7a04c132633";
+async function fetchFullTimeline() {
+    try {
+        console.log("🔥 Connecting to DB…");
+        await mongoose.connect(process.env.MONGO_URI, {});
 
-const found = await Comment.findById(id);
-console.log("FOUND?", found);
+        console.log("🔑 Fetching Shiprocket token…");
+        const token = await getShiprocketToken();
+
+        // Fetch all orders with shipments (including return shipments)
+        const orders = await Order.find({
+            $or: [
+                { "shipments.awb_code": { $exists: true, $ne: null } },
+                { "shipments.returns.pickupDetails.awb": { $exists: true, $ne: null } }
+            ]
+        });
+
+        console.log(`🔍 Found ${orders.length} orders with shipments/returns`);
+
+        for (const order of orders) {
+            for (const shipment of order.shipments || []) {
+                // ----- FORWARD SHIPMENTS -----
+                if (shipment.awb_code) {
+                    await fetchAndUpdateShipmentTimeline(order, shipment, token);
+                }
+
+                // ----- RETURN SHIPMENTS -----
+                if (shipment.returns?.length) {
+                    for (const ret of shipment.returns) {
+                        if (ret.pickupDetails?.awb) {
+                            await fetchAndUpdateShipmentTimeline(order, ret, token, true);
+                        }
+                    }
+                }
+            }
+
+            // Save after all updates
+            await order.save();
+        }
+
+        console.log("\n🎉 DONE — All timelines updated!");
+        process.exit(0);
+    } catch (err) {
+        console.error("❌ ERROR:", err);
+        process.exit(1);
+    }
+}
+
+/**
+ * Fetch Shiprocket timeline & update local object
+ * @param {Object} order - Mongoose order doc
+ * @param {Object} shipmentObj - Shipment or Return object
+ * @param {string} token - Shiprocket token
+ * @param {boolean} isReturn - whether this is a return shipment
+ */
+async function fetchAndUpdateShipmentTimeline(order, shipmentObj, token, isReturn = false) {
+    const awb = shipmentObj.awb_code || shipmentObj.pickupDetails?.awb;
+    if (!awb) return;
+
+    console.log(`\n🚚 Fetching timeline for AWB: ${awb}`);
+
+    try {
+        const url = `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${awb}`;
+        const response = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+
+        const trackingData = response.data.tracking_data;
+        if (!trackingData) {
+            console.log("⚠️ No tracking data found");
+            return;
+        }
+
+        // Use either shipment_track_activities or shipment_track
+        const events = trackingData.shipment_track_activities?.length
+            ? trackingData.shipment_track_activities
+            : trackingData.shipment_track?.length
+                ? trackingData.shipment_track
+                : [];
+
+        // Map to standard trackingHistory format
+        shipmentObj.trackingHistory = events.map(ev => ({
+            status: ev.activity || ev.status || "Unknown",
+            timestamp: new Date(ev.date || ev.datetime || Date.now()),
+            location: ev.location || "N/A",
+            description: ev.activity || ev.status || ""
+        })).sort((a, b) => b.timestamp - a.timestamp);
+
+        // Fallback if no events
+        if (shipmentObj.trackingHistory.length === 0) {
+            const fallbackStatus = trackingData.shipment_status || "Unknown";
+            shipmentObj.trackingHistory.push({
+                status: fallbackStatus,
+                timestamp: new Date(),
+                location: "N/A",
+                description: fallbackStatus
+            });
+            console.log(`⚠️ No timeline events, using fallback status: ${fallbackStatus}`);
+        }
+
+        // Print timeline in console (Nykaa-style)
+        console.log(`📜 Timeline for AWB ${awb}:`);
+        shipmentObj.trackingHistory.forEach((ev, idx) => {
+            console.log(`${idx + 1}. [${ev.timestamp.toLocaleString()}] ${ev.status} — ${ev.location}`);
+        });
+
+        // Update overallStatus
+        const shipStatus = trackingData.shipment_status;
+        if (typeof shipStatus === "string" && shipStatus.trim() !== "") {
+            shipmentObj.overallStatus = shipStatus.toLowerCase().replace(/\s+/g, "_");
+            if (shipmentObj.pickupDetails) shipmentObj.pickupDetails.status = shipmentObj.overallStatus;
+        } else if (shipStatus != null) {
+            shipmentObj.overallStatus = shipStatus;
+        }
+
+        console.log(`✅ Timeline updated for AWB: ${awb}`);
+    } catch (err) {
+        console.log("❌ Failed fetching timeline:", err.response?.data || err.message);
+    }
+}
+
+fetchFullTimeline();

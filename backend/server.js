@@ -434,12 +434,12 @@ import "./middlewares/utils/cron/promotionScheduler.js";
 import "./middlewares/utils/cron/cleanUpOrders.js";
 
 // import "./middlewares/utils/cron/shiprocketRetry.js";
-import { startTrackingJob } from "./middlewares/utils/cron/shiprocketTrackingJob.js";
-import "./middlewares/utils/cron/autoPayout.js";
-import "./middlewares/utils/cron/returnCron.js";
+// import { startTrackingJob } from "./middlewares/utils/cron/shiprocketTrackingJob.js";
+// import "./middlewares/utils/cron/autoPayout.js";
+// import "./middlewares/utils/cron/returnCron.js";
 
 // ================= START CRON JOBS =================
-startTrackingJob();
+// startTrackingJob();
 console.log("🚀 Shiprocket tracking job started...");
 
 // 🔹 Routes
@@ -544,7 +544,8 @@ const allowedOrigins = [
     "http://192.168.1.5:5174",
 
     "https://joyory.com",
-    "https://darkviolet-dolphin-447223.hostingersite.com"];
+    "https://www.joyory.com",
+    "https://mediumorchid-vulture-478183.hostingersite.com/"];
 
 app.use(
     cors({
