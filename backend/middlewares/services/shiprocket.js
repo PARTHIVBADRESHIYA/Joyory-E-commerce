@@ -1348,22 +1348,24 @@ export const createShiprocketReturnOrder = async (order, returnRequest) => {
     const token = await getShiprocketToken();
     if (!token) throw new Error("Unable to get Shiprocket token");
 
-    // Normalize shipping address (customer pickup)
-    const SA = order.shippingAddress || {};
+    // Work with a safe clone of the order for reading only
+    const orderSafe = order.toObject ? order.toObject({ depopulate: true }) : JSON.parse(JSON.stringify(order));
+
+    // Normalize shipping address from clone
+    const SA = orderSafe.shippingAddress || {};
     const addressLine1 = SA.addressLine1 || SA.address || SA.address_line1 || "";
     const city = SA.city || SA.town || "";
     const state = SA.state || SA.region || "";
     const pincode = (SA.pincode || SA.pin || SA.zip || "") + "";
-    const phone = SA.phone || SA.mobile || order.user?.phone || "0000000000";
-    const email = order.user?.email || SA.email || "no-reply@yourdomain.com";
+    const phone = SA.phone || SA.mobile || orderSafe.user?.phone || "0000000000";
+    const email = orderSafe.user?.email || SA.email || "no-reply@yourdomain.com";
 
     if (!addressLine1 || !city || !state || !pincode) {
         throw new Error("Invalid shipping address for return pickup");
     }
 
-    // Pickup (customer)
     const pickup = {
-        pickup_customer_name: `${order.user?.name || "Customer"}`.slice(0, 50),
+        pickup_customer_name: `${orderSafe.user?.name || "Customer"}`.slice(0, 50),
         pickup_last_name: "",
         pickup_address: addressLine1,
         pickup_city: city,
@@ -1374,15 +1376,8 @@ export const createShiprocketReturnOrder = async (order, returnRequest) => {
         pickup_phone: phone,
     };
 
-    // Warehouse destination (your return warehouse) - env JSON expected
     let W = {};
-    try {
-        W = JSON.parse(process.env.WAREHOUSE_JSON || "{}");
-    } catch (err) {
-        // If env not set, proceed with blank warehouse fields but log
-        console.warn("createShiprocketReturnOrder: WAREHOUSE_JSON parse failed, using defaults");
-        W = {};
-    }
+    try { W = JSON.parse(process.env.WAREHOUSE_JSON || "{}"); } catch (err) { W = {}; console.warn("WAREHOUSE_JSON parse failed"); }
 
     const shipping = {
         shipping_customer_name: W?.name || "Warehouse",
@@ -1396,7 +1391,6 @@ export const createShiprocketReturnOrder = async (order, returnRequest) => {
         shipping_phone: W?.phone || "",
     };
 
-    // Build order_items for Shiprocket (returns usually have 0 price)
     const order_items = returnRequest.items.map((it) => ({
         name: it.variant?.name || it.name || "Returned Product",
         sku: it.variant?.sku || `NO-SKU-${it.productId}`,
@@ -1404,7 +1398,7 @@ export const createShiprocketReturnOrder = async (order, returnRequest) => {
         selling_price: 0,
     }));
 
-    const baseOrderId = `${order.orderId || order._id}`.toString();
+    const baseOrderId = `${orderSafe.orderId || orderSafe._id}`.toString();
     const rsRid = `${returnRequest._id || new mongoose.Types.ObjectId()}`.toString();
     const order_id = `RET-${baseOrderId}-${rsRid}`.slice(0, 48);
 
@@ -1412,12 +1406,8 @@ export const createShiprocketReturnOrder = async (order, returnRequest) => {
         order_id,
         order_date: new Date().toISOString().slice(0, 19).replace("T", " "),
         pickup_location: process.env.SHIPROCKET_PICKUP || "Primary",
-
-        // pickup flattened (Shiprocket expects flat keys)
         ...pickup,
-        // shipping flattened
         ...shipping,
-
         order_items,
         payment_method: "Prepaid",
         sub_total: 0,
@@ -1438,31 +1428,26 @@ export const createShiprocketReturnOrder = async (order, returnRequest) => {
         const data = res?.data ?? {};
         const payloadResp = data.data ?? data;
 
-        // Normalized fields (defensive)
         const shiprocketOrderId =
             payloadResp?.id || payloadResp?.order_id || payloadResp?.shiprocket_order_id || null;
         const shipmentId =
             payloadResp?.shipment_id || payloadResp?.shipmentId || payloadResp?.id || null;
 
         if (!shipmentId) {
-            console.warn(
-                "createShiprocketReturnOrder: Shiprocket did not return shipment_id immediately (this is acceptable). Response head: ",
-                JSON.stringify(payloadResp).slice(0, 2000)
-            );
+            console.warn("createShiprocketReturnOrder: Shiprocket did not return shipment_id immediately.");
         }
 
-        // Build return sub-document following forward flow field names
+        // Build returnDoc locally (do NOT mutate order)
         const now = new Date();
         const returnDoc = {
             _id: new mongoose.Types.ObjectId(),
-            // fields aligned with forward flow
             shiprocket_order_id: shiprocketOrderId || null,
             shipment_id: shipmentId || null,
             awb_code: null,
             courier_name: null,
             tracking_url: null,
-            status: "Awaiting Pickup", // matches forward shipment initial status
-            assignedAt: now, // mark when return doc was created (for threshold queries)
+            status: "Awaiting Pickup",
+            assignedAt: now,
             pickupDetails: {
                 name: pickup.pickup_customer_name,
                 address: pickup.pickup_address,
@@ -1494,75 +1479,102 @@ export const createShiprocketReturnOrder = async (order, returnRequest) => {
                 {
                     status: "Awaiting Pickup",
                     action: "return_created",
-                    performedBy: returnRequest.requestedBy || order.user?._id || null,
+                    performedBy: returnRequest.requestedBy || orderSafe.user?._id || null,
                     performedByModel: returnRequest.requestedBy ? "User" : "Admin",
                     notes: "Return order created and return request saved",
                     timestamp: now
                 }
             ],
-            refund: {
-                amount: 0,
-                status: null,
-                initiatedAt: null
-            },
+            refund: { amount: 0, status: null, initiatedAt: null },
             createdAt: now,
-            requestedBy: returnRequest.requestedBy || order.user?._id || null,
+            requestedBy: returnRequest.requestedBy || orderSafe.user?._id || null,
             requestedAt: returnRequest.requestedAt || now,
             reason: returnRequest.reason || "",
             description: returnRequest.description || ""
         };
 
-        // Attach returnDoc into an existing shipment (prefer matching shipment by id, else primary_shipment, else first shipment)
-        let shipmentIndex = -1;
-        if (returnRequest.shipment_id) {
-            shipmentIndex = order.shipments.findIndex(
-                s =>
-                    String(s.shipment_id) === String(returnRequest.shipment_id) ||
-                    String(s.shipmentId) === String(returnRequest.shipment_id) ||
-                    String(s._id) === String(returnRequest.shipment_id)
-            );
+        // Determine target shipment id (string) that we want to attach into
+        let targetShipmentId = null;
+        if (returnRequest.shipment_id) targetShipmentId = String(returnRequest.shipment_id);
+        else if (orderSafe.primary_shipment) targetShipmentId = String(orderSafe.primary_shipment);
+        else if (Array.isArray(orderSafe.shipments) && orderSafe.shipments.length > 0) {
+            const first = orderSafe.shipments[0];
+            targetShipmentId = String(first._id || first.shipment_id || "");
         }
-        if (shipmentIndex === -1 && order.primary_shipment) {
-            shipmentIndex = order.shipments.findIndex(
-                s => String(s._id) === String(order.primary_shipment) || String(s._id) === String(order.primary_shipment)
-            );
-        }
-        if (shipmentIndex === -1) shipmentIndex = 0; // fallback to first shipment
 
-        if (!order.shipments || order.shipments.length === 0) {
-            // create minimal shipment to hold return
-            order.shipments = [
-                {
-                    shipment_id: shipmentId || `gen-${new mongoose.Types.ObjectId()}`,
-                    products: [],
-                    trackingHistory: [],
-                    returns: [returnDoc]
-                }
-            ];
+        // Attempt atomic updates in order of specificity (by shipment _id, by shipment_id, fallback to pushing to first shipment)
+        let updateRes = null;
+
+        if (!Array.isArray(orderSafe.shipments) || orderSafe.shipments.length === 0) {
+            // no shipments: create minimal shipment containing this return
+            const minimalShipment = {
+                _id: new mongoose.Types.ObjectId(),
+                shipment_id: shipmentId || `gen-${new mongoose.Types.ObjectId()}`,
+                products: [],
+                trackingHistory: [], // ensure forward timeline exists
+                returns: [returnDoc]
+            };
+
+            updateRes = await Order.updateOne(
+                { _id: orderSafe._id },
+                { $push: { shipments: minimalShipment }, $inc: { "returnStats.totalReturns": 1 } }
+            );
         } else {
-            order.shipments[shipmentIndex].returns = order.shipments[shipmentIndex].returns || [];
-            order.shipments[shipmentIndex].returns.push(returnDoc);
+            const attempts = [];
+
+            if (targetShipmentId) {
+                // attempt match by shipments._id (ObjectId)
+                if (mongoose.Types.ObjectId.isValid(targetShipmentId)) {
+                    attempts.push({
+                        filter: { _id: orderSafe._id, "shipments._id": mongoose.Types.ObjectId(targetShipmentId) },
+                        update: { $push: { "shipments.$.returns": returnDoc }, $inc: { "returnStats.totalReturns": 1 } }
+                    });
+                }
+
+                // attempt match by shipments.shipment_id (string)
+                attempts.push({
+                    filter: { _id: orderSafe._id, "shipments.shipment_id": targetShipmentId },
+                    update: { $push: { "shipments.$.returns": returnDoc }, $inc: { "returnStats.totalReturns": 1 } }
+                });
+            }
+
+            // final fallback: push to the first shipment index (shipments.0)
+            attempts.push({
+                filter: { _id: orderSafe._id },
+                update: { $push: { "shipments.0.returns": returnDoc }, $inc: { "returnStats.totalReturns": 1 } }
+            });
+
+            for (const a of attempts) {
+                try {
+                    updateRes = await Order.updateOne(a.filter, a.update);
+                    // modern mongoose returns matchedCount/modifiedCount; older drivers may use nModified
+                    if (updateRes?.modifiedCount || updateRes?.nModified || updateRes?.modifiedCount === 1) break;
+                } catch (uerr) {
+                    // ignore and try next attempt
+                    continue;
+                }
+            }
         }
 
-        // increment returnStats
-        order.returnStats = order.returnStats || {};
-        order.returnStats.totalReturns = (order.returnStats.totalReturns || 0) + 1;
+        // If still nothing modified (rare), fallback to findOneAndUpdate (safe atomic)
+        if (!updateRes || (updateRes.matchedCount === 0 && updateRes.modifiedCount === 0 && updateRes.nModified !== 1)) {
+            const fallback = await Order.findOneAndUpdate(
+                { _id: orderSafe._id },
+                { $push: { "shipments.0.returns": returnDoc }, $inc: { "returnStats.totalReturns": 1 } },
+                { new: true }
+            );
+            if (!fallback) throw new Error("Unable to attach return to order (fallback failed)");
+        }
 
-        // Persist
-        await order.save();
+        console.log(`✅ Shiprocket return order created: shipmentId=${shipmentId} | shiprocketOrderId=${shiprocketOrderId}`);
 
-        console.log(
-            `✅ Shiprocket return order created: shipmentId=${shipmentId} | shiprocketOrderId=${shiprocketOrderId}`
-        );
-
-        // Optional: trigger immediate single-check to accelerate AWB assignment if helper exists
+        // Non-blocking immediate check if helper exists
         try {
             const srId = shiprocketOrderId || shipmentId;
             if (srId && typeof checkSingleShiprocketOrderAndSave === "function") {
                 await checkSingleShiprocketOrderAndSave(srId);
             }
         } catch (e) {
-            // non-blocking
             console.warn("Immediate return AWB check failed (non-blocking):", e.message || e);
         }
 

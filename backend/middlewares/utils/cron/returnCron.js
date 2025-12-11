@@ -506,7 +506,7 @@ import Order from "../../../models/Order.js";
 import { getShiprocketToken } from "../../services/shiprocket.js";
 import { addRefundJob } from "../../services/refundQueue.js";
 
-function parseShipmentShowResponse(root) {
+export function parseShipmentShowResponse(root) {
     const shipments = root?.shipments || (Array.isArray(root) ? root : null);
     const sr = Array.isArray(shipments) ? shipments[0] : root;
 
@@ -538,16 +538,18 @@ export async function trackReturnAWBAssignment() {
         const THRESHOLD = new Date(Date.now() - 1000 * 60 * 60 * 24 * 7); // last 7 days
 
         const orders = await Order.find({
-            "shipments.returns": {
+            shipments: {
                 $elemMatch: {
-                    awb_code: null,
-                    createdAt: { $gte: THRESHOLD },
-                    // we stored shiprocket order/shipment id at create time under shiprocket_order_id or shipment_id
-                    $or: [
-                        { shiprocket_order_id: { $exists: true, $ne: null } },
-                        { shipment_id: { $exists: true, $ne: null } },
-                        { "shipments.returns.shipment_id": { $exists: true, $ne: null } }
-                    ]
+                    returns: {
+                        $elemMatch: {
+                            awb_code: null,
+                            createdAt: { $gte: THRESHOLD },
+                            $or: [
+                                { shiprocket_order_id: { $exists: true, $ne: null } },
+                                { shipment_id: { $exists: true, $ne: null } }
+                            ]
+                        }
+                    }
                 }
             }
         }).select("_id shipments");
@@ -649,59 +651,6 @@ export async function trackReturnAWBAssignment() {
     }
 }
 
-export async function triggerReturnRefund(order, shipment, ret) {
-    console.log(`💸 Triggering Refund for Return ${ret._id}`);
-
-    try {
-        // Compute refund amount if item.price exists (defensive)
-        const refundAmount = (ret.items || []).reduce((total, item) => {
-            const price = Number(item.price || 0);
-            const qty = Number(item.quantity || 0);
-            return total + price * qty;
-        }, 0);
-
-        await Order.updateOne(
-            { _id: order._id },
-            {
-                $set: {
-                    "shipments.$[ship].returns.$[ret].overallStatus": "quality_check",
-                    "shipments.$[ship].returns.$[ret].refund.amount": refundAmount,
-                    "shipments.$[ship].returns.$[ret].refund.status": "initiated",
-                    "shipments.$[ship].returns.$[ret].refund.initiatedAt": new Date()
-                },
-                $push: {
-                    "shipments.$[ship].returns.$[ret].auditTrail": {
-                        status: "quality_check",
-                        action: "refund_initiated",
-                        performedBy: null,
-                        performedByModel: "System",
-                        notes: `Refund of ₹${refundAmount} initiated`,
-                        timestamp: new Date()
-                    }
-                }
-            },
-            {
-                arrayFilters: [
-                    { "ship._id": shipment._id },
-                    { "ret._id": ret._id }
-                ]
-            }
-        );
-
-        // Add job to refund queue
-        await addRefundJob(order._id, {
-            orderId: order._id,
-            shipmentId: shipment._id,
-            returnId: ret._id,
-            amount: refundAmount
-        });
-
-        console.log(`✅ Refund initiated for return ${ret._id}: ₹${refundAmount}`);
-    } catch (error) {
-        console.error(`❌ Failed to trigger refund for return ${ret._id}:`, error.message || error);
-    }
-}
-
 export async function trackReturnTimeline() {
     console.log("📍 Return Timeline Tracker Running...");
 
@@ -711,13 +660,18 @@ export async function trackReturnTimeline() {
 
         // Find returns that have AWB and are not finished
         const orders = await Order.find({
-            "shipments.returns": {
+            shipments: {
                 $elemMatch: {
-                    awb_code: { $ne: null },
-                    status: { $nin: ["received_at_warehouse", "refunded", "cancelled"] }
+                    returns: {
+                        $elemMatch: {
+                            awb_code: { $ne: null },
+                            status: { $nin: ["received_at_warehouse", "refunded", "cancelled"] }
+                        }
+                    }
                 }
             }
         }).select("_id shipments");
+
 
         console.log(`📍 Return Timeline → Checking ${orders.length || 0} orders`);
 
@@ -833,27 +787,27 @@ export async function trackReturnTimeline() {
 }
 
 
-export function startReturnTrackingCron() {
-    // CRON 1 → Return AWB Assignment (every minute at :30)
-    cron.schedule("30 * * * * *", () => {
-        console.log("🔥 Return Cron 1 → AWB Assignment");
-        trackReturnAWBAssignment().catch(err => console.error("Return Cron1 Error:", err));
-    }, {
-        scheduled: true,
-        timezone: "Asia/Kolkata"
-    });
+// export function startReturnTrackingCron() {
+//     // CRON 1 → Return AWB Assignment (every minute at :30)
+//     cron.schedule("30 * * * * *", () => {
+//         console.log("🔥 Return Cron 1 → AWB Assignment");
+//         trackReturnAWBAssignment().catch(err => console.error("Return Cron1 Error:", err));
+//     }, {
+//         scheduled: true,
+//         timezone: "Asia/Kolkata"
+//     });
 
-    // CRON 2 → Return Timeline Tracking (every 2 minutes)
-    cron.schedule("0 */2 * * * *", () => {
-        console.log("📍 Return Cron 2 → Timeline Tracking");
-        trackReturnTimeline().catch(err => console.error("Return Cron2 Error:", err));
-    }, {
-        scheduled: true,
-        timezone: "Asia/Kolkata"
-    });
+//     // CRON 2 → Return Timeline Tracking (every 2 minutes)
+//     cron.schedule("0 */2 * * * *", () => {
+//         console.log("📍 Return Cron 2 → Timeline Tracking");
+//         trackReturnTimeline().catch(err => console.error("Return Cron2 Error:", err));
+//     }, {
+//         scheduled: true,
+//         timezone: "Asia/Kolkata"
+//     });
 
-    console.log("✅ Both Return Cron Jobs Started (AWB Tracker + Timeline Tracker)");
-}
+//     console.log("✅ Both Return Cron Jobs Started (AWB Tracker + Timeline Tracker)");
+// }
 
 
 

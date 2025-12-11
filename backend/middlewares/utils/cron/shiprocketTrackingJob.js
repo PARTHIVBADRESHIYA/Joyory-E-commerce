@@ -4,7 +4,7 @@ import axios from "axios";
 import Order from "../../../models/Order.js";
 import { getShiprocketToken, extractAWBFromShiprocket } from "../../services/shiprocket.js";
 import { computeOrderStatus } from "../../../controllers/orderController.js";
-
+import { trackReturnAWBAssignment, trackReturnTimeline } from "./returnCron.js";
 
 function mapTimelineToNykaa(events = []) {
     if (!Array.isArray(events) || events.length === 0) return [];
@@ -114,7 +114,7 @@ function mapStatus(s) {
     return "In Transit";
 }
 
-async function trackShipments() {
+export async function trackShipments() {
     try {
         // Only orders that have shiprocket_order_id and shipments that haven't received an AWB yet OR not delivered
         const THRESHOLD = new Date(Date.now() - 1000 * 60 * 60 * 2); // last 2 hours
@@ -362,7 +362,7 @@ async function trackShipments() {
     }
 }
 
-async function trackShipmentTimeline() {
+export async function trackShipmentTimeline() {
     try {
         const token = await getShiprocketToken();
 
@@ -373,11 +373,13 @@ async function trackShipmentTimeline() {
                     status: { $nin: ["Delivered", "Cancelled", "RTO Delivered"] }
                 }
             }
-        });
+        }).select("_id shipments");
 
         console.log(`📍 Timeline Tracker → Checking ${orders.length} orders`);
 
         for (const order of orders) {
+            let orderUpdated = false;
+
             for (const shipment of order.shipments) {
                 if (!shipment.awb_code) continue;
 
@@ -396,28 +398,25 @@ async function trackShipmentTimeline() {
                         continue;
                     }
 
-                    // EXACT SAME LOGIC AS YOUR SCRIPT
                     const rawEvents = trackingData.shipment_track_activities || [];
 
-                    const events = rawEvents.map(ev => ({
-                        status: ev.activity,
-                        timestamp: new Date(ev.date),
-                        location: ev.location || "N/A",
-                        description: ev.activity
-                    }));
+                    const events = rawEvents
+                        .map(ev => ({
+                            status: ev.activity || "Unknown",
+                            timestamp: ev.date ? new Date(ev.date) : new Date(),
+                            location: ev.location || "N/A",
+                            description: ev.activity || "No description"
+                        }))
+                        .sort((a, b) => b.timestamp - a.timestamp);
 
-                    shipment.trackingHistory = events;
+                    // -------------------------------------------------------
+                    // 🔥 Clean shipment status (ALWAYS STRING)
+                    // -------------------------------------------------------
+                    let cleanStatus = events?.[0]?.status
+                        || trackingData.shipment_status
+                        || trackingData.current_status
+                        || "In Transit";
 
-                    // if (trackingData.shipment_status) {
-                    //     shipment.status = trackingData.shipment_status;
-                    // }
-                    // 🔥 1. Pick the latest activity from timeline
-                    const latestEvent = events[0];
-
-                    // 🔥 2. Convert their status text
-                    let cleanStatus = latestEvent?.status || trackingData.shipment_status;
-
-                    // Shiprocket → Clean readable statuses
                     const statusMap = {
                         "PickupDone": "Pickup Done",
                         "OutForDelivery": "Out For Delivery",
@@ -428,65 +427,229 @@ async function trackShipmentTimeline() {
                         "PickupFailed": "Pickup Failed",
                         "RTOInitiated": "RTO Initiated",
                         "RTODelivered": "RTO Delivered",
-                        "Cancelled": "Cancelled",
+                        "Cancelled": "Cancelled"
                     };
 
-                    // Convert if exists
-                    if (statusMap[cleanStatus]) {
-                        cleanStatus = statusMap[cleanStatus];
+                    if (statusMap[cleanStatus]) cleanStatus = statusMap[cleanStatus];
+
+                    // ensure string ALWAYS
+                    cleanStatus = String(cleanStatus).trim();
+
+                    // -------------------------------------------------------
+                    // 🔥 Update shipment subdocument
+                    // -------------------------------------------------------
+                    const shipmentIndex = order.shipments.findIndex(
+                        s => String(s._id) === String(shipment._id)
+                    );
+
+                    if (shipmentIndex === -1) {
+                        console.log("❌ Shipment not found inside order — cannot update timeline");
+                        continue;
                     }
 
-                    // 🔥 3. Update shipment.status always with REAL status
-                    shipment.status = cleanStatus;
-                    // ⭐ Recompute orderStatus after shipment status change
-                    const finalStatus = computeOrderStatus(order.shipments);
-                    order.orderStatus = finalStatus;
+                    order.shipments[shipmentIndex].trackingHistory = events.slice(0, 50);
+                    order.shipments[shipmentIndex].status = cleanStatus;
 
-                    console.log(`📦 Order ${order._id} recalculated → ${finalStatus}`);
+                    order.markModified(`shipments.${shipmentIndex}.trackingHistory`);
+                    order.markModified(`shipments.${shipmentIndex}.status`);
 
-                    // THIS WAS MISSING — REQUIRED FOR SUBDOCUMENT OVERWRITE
-                    order.markModified("shipments");
+                    orderUpdated = true;
 
-                    console.log(`✅ Timeline updated for ${awb}`);
-
+                    console.log(`✅ Timeline prepared for AWB ${awb} | Shipment status → ${cleanStatus}`);
 
                 } catch (err) {
                     console.log(
-                        `❌ Timeline error for shipment ${shipment.shipment_id}`,
+                        `❌ Timeline error for AWB ${shipment.shipment_id}`,
                         err.response?.data || err.message
                     );
                 }
             }
 
-            await order.save();
+            // -------------------------------------------------------
+            // 🔥 Recalculate orderStatus only if changes were made
+            // -------------------------------------------------------
+            if (orderUpdated) {
+                const finalStatus = computeOrderStatus(order.shipments);
+                order.orderStatus = finalStatus;
+
+                await order.save();
+                console.log(`🏁 Order ${order._id} status recalculated → ${finalStatus}`);
+            }
         }
 
     } catch (err) {
-        console.log("❌ Timeline cron failedessssssssss:", err.message);
+        console.log("❌ Timeline cron failed:", err.message);
+    }
+}
+
+
+// export async function trackShipmentTimeline() {
+//     try {
+//         const token = await getShiprocketToken();
+
+//         const orders = await Order.find({
+//             shipments: {
+//                 $elemMatch: {
+//                     awb_code: { $ne: null },
+//                     status: { $nin: ["Delivered", "Cancelled", "RTO Delivered"] }
+//                 }
+//             }
+//         });
+
+//         console.log(`📍 Timeline Tracker → Checking ${orders.length} orders`);
+
+//         for (const order of orders) {
+//             for (const shipment of order.shipments) {
+//                 if (!shipment.awb_code) continue;
+
+//                 const awb = shipment.awb_code;
+//                 console.log(`⏳ Fetching timeline for AWB → ${awb}`);
+
+//                 try {
+//                     const res = await axios.get(
+//                         `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${awb}`,
+//                         { headers: { Authorization: `Bearer ${token}` } }
+//                     );
+
+//                     const trackingData = res.data?.tracking_data;
+//                     if (!trackingData) {
+//                         console.log(`⚠️ No tracking_data for AWB ${awb}`);
+//                         continue;
+//                     }
+
+//                     // EXACT SAME LOGIC AS YOUR SCRIPT
+//                     const rawEvents = trackingData.shipment_track_activities || [];
+
+//                     const events = rawEvents.map(ev => ({
+//                         status: ev.activity,
+//                         timestamp: new Date(ev.date),
+//                         location: ev.location || "N/A",
+//                         description: ev.activity
+//                     }));
+
+//                     shipment.trackingHistory = events;
+
+//                     // if (trackingData.shipment_status) {
+//                     //     shipment.status = trackingData.shipment_status;
+//                     // }
+//                     // 🔥 1. Pick the latest activity from timeline
+//                     const latestEvent = events[0];
+
+//                     // 🔥 2. Convert their status text
+//                     let cleanStatus = latestEvent?.status || trackingData.shipment_status;
+
+//                     // Shiprocket → Clean readable statuses
+//                     const statusMap = {
+//                         "PickupDone": "Pickup Done",
+//                         "OutForDelivery": "Out For Delivery",
+//                         "ReachedHub": "Reached Hub",
+//                         "InTransit": "In Transit",
+//                         "Delivered": "Delivered",
+//                         "Undelivered": "Undelivered",
+//                         "PickupFailed": "Pickup Failed",
+//                         "RTOInitiated": "RTO Initiated",
+//                         "RTODelivered": "RTO Delivered",
+//                         "Cancelled": "Cancelled",
+//                     };
+
+//                     // Convert if exists
+//                     if (statusMap[cleanStatus]) {
+//                         cleanStatus = statusMap[cleanStatus];
+//                     }
+
+//                     // 🔥 3. Update shipment.status always with REAL status
+//                     shipment.status = cleanStatus;
+//                     // ⭐ Recompute orderStatus after shipment status change
+//                     const finalStatus = computeOrderStatus(order.shipments);
+//                     order.orderStatus = finalStatus;
+
+//                     console.log(`📦 Order ${order._id} recalculated → ${finalStatus}`);
+
+//                     // THIS WAS MISSING — REQUIRED FOR SUBDOCUMENT OVERWRITE
+//                     order.markModified("shipments");
+
+//                     console.log(`✅ Timeline updated for ${awb}`);
+
+
+//                 } catch (err) {
+//                     console.log(
+//                         `❌ Timeline error for shipment ${shipment.shipment_id}`,
+//                         err.response?.data || err.message
+//                     );
+//                 }
+//             }
+
+//             await order.save();
+//         }
+
+//     } catch (err) {
+//         console.log("❌ Timeline cron failedessssssssss:", err.message);
+//     }
+// }
+
+const locks = {
+    forward: false,
+    forwardTimeline: false,
+    returnAWB: false,
+    returnTimeline: false
+};
+
+export async function runWithLock(type, fn) {
+    if (locks[type]) {
+        console.log(`⏳ ${type} cron skipped, previous run still in progress`);
+        return;
+    }
+    locks[type] = true;
+    try {
+        await fn();
+    } catch (err) {
+        console.error(`${type} cron error:`, err);
+    } finally {
+        locks[type] = false;
     }
 }
 
 export function startTrackingJob() {
-    // CRON 1 → AWB + Shipment status
     cron.schedule("* * * * *", () => {
-        console.log("🔥 Cron 1 → AWB + Shipment status");
-        trackShipments().catch(err => console.error("Cron1 Error:", err));
-    }, {
-        scheduled: true,
-        timezone: "Asia/Kolkata"
-    });
+        runWithLock("forward", trackShipments);
+    }, { timezone: "Asia/Kolkata" });
 
-    // CRON 2 → Real Timeline Nykaa-style
     cron.schedule("*/2 * * * *", () => {
-        console.log("📍 Cron 2 → Timeline (Nykaa Style)");
-        trackShipmentTimeline().catch(err => console.error("Cron2 Error:", err));
-    }, {
-        scheduled: true,
-        timezone: "Asia/Kolkata"
-    });
+        runWithLock("forwardTimeline", trackShipmentTimeline);
+    }, { timezone: "Asia/Kolkata" });
 
-    console.log("✅ Both Cron Jobs Started (AWB Tracker + Timeline Tracker)");
+    cron.schedule("30 * * * * *", () => {
+        runWithLock("returnAWB", trackReturnAWBAssignment);
+    }, { timezone: "Asia/Kolkata" });
+
+    cron.schedule("0 */2 * * * *", () => {
+        runWithLock("returnTimeline", trackReturnTimeline);
+    }, { timezone: "Asia/Kolkata" });
+
+    console.log("✅ All crons started with sequential locking");
 }
+
+// export function startTrackingJob() {
+//     // CRON 1 → AWB + Shipment status
+//     cron.schedule("* * * * *", () => {
+//         console.log("🔥 Cron 1 → AWB + Shipment status");
+//         trackShipments().catch(err => console.error("Cron1 Error:", err));
+//     }, {
+//         scheduled: true,
+//         timezone: "Asia/Kolkata"
+//     });
+
+//     // CRON 2 → Real Timeline Nykaa-style
+//     cron.schedule("*/2 * * * *", () => {
+//         console.log("📍 Cron 2 → Timeline (Nykaa Style)");
+//         trackShipmentTimeline().catch(err => console.error("Cron2 Error:", err));
+//     }, {
+//         scheduled: true,
+//         timezone: "Asia/Kolkata"
+//     });
+
+//     console.log("✅ Both Cron Jobs Started (AWB Tracker + Timeline Tracker)");
+// }
 
 // async function trackShipmentTimeline() {
 //     try {
