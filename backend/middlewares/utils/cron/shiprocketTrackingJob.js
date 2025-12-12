@@ -114,22 +114,271 @@ function mapStatus(s) {
     return "In Transit";
 }
 
+// export async function trackShipments() {
+//     try {
+//         // Only orders that have shiprocket_order_id and shipments that haven't received an AWB yet OR not delivered
+//         const THRESHOLD = new Date(Date.now() - 1000 * 60 * 60 * 2); // last 2 hours
+
+//         const orders = await Order.find({
+//             shipments: {
+//                 $elemMatch: {
+//                     awb_code: null,
+//                     courier_name: null,
+//                     status: "Awaiting Pickup",
+//                     assignedAt: { $gte: THRESHOLD }  // FIXED
+//                 }
+//             }
+//         }).select("_id shipments");
+
+
+//         console.log(`🔥 Tracking ${orders?.length || 0} orders for AWB updates`);
+//         if (!orders?.length) return;
+
+//         const token = await getShiprocketToken();
+
+//         for (const order of orders) {
+//             try {
+//                 if (!order.shipments?.length) continue;
+
+//                 for (const shipment of order.shipments) {
+//                     try {
+//                         if ([
+//                             "Delivered",
+//                             "Cancelled",
+//                             "RTO Delivered",
+//                             "RTO Initiated",
+//                             "Lost",
+//                             "Returning"
+//                         ].includes(shipment.status)) {
+//                             console.log(`⛔ Shipment ${shipment.shipment_id} already finished → skipping`);
+//                             continue;
+//                         }
+
+//                         const srOrderId = shipment.shiprocket_order_id || shipment.shipment_id;
+//                         if (!srOrderId) {
+//                             console.log("❌ No Shiprocket order ID or shipment ID found → skipping");
+//                             continue;
+//                         }
+
+
+//                         console.log(
+//                             `📦 Order ${order._id} → Shipment ${shipment.shipment_id} (srOrderId ${srOrderId}) | AWB: ${shipment.awb_code || 'NOT ASSIGNED'}`
+//                         );
+
+//                         const orderDetailsRes = await axios.get(
+//                             `https://apiv2.shiprocket.in/v1/external/courier/track/shipment/${shipment.shipment_id}`,
+//                             { headers: { Authorization: `Bearer ${token}` } }
+//                         );
+
+//                         const shipOrder = orderDetailsRes.data;
+
+//                         if (!shipOrder) {
+//                             console.warn(`⚠️ Empty response for srOrder ${srOrderId}`);
+//                             continue;
+//                         }
+
+//                         // Shiprocket wraps everything inside data
+//                         const root = shipOrder?.data || shipOrder;
+
+//                         // Case 1: shipments is an OBJECT, not array
+//                         let srShipment = null;
+//                         if (root.shipments && !Array.isArray(root.shipments)) {
+//                             srShipment = root.shipments;
+//                         }
+//                         // Case 2: shipments is array (rare but possible)
+//                         else if (Array.isArray(root.shipments)) {
+//                             srShipment = root.shipments.find(s => String(s.shipment_id) === String(shipment.shipment_id));
+//                             if (!srShipment) srShipment = root.shipments[0]; // fallback
+//                         }
+//                         // Fallback
+//                         else {
+//                             srShipment = root;
+//                         }
+
+//                         /** ----------------- EXISTING AWB EXTRACTION ----------------- */
+//                         let {
+//                             awb: newAwb,
+//                             trackUrl: newTrackUrl
+//                         } = extractAWBFromShiprocket(shipOrder, srShipment);
+
+//                         let shouldUpdate = true;
+
+//                         // WITH
+//                         if (shipment.awb_code && newAwb && shipment.awb_code === newAwb) {
+//                             console.log("✔️ AWB matches — checking courier anyway...");
+//                             shouldUpdate = true; // always update courier and tracking info
+//                         }
+
+
+//                         // If no AWB found at all, skip
+//                         if (!newAwb) {
+//                             console.log(`⏳ AWB not yet assigned for sr shipment ${shipment.shipment_id}`);
+//                             continue;
+//                         }
+
+//                         /** ------------------ FIX: FETCH COURIER NAME ------------------ */
+//                         let newCourier = null;
+
+//                         try {
+//                             const courierRes = await axios.get(
+//                                 `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${newAwb}`,
+//                                 { headers: { Authorization: `Bearer ${token}` } }
+//                             );
+//                             const trackData = courierRes.data?.tracking_data;
+
+//                             newCourier =
+//                                 trackData?.shipment_track?.[0]?.courier_name ||
+//                                 trackData?.courier_name ||
+//                                 trackData?.awb_details?.courier_name ||
+//                                 courierRes.data?.courier_name ||
+//                                 null;
+
+//                             console.log("🔍 courier extracted:", newCourier);
+
+//                             const trackList = courierRes.data?.tracking_data?.shipment_track || [];
+//                             if (trackList.length > 0) {
+//                                 const lastStatus = trackList[0]?.activity || null;
+
+//                                 const formattedEvents = trackList.map(ev => ({
+//                                     status: ev.activity || ev.status || "Unknown",
+//                                     timestamp: new Date(ev.date),
+//                                     location: ev.location || "N/A",
+//                                     description: ev.activity || ev.status || "N/A",
+//                                 }));
+
+
+//                                 // SORT NEW EVENTS (latest first)
+//                                 formattedEvents.sort((a, b) => b.timestamp - a.timestamp);
+//                                 console.log("📌 Timeline + status updated for:", shipment.shipment_id);
+
+//                                 // AUTO UPDATE STATUS
+
+//                             }
+
+//                             if (newCourier && shipment.courier_name !== newCourier) {
+//                                 await Order.updateOne(
+//                                     {
+//                                         _id: order._id,
+//                                         "shipments.shipment_id": shipment.shipment_id
+//                                     },
+//                                     {
+//                                         $set: {
+//                                             "shipments.$.courier_name": newCourier
+//                                         }
+//                                     }
+//                                 );
+
+//                                 console.log(`🚚 Courier updated → ${newCourier}`);
+//                             }
+
+
+//                         } catch (err) {
+//                             console.warn(`⚠️ Courier lookup failed for AWB ${newAwb}:`);
+//                         }
+
+//                         console.log("🔥 Found AWB →", {
+//                             newAwb,
+//                             newCourier: newCourier || "unknown",
+//                             newTrackUrl
+//                         });
+
+//                         if (shouldUpdate) {
+//                             const trackingEntry = {
+//                                 status: "AWB Assigned",
+//                                 timestamp: new Date(),
+//                                 location: "Shiprocket",
+//                                 description: `AWB ${newAwb} assigned via ${newCourier || 'unknown'}`
+//                             };
+
+//                             const updatePayload = {
+//                                 $set: {
+//                                     "shipments.$.awb_code": newAwb,
+//                                     "shipments.$.tracking_url": newTrackUrl,
+//                                     "shipments.$.status": "AWB Assigned",
+//                                     "orderStatus": "Shipped",
+//                                     "primary_shipment": order.primary_shipment || shipment._id
+//                                 },
+//                                 $push: {
+//                                     "shipments.$.trackingHistory": trackingEntry,
+//                                     trackingHistory: {
+//                                         status: "AWB Assigned",
+//                                         timestamp: new Date(),
+//                                         location: "Shiprocket",
+//                                         description: `Shipment ${shipment.shipment_id} AWB ${newAwb}`
+//                                     }
+//                                 }
+//                             };
+
+//                             if (newCourier) {
+//                                 updatePayload.$set["shipments.$.courier_name"] = newCourier;
+//                             }
+
+//                             const updateRes = await Order.updateOne(
+//                                 {
+//                                     _id: order._id,
+//                                     "shipments.shipment_id": shipment.shipment_id
+//                                 },
+//                                 updatePayload
+//                             );
+
+//                             // ⭐ After AWB assignment → recalc order status
+//                             const refreshed = await Order.findById(order._id).select("shipments");
+
+//                             const finalStatus = computeOrderStatus(refreshed.shipments);
+
+//                             await Order.updateOne(
+//                                 { _id: order._id },
+//                                 { $set: { orderStatus: finalStatus } }
+//                             );
+
+//                             console.log(`🏁 Updated Order Status → ${finalStatus}`);
+
+//                             console.log(
+//                                 `✅ AWB update result for order ${order._id}, shipment ${shipment.shipment_id}:`,
+//                                 {
+//                                     matched: updateRes.matchedCount,
+//                                     modified: updateRes.modifiedCount
+//                                 }
+//                             );
+//                         }
+
+
+//                     } catch (shErr) {
+//                         console.error(
+//                             `❌ Error processing shipment ${shipment._id} for order ${order._id}:`,
+//                             shErr.response?.data || shErr.message || shErr
+//                         );
+//                     }
+//                 }
+//             } catch (innerErr) {
+//                 console.error(
+//                     `❌ Error iterating shipments for order ${order._id}:`,
+//                     innerErr.message || innerErr
+//                 );
+//             }
+//         }
+//     } catch (err) {
+//         console.error("❌ Tracking job failed:", err.message || err);
+//     }
+// }
+
+// ============================================================
+// FIX 1: FORWARD TIMELINE - MERGE EVENTS, DON'T OVERWRITE
+// ============================================================
 export async function trackShipments() {
     try {
-        // Only orders that have shiprocket_order_id and shipments that haven't received an AWB yet OR not delivered
-        const THRESHOLD = new Date(Date.now() - 1000 * 60 * 60 * 2); // last 2 hours
+        // Find orders with shipments that don't have AWB yet (within last 24 hours)
+        const THRESHOLD = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
         const orders = await Order.find({
-            shipments: {
+            "shipments": {
                 $elemMatch: {
                     awb_code: null,
-                    courier_name: null,
-                    status: "Awaiting Pickup",
-                    assignedAt: { $gte: THRESHOLD }  // FIXED
+                    assignedAt: { $gte: THRESHOLD },
+                    status: { $nin: ["Delivered", "Cancelled", "RTO Delivered"] }
                 }
             }
         }).select("_id shipments");
-
 
         console.log(`🔥 Tracking ${orders?.length || 0} orders for AWB updates`);
         if (!orders?.length) return;
@@ -138,227 +387,105 @@ export async function trackShipments() {
 
         for (const order of orders) {
             try {
-                if (!order.shipments?.length) continue;
-
                 for (const shipment of order.shipments) {
+                    // Skip if already has AWB or is in final state
+                    if (shipment.awb_code) continue;
+                    if (["Delivered", "Cancelled", "RTO Delivered"].includes(shipment.status)) continue;
+
+                    const srOrderId = shipment.shiprocket_order_id;
+                    if (!srOrderId) {
+                        console.log(`❌ No shiprocket_order_id for shipment ${shipment._id}`);
+                        continue;
+                    }
+
+                    console.log(`📦 Checking AWB for order ${srOrderId}, shipment ${shipment._id}`);
+
                     try {
-                        if ([
-                            "Delivered",
-                            "Cancelled",
-                            "RTO Delivered",
-                            "RTO Initiated",
-                            "Lost",
-                            "Returning"
-                        ].includes(shipment.status)) {
-                            console.log(`⛔ Shipment ${shipment.shipment_id} already finished → skipping`);
-                            continue;
-                        }
-
-                        const srOrderId = shipment.shiprocket_order_id || shipment.shipment_id;
-                        if (!srOrderId) {
-                            console.log("❌ No Shiprocket order ID or shipment ID found → skipping");
-                            continue;
-                        }
-
-
-                        console.log(
-                            `📦 Order ${order._id} → Shipment ${shipment.shipment_id} (srOrderId ${srOrderId}) | AWB: ${shipment.awb_code || 'NOT ASSIGNED'}`
-                        );
-
-                        const orderDetailsRes = await axios.get(
-                            `https://apiv2.shiprocket.in/v1/external/courier/track/shipment/${shipment.shipment_id}`,
+                        // Get order details from Shiprocket
+                        const orderRes = await axios.get(
+                            `https://apiv2.shiprocket.in/v1/external/orders/show/${srOrderId}`,
                             { headers: { Authorization: `Bearer ${token}` } }
                         );
 
-                        const shipOrder = orderDetailsRes.data;
-
-                        if (!shipOrder) {
-                            console.warn(`⚠️ Empty response for srOrder ${srOrderId}`);
+                        const orderData = orderRes.data?.data;
+                        if (!orderData) {
+                            console.log(`⚠️ No data for order ${srOrderId}`);
                             continue;
                         }
 
-                        // Shiprocket wraps everything inside data
-                        const root = shipOrder?.data || shipOrder;
+                        // Extract AWB from order data
+                        const awb = orderData.awb_code ||
+                            orderData.shipments?.[0]?.awb_code ||
+                            orderData.shipment?.awb_code;
 
-                        // Case 1: shipments is an OBJECT, not array
-                        let srShipment = null;
-                        if (root.shipments && !Array.isArray(root.shipments)) {
-                            srShipment = root.shipments;
-                        }
-                        // Case 2: shipments is array (rare but possible)
-                        else if (Array.isArray(root.shipments)) {
-                            srShipment = root.shipments.find(s => String(s.shipment_id) === String(shipment.shipment_id));
-                            if (!srShipment) srShipment = root.shipments[0]; // fallback
-                        }
-                        // Fallback
-                        else {
-                            srShipment = root;
-                        }
+                        const courierName = orderData.courier_name ||
+                            orderData.shipments?.[0]?.courier_name ||
+                            orderData.courier_company?.name;
 
-                        /** ----------------- EXISTING AWB EXTRACTION ----------------- */
-                        let {
-                            awb: newAwb,
-                            trackUrl: newTrackUrl
-                        } = extractAWBFromShiprocket(shipOrder, srShipment);
+                        const trackingUrl = orderData.tracking_url ||
+                            orderData.shipments?.[0]?.tracking_url;
 
-                        let shouldUpdate = true;
-
-                        // WITH
-                        if (shipment.awb_code && newAwb && shipment.awb_code === newAwb) {
-                            console.log("✔️ AWB matches — checking courier anyway...");
-                            shouldUpdate = true; // always update courier and tracking info
-                        }
-
-
-                        // If no AWB found at all, skip
-                        if (!newAwb) {
-                            console.log(`⏳ AWB not yet assigned for sr shipment ${shipment.shipment_id}`);
+                        if (!awb) {
+                            console.log(`⏳ AWB not yet assigned for ${srOrderId}`);
                             continue;
                         }
 
-                        /** ------------------ FIX: FETCH COURIER NAME ------------------ */
-                        let newCourier = null;
+                        console.log(`✅ Found AWB ${awb} for shipment ${shipment._id}`);
 
+                        // Get tracking timeline for this AWB
+                        let timeline = [];
                         try {
-                            const courierRes = await axios.get(
-                                `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${newAwb}`,
+                            const trackRes = await axios.get(
+                                `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${awb}`,
                                 { headers: { Authorization: `Bearer ${token}` } }
                             );
-                            const trackData = courierRes.data?.tracking_data;
 
-                            newCourier =
-                                trackData?.shipment_track?.[0]?.courier_name ||
-                                trackData?.courier_name ||
-                                trackData?.awb_details?.courier_name ||
-                                courierRes.data?.courier_name ||
-                                null;
-
-                            console.log("🔍 courier extracted:", newCourier);
-
-                            const trackList = courierRes.data?.tracking_data?.shipment_track || [];
-                            if (trackList.length > 0) {
-                                const lastStatus = trackList[0]?.activity || null;
-
-                                const formattedEvents = trackList.map(ev => ({
+                            const trackData = trackRes.data?.tracking_data;
+                            if (trackData?.shipment_track) {
+                                timeline = trackData.shipment_track.map(ev => ({
                                     status: ev.activity || ev.status || "Unknown",
                                     timestamp: new Date(ev.date),
                                     location: ev.location || "N/A",
-                                    description: ev.activity || ev.status || "N/A",
-                                }));
-
-
-                                // SORT NEW EVENTS (latest first)
-                                formattedEvents.sort((a, b) => b.timestamp - a.timestamp);
-                                console.log("📌 Timeline + status updated for:", shipment.shipment_id);
-
-                                // AUTO UPDATE STATUS
-
+                                    description: ev.activity || ev.status || "N/A"
+                                })).sort((a, b) => b.timestamp - a.timestamp);
                             }
-
-                            if (newCourier && shipment.courier_name !== newCourier) {
-                                await Order.updateOne(
-                                    {
-                                        _id: order._id,
-                                        "shipments.shipment_id": shipment.shipment_id
-                                    },
-                                    {
-                                        $set: {
-                                            "shipments.$.courier_name": newCourier
-                                        }
-                                    }
-                                );
-
-                                console.log(`🚚 Courier updated → ${newCourier}`);
-                            }
-
-
-                        } catch (err) {
-                            console.warn(`⚠️ Courier lookup failed for AWB ${newAwb}:`);
+                        } catch (trackErr) {
+                            console.warn(`⚠️ Could not fetch timeline for AWB ${awb}:`, trackErr.message);
                         }
 
-                        console.log("🔥 Found AWB →", {
-                            newAwb,
-                            newCourier: newCourier || "unknown",
-                            newTrackUrl
-                        });
-
-                        if (shouldUpdate) {
-                            const trackingEntry = {
-                                status: "AWB Assigned",
-                                timestamp: new Date(),
-                                location: "Shiprocket",
-                                description: `AWB ${newAwb} assigned via ${newCourier || 'unknown'}`
-                            };
-
-                            const updatePayload = {
+                        // Update shipment with AWB and timeline
+                        await Order.updateOne(
+                            { _id: order._id, "shipments._id": shipment._id },
+                            {
                                 $set: {
-                                    "shipments.$.awb_code": newAwb,
-                                    "shipments.$.tracking_url": newTrackUrl,
+                                    "shipments.$.awb_code": awb,
+                                    "shipments.$.courier_name": courierName,
+                                    "shipments.$.tracking_url": trackingUrl || `https://shiprocket.co/tracking/${awb}`,
                                     "shipments.$.status": "AWB Assigned",
-                                    "orderStatus": "Shipped",
-                                    "primary_shipment": order.primary_shipment || shipment._id
-                                },
-                                $push: {
-                                    "shipments.$.trackingHistory": trackingEntry,
-                                    trackingHistory: {
+                                    "shipments.$.tracking_history": timeline.length > 0 ? timeline : [{
                                         status: "AWB Assigned",
                                         timestamp: new Date(),
                                         location: "Shiprocket",
-                                        description: `Shipment ${shipment.shipment_id} AWB ${newAwb}`
-                                    }
+                                        description: `AWB ${awb} assigned via ${courierName || 'unknown courier'}`
+                                    }]
                                 }
-                            };
-
-                            if (newCourier) {
-                                updatePayload.$set["shipments.$.courier_name"] = newCourier;
                             }
-
-                            const updateRes = await Order.updateOne(
-                                {
-                                    _id: order._id,
-                                    "shipments.shipment_id": shipment.shipment_id
-                                },
-                                updatePayload
-                            );
-
-                            // ⭐ After AWB assignment → recalc order status
-                            const refreshed = await Order.findById(order._id).select("shipments");
-
-                            const finalStatus = computeOrderStatus(refreshed.shipments);
-
-                            await Order.updateOne(
-                                { _id: order._id },
-                                { $set: { orderStatus: finalStatus } }
-                            );
-
-                            console.log(`🏁 Updated Order Status → ${finalStatus}`);
-
-                            console.log(
-                                `✅ AWB update result for order ${order._id}, shipment ${shipment.shipment_id}:`,
-                                {
-                                    matched: updateRes.matchedCount,
-                                    modified: updateRes.modifiedCount
-                                }
-                            );
-                        }
-
-
-                    } catch (shErr) {
-                        console.error(
-                            `❌ Error processing shipment ${shipment._id} for order ${order._id}:`,
-                            shErr.response?.data || shErr.message || shErr
                         );
+
+                        console.log(`✅ Updated shipment ${shipment._id} with AWB ${awb}`);
+
+                    } catch (apiErr) {
+                        console.error(`❌ Error fetching Shiprocket data for ${srOrderId}:`, apiErr.message);
+                        continue;
                     }
                 }
-            } catch (innerErr) {
-                console.error(
-                    `❌ Error iterating shipments for order ${order._id}:`,
-                    innerErr.message || innerErr
-                );
+            } catch (orderErr) {
+                console.error(`❌ Error processing order ${order._id}:`, orderErr.message);
+                continue;
             }
         }
     } catch (err) {
-        console.error("❌ Tracking job failed:", err.message || err);
+        console.error("❌ Tracking job failed:", err.message);
     }
 }
 
@@ -366,8 +493,9 @@ export async function trackShipmentTimeline() {
     try {
         const token = await getShiprocketToken();
 
+        // Find shipments with AWB that are not delivered
         const orders = await Order.find({
-            shipments: {
+            "shipments": {
                 $elemMatch: {
                     awb_code: { $ne: null },
                     status: { $nin: ["Delivered", "Cancelled", "RTO Delivered"] }
@@ -375,16 +503,15 @@ export async function trackShipmentTimeline() {
             }
         }).select("_id shipments");
 
-        console.log(`📍 Timeline Tracker → Checking ${orders.length} orders`);
+        console.log(`📍 Forward Timeline → Checking ${orders.length} orders`);
 
         for (const order of orders) {
-            let orderUpdated = false;
-
             for (const shipment of order.shipments) {
                 if (!shipment.awb_code) continue;
+                if (["Delivered", "Cancelled", "RTO Delivered"].includes(shipment.status)) continue;
 
                 const awb = shipment.awb_code;
-                console.log(`⏳ Fetching timeline for AWB → ${awb}`);
+                console.log(`⏳ Fetching timeline for AWB: ${awb}`);
 
                 try {
                     const res = await axios.get(
@@ -394,93 +521,194 @@ export async function trackShipmentTimeline() {
 
                     const trackingData = res.data?.tracking_data;
                     if (!trackingData) {
-                        console.log(`⚠️ No tracking_data for AWB ${awb}`);
+                        console.log(`⚠️ No tracking data for AWB ${awb}`);
                         continue;
                     }
 
-                    const rawEvents = trackingData.shipment_track_activities || [];
-
+                    // Extract events
+                    const rawEvents = trackingData.shipment_track_activities || 
+                                     trackingData.shipment_track || 
+                                     [];
+                    
                     const events = rawEvents
                         .map(ev => ({
-                            status: ev.activity || "Unknown",
-                            timestamp: ev.date ? new Date(ev.date) : new Date(),
+                            status: ev.activity || ev.status || "Unknown",
+                            timestamp: new Date(ev.date || ev.timestamp),
                             location: ev.location || "N/A",
-                            description: ev.activity || "No description"
+                            description: ev.activity || ev.status || "N/A"
                         }))
                         .sort((a, b) => b.timestamp - a.timestamp);
 
-                    // -------------------------------------------------------
-                    // 🔥 Clean shipment status (ALWAYS STRING)
-                    // -------------------------------------------------------
-                    let cleanStatus = events?.[0]?.status
-                        || trackingData.shipment_status
-                        || trackingData.current_status
-                        || "In Transit";
-
-                    const statusMap = {
-                        "PickupDone": "Pickup Done",
-                        "OutForDelivery": "Out For Delivery",
-                        "ReachedHub": "Reached Hub",
-                        "InTransit": "In Transit",
-                        "Delivered": "Delivered",
-                        "Undelivered": "Undelivered",
-                        "PickupFailed": "Pickup Failed",
-                        "RTOInitiated": "RTO Initiated",
-                        "RTODelivered": "RTO Delivered",
-                        "Cancelled": "Cancelled"
-                    };
-
-                    if (statusMap[cleanStatus]) cleanStatus = statusMap[cleanStatus];
-
-                    // ensure string ALWAYS
-                    cleanStatus = String(cleanStatus).trim();
-
-                    // -------------------------------------------------------
-                    // 🔥 Update shipment subdocument
-                    // -------------------------------------------------------
-                    const shipmentIndex = order.shipments.findIndex(
-                        s => String(s._id) === String(shipment._id)
-                    );
-
-                    if (shipmentIndex === -1) {
-                        console.log("❌ Shipment not found inside order — cannot update timeline");
-                        continue;
+                    // Determine current status
+                    let currentStatus = shipment.status;
+                    if (events.length > 0) {
+                        const latestEvent = events[0];
+                        const statusMap = {
+                            "Delivered": "Delivered",
+                            "Out for Delivery": "Out for Delivery",
+                            "In Transit": "In Transit",
+                            "Picked Up": "Pickup Done",
+                            "Pickup Done": "Pickup Done",
+                            "Pickup Scheduled": "Pickup Scheduled",
+                            "AWB Assigned": "AWB Assigned"
+                        };
+                        currentStatus = statusMap[latestEvent.status] || latestEvent.status;
                     }
 
-                    order.shipments[shipmentIndex].trackingHistory = events.slice(0, 50);
-                    order.shipments[shipmentIndex].status = cleanStatus;
+                    // Update shipment
+                    await Order.updateOne(
+                        { _id: order._id, "shipments._id": shipment._id },
+                        {
+                            $set: {
+                                "shipments.$.tracking_history": events,
+                                "shipments.$.status": currentStatus,
+                                "shipments.$.tracking_url": `https://shiprocket.co/tracking/${awb}`
+                            }
+                        }
+                    );
 
-                    order.markModified(`shipments.${shipmentIndex}.trackingHistory`);
-                    order.markModified(`shipments.${shipmentIndex}.status`);
-
-                    orderUpdated = true;
-
-                    console.log(`✅ Timeline prepared for AWB ${awb} | Shipment status → ${cleanStatus}`);
+                    console.log(`✅ Updated timeline for AWB ${awb} | Status: ${currentStatus}`);
 
                 } catch (err) {
-                    console.log(
-                        `❌ Timeline error for AWB ${shipment.shipment_id}`,
-                        err.response?.data || err.message
-                    );
+                    console.log(`❌ Timeline fetch failed for AWB ${awb}:`, err.message);
                 }
             }
-
-            // -------------------------------------------------------
-            // 🔥 Recalculate orderStatus only if changes were made
-            // -------------------------------------------------------
-            if (orderUpdated) {
-                const finalStatus = computeOrderStatus(order.shipments);
-                order.orderStatus = finalStatus;
-
-                await order.save();
-                console.log(`🏁 Order ${order._id} status recalculated → ${finalStatus}`);
-            }
         }
-
     } catch (err) {
-        console.log("❌ Timeline cron failed:", err.message);
+        console.error("❌ Forward timeline cron failed:", err.message);
     }
 }
+
+// export async function trackShipmentTimeline() {
+//     try {
+//         const token = await getShiprocketToken();
+
+//         const orders = await Order.find({
+//             shipments: {
+//                 $elemMatch: {
+//                     awb_code: { $ne: null },
+//                     status: { $nin: ["Delivered", "Cancelled", "RTO Delivered"] }
+//                 }
+//             }
+//         }).select("_id shipments");
+
+//         console.log(`📍 Forward Timeline → Checking ${orders.length} orders`);
+
+//         for (const order of orders) {
+//             let orderStatusChanged = false;
+//             let updatedShipments = [...order.shipments];
+
+//             for (const shipment of order.shipments) {
+//                 if (!shipment.awb_code) continue;
+
+//                 const awb = shipment.awb_code;
+//                 console.log(`⏳ Timeline fetch for AWB → ${awb}`);
+
+//                 try {
+//                     const res = await axios.get(
+//                         `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${awb}`,
+//                         { headers: { Authorization: `Bearer ${token}` } }
+//                     );
+
+//                     const trackingData = res.data?.tracking_data;
+//                     if (!trackingData) {
+//                         console.log(`⚠️ No tracking data for AWB ${awb}`);
+//                         continue;
+//                     }
+
+//                     const rawEvents =
+//                         trackingData.shipment_track_activities ||
+//                         trackingData.shipment_track ||
+//                         [];
+
+//                     const events = rawEvents
+//                         .map(ev => ({
+//                             status: ev.activity || ev.status || "Unknown",
+//                             timestamp: ev.date ? new Date(ev.date) : new Date(),
+//                             location: ev.location || "N/A",
+//                             description: ev.activity || ev.status || "N/A"
+//                         }))
+//                         .sort((a, b) => b.timestamp - a.timestamp);
+
+//                     let cleanStatus =
+//                         events?.[0]?.status ||
+//                         trackingData.shipment_status ||
+//                         "In Transit";
+
+//                     const statusMap = {
+//                         "PickupDone": "Pickup Done",
+//                         "OutForDelivery": "Out For Delivery",
+//                         "ReachedHub": "Reached Hub",
+//                         "InTransit": "In Transit",
+//                         "Delivered": "Delivered",
+//                         "Undelivered": "Undelivered",
+//                         "PickupFailed": "Pickup Failed",
+//                         "RTOInitiated": "RTO Initiated",
+//                         "RTODelivered": "RTO Delivered",
+//                         "Cancelled": "Cancelled"
+//                     };
+
+//                     cleanStatus = statusMap[cleanStatus] || cleanStatus;
+//                     cleanStatus = String(cleanStatus).trim();
+
+//                     // -----------------------------------------------------
+//                     // 🔥 Atomic MongoDB update — DOES NOT OVERWRITE ANYTHING
+//                     // -----------------------------------------------------
+//                     await Order.updateOne(
+//                         { _id: order._id },
+//                         {
+//                             $set: {
+//                                 "shipments.$[ship].trackingHistory": events.slice(0, 50),
+//                                 "shipments.$[ship].status": cleanStatus
+//                             }
+//                         },
+//                         {
+//                             arrayFilters: [
+//                                 { "ship._id": shipment._id }
+//                             ]
+//                         }
+//                     );
+
+//                     // Update local copy for orderStatus compute
+//                     const index = updatedShipments.findIndex(
+//                         s => String(s._id) === String(shipment._id)
+//                     );
+//                     if (index !== -1) {
+//                         updatedShipments[index].trackingHistory = events.slice(0, 50);
+//                         updatedShipments[index].status = cleanStatus;
+//                     }
+
+//                     orderStatusChanged = true;
+
+//                     console.log(`✅ Updated timeline for AWB ${awb} | Status → ${cleanStatus}`);
+
+//                 } catch (err) {
+//                     console.log(
+//                         `❌ Timeline fetch failed for AWB ${awb}:`,
+//                         err.response?.data || err.message
+//                     );
+//                 }
+//             }
+
+//             // -----------------------------------------------------
+//             // 🔥 Recompute orderStatus using updated shipments
+//             // -----------------------------------------------------
+//             if (orderStatusChanged) {
+//                 const finalStatus = computeOrderStatus(updatedShipments);
+
+//                 await Order.updateOne(
+//                     { _id: order._id },
+//                     { $set: { orderStatus: finalStatus } }
+//                 );
+
+//                 console.log(`🏁 Order ${order._id} → orderStatus updated → ${finalStatus}`);
+//             }
+//         }
+
+//     } catch (err) {
+//         console.log("❌ Forward timeline cron failed:", err.message);
+//     }
+// }
 
 
 // export async function trackShipmentTimeline() {
@@ -610,23 +838,29 @@ export async function runWithLock(type, fn) {
 }
 
 export function startTrackingJob() {
-    cron.schedule("* * * * *", () => {
+    // TESTING - Quick updates every 2 minutes
+    
+    cron.schedule("*/2 * * * *", () => {
+        console.log("🧪 TEST: Running forward AWB...");
         runWithLock("forward", trackShipments);
     }, { timezone: "Asia/Kolkata" });
 
     cron.schedule("*/2 * * * *", () => {
+        console.log("🧪 TEST: Running forward timeline...");
         runWithLock("forwardTimeline", trackShipmentTimeline);
     }, { timezone: "Asia/Kolkata" });
 
-    cron.schedule("30 * * * * *", () => {
+    cron.schedule("*/2 * * * *", () => {
+        console.log("🧪 TEST: Running return AWB...");
         runWithLock("returnAWB", trackReturnAWBAssignment);
     }, { timezone: "Asia/Kolkata" });
 
-    cron.schedule("0 */2 * * * *", () => {
+    cron.schedule("*/2 * * * *", () => {
+        console.log("🧪 TEST: Running return timeline...");
         runWithLock("returnTimeline", trackReturnTimeline);
     }, { timezone: "Asia/Kolkata" });
 
-    console.log("✅ All crons started with sequential locking");
+    console.log("✅ TEST MODE: All crons running every 2 minutes");
 }
 
 // export function startTrackingJob() {

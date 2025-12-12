@@ -253,115 +253,147 @@
 
 
 
+// ============================================================
+// CLEANUP SCRIPT - RUN ONCE TO FIX OLD ORDER
+// Save as: cleanup-old-order.js
+// ============================================================
 
+import mongoose from 'mongoose';
+import dotenv from 'dotenv';
+import Order from './models/Order.js';
+dotenv.config();
 
+// ============================================================
+// CLEANUP FUNCTION
+// ============================================================
 
-
-
-
-import mongoose from "mongoose";
-import Order from "./models/Order.js";
-import axios from "axios";
-import { getShiprocketToken } from "./middlewares/services/shiprocket.js";
-import { fileURLToPath } from "url";
-import { dirname } from "path";
-
-// 🔥 Replace with your MongoDB connection string
-const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/joyory";
-
-async function connectDB() {
-    if (mongoose.connection.readyState === 0) {
-        await mongoose.connect(MONGO_URI, {
+async function cleanupOldOrder() {
+    try {
+        // Connect to MongoDB
+        console.log("🔌 Connecting to MongoDB...");
+        await mongoose.connect(process.env.MONGO_URI || process.env.MONGODB_URI, {
             useNewUrlParser: true,
             useUnifiedTopology: true,
         });
         console.log("✅ MongoDB connected");
-    }
-}
 
-export async function migrateReturnTimeline() {
-    console.log("🚀 Migrating timeline for old returns...");
+        const orderId = "693aa7fa871080413e775362";
+        
+        const order = await Order.findById(orderId);
+        
+        if (!order) {
+            console.log("❌ Order not found");
+            await mongoose.connection.close();
+            return;
+        }
 
-    await connectDB();
+        console.log(`🔍 Found order: ${orderId}`);
+        console.log(`📦 Total shipments: ${order.shipments?.length || 0}`);
 
-    const orders = await Order.find({
-        "shipments.returns": { $exists: true, $not: { $size: 0 } }
-    }).select("_id shipments");
+        // Find shipment with returns
+        const shipmentWithReturns = order.shipments.find(s => s.returns?.length > 0);
+        
+        if (!shipmentWithReturns) {
+            console.log("❌ No shipment with returns found");
+            await mongoose.connection.close();
+            return;
+        }
 
-    if (!orders.length) return console.log("✅ No old returns found.");
+        console.log(`📦 Shipment ${shipmentWithReturns.shipment_id} has ${shipmentWithReturns.returns.length} returns`);
 
-    const token = await getShiprocketToken();
-    if (!token) throw new Error("❌ No Shiprocket token available");
+        // Show all returns before cleanup
+        console.log("\n🔍 BEFORE CLEANUP:");
+        shipmentWithReturns.returns.forEach((ret, idx) => {
+            console.log(`   ${idx + 1}. Return ${ret._id}:`);
+            console.log(`      - return_order_id: ${ret.return_order_id || 'NONE'}`);
+            console.log(`      - return_shipment_id: ${ret.return_shipment_id || 'NONE'}`);
+            console.log(`      - awb_code: ${ret.awb_code || 'NONE'}`);
+            console.log(`      - status: ${ret.overallStatus}`);
+        });
 
-    for (const order of orders) {
-        for (const shipment of order.shipments || []) {
-            if (!shipment.returns?.length) continue;
+        // 🔥 FIX: Keep only unique returns, remove invalid ones
+        const uniqueReturns = [];
+        const seenReturnIds = new Set();
+        const seenShipmentIds = new Set();
 
-            for (const ret of shipment.returns) {
-                if (!ret.awb_code) continue; // must have AWB
+        for (const ret of shipmentWithReturns.returns) {
+            const retId = ret._id.toString();
+            const shipmentId = ret.return_shipment_id;
 
-                console.log(`⏳ Fetching timeline for return ${ret._id}, AWB ${ret.awb_code}`);
+            // Skip if we've already seen this return _id
+            if (seenReturnIds.has(retId)) {
+                console.log(`\n⚠️ REMOVING: Duplicate return with _id ${retId}`);
+                continue;
+            }
 
-                try {
-                    const res = await axios.get(
-                        `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${ret.awb_code}`,
-                        {
-                            headers: { Authorization: `Bearer ${token}` },
-                            timeout: 15000
-                        }
-                    );
+            // Skip if this return_shipment_id already exists (duplicate Shiprocket IDs)
+            if (shipmentId && seenShipmentIds.has(shipmentId)) {
+                console.log(`\n⚠️ REMOVING: Duplicate return with shipment_id ${shipmentId} (return ${retId})`);
+                continue;
+            }
 
-                    const rawEvents = res.data?.tracking_data?.shipment_track_activities || [];
-                    const timelineEvents = rawEvents
-                        .map(ev => ({
-                            status: ev.activity || ev.status || "Unknown",
-                            timestamp: new Date(ev.date || ev.datetime || Date.now()),
-                            location: ev.location || "N/A",
-                            description: ev.activity || ev.status || ""
-                        }))
-                        .sort((a, b) => b.timestamp - a.timestamp)
-                        .slice(0, 50); // latest 50 events
+            // Skip if Shiprocket returns 404 for this ID (you mentioned 1075711965 is invalid)
+            if (shipmentId === "1075711965") {
+                console.log(`\n⚠️ REMOVING: Return ${retId} has invalid/404 shipment_id ${shipmentId}`);
+                continue;
+            }
 
-                    // Update only trackingHistory for this return
-                    await Order.updateOne(
-                        { _id: order._id },
-                        {
-                            $set: {
-                                "shipments.$[ship].returns.$[ret].trackingHistory": timelineEvents
-                            }
-                        },
-                        {
-                            arrayFilters: [
-                                { "ship._id": shipment._id },
-                                { "ret._id": ret._id }
-                            ]
-                        }
-                    );
+            seenReturnIds.add(retId);
+            if (shipmentId) seenShipmentIds.add(shipmentId);
+            uniqueReturns.push(ret);
+        }
 
-                    console.log(`✅ Timeline updated for return ${ret._id}`);
-                } catch (err) {
-                    console.error(`❌ Failed timeline for return ${ret._id}:`, err.message);
+        console.log(`\n✅ Keeping ${uniqueReturns.length} valid returns out of ${shipmentWithReturns.returns.length}`);
+
+        if (uniqueReturns.length === shipmentWithReturns.returns.length) {
+            console.log("✅ No cleanup needed - all returns are valid");
+            await mongoose.connection.close();
+            return;
+        }
+
+        // Update the order
+        const updateResult = await Order.updateOne(
+            { 
+                _id: orderId,
+                "shipments._id": shipmentWithReturns._id
+            },
+            {
+                $set: {
+                    "shipments.$.returns": uniqueReturns
                 }
             }
-        }
+        );
+
+        console.log(`\n✅ Order updated: matched=${updateResult.matchedCount}, modified=${updateResult.modifiedCount}`);
+        
+        // Show final state
+        const updatedOrder = await Order.findById(orderId).select("shipments");
+        const updatedShipment = updatedOrder.shipments.find(s => 
+            s._id.toString() === shipmentWithReturns._id.toString()
+        );
+        
+        console.log("\n📊 AFTER CLEANUP:");
+        console.log(`   Total returns: ${updatedShipment.returns.length}`);
+        updatedShipment.returns.forEach((ret, idx) => {
+            console.log(`   ${idx + 1}. Return ${ret._id}:`);
+            console.log(`      - return_order_id: ${ret.return_order_id || 'NONE'}`);
+            console.log(`      - return_shipment_id: ${ret.return_shipment_id || 'NONE'}`);
+            console.log(`      - awb_code: ${ret.awb_code || 'NONE'}`);
+            console.log(`      - status: ${ret.overallStatus}`);
+        });
+
+        console.log("\n✅ Cleanup completed successfully!");
+
+    } catch (err) {
+        console.error("❌ Cleanup failed:", err.message);
+        console.error(err.stack);
+    } finally {
+        // Close connection
+        await mongoose.connection.close();
+        console.log("🔌 MongoDB connection closed");
+        process.exit(0);
     }
-
-    console.log("🚀 Timeline migration finished!");
 }
 
-// 🔥 ES Module compatible entry
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-if (process.argv[1] === __filename) {
-    (async () => {
-        try {
-            await migrateReturnTimeline();
-            console.log("✅ All done");
-            process.exit(0);
-        } catch (err) {
-            console.error("❌ Migration script failed:", err);
-            process.exit(1);
-        }
-    })();
-}
+// Run cleanup
+cleanupOldOrder();
