@@ -8,7 +8,6 @@ import {
     markShipmentReturnReceived,
     approveShipmentReturn,
     rejectShipmentReturn,
-    getAllReturnsForAdmin,
     getReturnsSummary,
     getReturnDetails,
     getReturnsAnalytics,
@@ -67,21 +66,13 @@ router.get(
         getReturnDetails
     )
 
-
-
-
-router.get(
-    "/admin/returns",
-    isAdmin,
-    getAllReturnsForAdmin
-)
 router.put(
     "/admin/approve/:shipment_id/:returnId",
     isAdmin,
     approveShipmentReturn
 );
 
-// ❌ Admin rejects shipment return
+// ❌ Admin rejects shipment return 
 router.put(
     "/admin/reject/:shipment_id/:returnId",
     isAdmin,

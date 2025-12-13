@@ -384,6 +384,26 @@ export const calculateCartSummary = async (user, query = {}) => {
     grandTotal += SHIPPING_CHARGE;
   }
 
+
+  // -------------------- GST Calculation --------------------
+  const GST_RATE = 0.12; // 12%
+
+  // taxable amount = amount after all discounts + shipping
+  const taxableAmount = round2(grandTotal);
+
+  // GST value
+  const gstAmount = round2(taxableAmount * GST_RATE);
+
+  // Final payable including GST
+  const payableWithGST = round2(taxableAmount + gstAmount);
+
+  // Friendly message
+  const gstMessage = `🧾 Includes 12% GST (₹${gstAmount})`;
+
+  // 🔥 IMPORTANT: override grandTotal
+  grandTotal = payableWithGST;
+
+
   return {
     cart: finalCart,
     priceDetails: {
@@ -396,7 +416,12 @@ export const calculateCartSummary = async (user, query = {}) => {
       giftCardDiscount: round2(giftCardDiscount),
       shippingCharge: round2(shippingCharge),
       shippingMessage,
-      payable: grandTotal,
+      taxableAmount,          // 🔥 SAME AS CART API
+      gstRate: 12,
+      gstAmount,
+      gstMessage,
+
+      payable: payableWithGST,
       savingsMessage: totalSavings > 0 ? `🎉 You saved ₹${totalSavings} on this order!` : "",
     },
     appliedCoupon,

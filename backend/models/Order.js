@@ -661,6 +661,11 @@ const orderSchema = new mongoose.Schema({
         senderMessage: String,
         amount: Number
     },
+    gst: {
+        rate: { type: Number, default: 12 },        // %
+        amount: { type: Number, default: 0 },       // ₹
+        taxableAmount: { type: Number, default: 0 } // before GST
+    },
 
     orderId: String,
     orderNumber: Number,
