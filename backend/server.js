@@ -429,18 +429,19 @@ import { Server } from "socket.io";
 import bodyParser from "body-parser";
 import connectDB from "./config/db.js";
 import cron from "node-cron";
-// import "./middlewares/utils/cron/scheduler.js";
-// import "./middlewares/utils/cron/promotionScheduler.js";
-// import "./middlewares/utils/cron/cleanUpOrders.js";
+import "./middlewares/utils/cron/scheduler.js";
+import "./middlewares/utils/cron/promotionScheduler.js";
+import "./middlewares/utils/cron/cleanUpOrders.js";
 
-// import "./middlewares/utils/cron/shiprocketRetry.js";
-// import { startTrackingJob } from "./middlewares/utils/cron/shiprocketTrackingJob.js";
-// import "./middlewares/utils/cron/autoPayout.js";
-// import "./middlewares/utils/cron/returnCron.js";
+import "./middlewares/utils/cron/shiprocketRetry.js";
+import { startTrackingJob } from "./middlewares/utils/cron/shiprocketTrackingJob.js";
 
-// // ================= START CRON JOBS =================
-// startTrackingJob();
-// console.log("🚀 Shiprocket tracking job started...");
+import "./middlewares/utils/cron/autoPayout.js";
+import "./middlewares/utils/cron/returnCron.js";
+
+// ================= START CRON JOBS =================
+startTrackingJob();
+console.log("🚀 Shiprocket tracking job started...");
 
 // 🔹 Routes
 import authRoutes from "./routes/authRoutes.js";

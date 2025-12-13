@@ -625,7 +625,7 @@ export function calculateOrderExpectedDelivery(shipments = []) {
 
 //       // Admin confirmed
 //       if (order.adminConfirmed) {
-//         const confirmedAt = order.trackingHistory?.find(t => t.status === "Admin Confirmed")?.timestamp || order.updatedAt || order.createdAt;
+//         const confirmedAt = order.tracking_history?.find(t => t.status === "Admin Confirmed")?.timestamp || order.updatedAt || order.createdAt;
 //         orderTimeline.push({
 //           status: "Seller Confirmed",
 //           timestamp: confirmedAt,
@@ -665,7 +665,7 @@ export function calculateOrderExpectedDelivery(shipments = []) {
 //         });
 
 //         // shipment timeline: only shipment events
-//         const shipmentTimeline = (shipment.trackingHistory || []).map(t => ({
+//         const shipmentTimeline = (shipment.tracking_history || []).map(t => ({
 //           status: t.status,
 //           timestamp: t.timestamp,
 //           location: t.location || "Courier",
@@ -875,7 +875,7 @@ export const getOrderTracking = async (req, res) => {
     }
 
     if (order.adminConfirmed) {
-      const confirmedAt = order.trackingHistory?.find(t => t.status === "Admin Confirmed")?.timestamp || order.updatedAt || order.createdAt;
+      const confirmedAt = order.tracking_history?.find(t => t.status === "Admin Confirmed")?.timestamp || order.updatedAt || order.createdAt;
       orderTimeline.push({
         status: "Seller Confirmed",
         timestamp: confirmedAt,
@@ -900,7 +900,7 @@ export const getOrderTracking = async (req, res) => {
         };
       });
 
-      const timeline = (shipment.trackingHistory || []).map(tr => ({
+      const timeline = (shipment.tracking_history || []).map(tr => ({
         status: tr.status,
         timestamp: tr.timestamp,
         location: tr.location || "Courier",
@@ -1056,7 +1056,7 @@ export const getOrderTracking = async (req, res) => {
 //     };
 
 //     // COURIER TIMELINE
-//     const trackingTimeline = (shipment.trackingHistory || [])
+//     const trackingTimeline = (shipment.tracking_history || [])
 //       .map(t => ({
 //         status: t.status,
 //         timestamp: t.timestamp,
@@ -1230,7 +1230,7 @@ export const getShipmentDetails = async (req, res) => {
     // ------------------------------------------------------------------
     // TRACKING HISTORY (schema-accurate)
     // ------------------------------------------------------------------
-    const trackingTimeline = shipment.trackingHistory || [];
+    const trackingTimeline = shipment.tracking_history || [];
 
     // ------------------------------------------------------------------
     // FINAL RESPONSE (0 assumptions)

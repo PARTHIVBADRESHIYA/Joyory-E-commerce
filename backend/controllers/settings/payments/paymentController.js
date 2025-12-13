@@ -275,13 +275,13 @@
 //         order.paymentStatus = "pending";
 //         order.orderStatus = "Awaiting Payment";
 
-//         if (!order.trackingHistory || order.trackingHistory.length === 0) {
-//             order.trackingHistory = [
+//         if (!order.tracking_history || order.tracking_history.length === 0) {
+//             order.tracking_history = [
 //                 { status: "Order Placed", timestamp: new Date(), location: "Store" },
 //                 { status: "Awaiting Payment", timestamp: new Date() },
 //             ];
 //         } else {
-//             order.trackingHistory.push({
+//             order.tracking_history.push({
 //                 status: "Awaiting Payment",
 //                 timestamp: new Date(),
 //             });
@@ -498,7 +498,7 @@
 //             const shiprocketRes = await createShiprocketOrder(finalOrder);
 //             if (shiprocketRes?.shipmentDetails) {
 //                 finalOrder.shipment = shiprocketRes.shipmentDetails;
-//                 finalOrder.trackingHistory.push({ status: "Shipment Created", timestamp: new Date(), location: "Shiprocket" });
+//                 finalOrder.tracking_history.push({ status: "Shipment Created", timestamp: new Date(), location: "Shiprocket" });
 //                 await finalOrder.save();
 //             } else {
 //                 console.warn("⚠️ Shiprocket responded without shipmentDetails", shiprocketRes);
@@ -508,7 +508,7 @@
 //             // record failure note
 //             try {
 //                 await Order.updateOne({ _id: finalOrder._id }, {
-//                     $push: { trackingHistory: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } }
+//                     $push: { tracking_history: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } }
 //                 });
 //             } catch (err) {
 //                 console.error("⚠️ Failed to record shipment failure:", err);
@@ -519,7 +519,7 @@
 //         try {
 //             await Order.updateOne({ _id: finalOrder._id }, {
 //                 $push: {
-//                     trackingHistory: [
+//                     tracking_history: [
 //                         { status: "Payment Successful", timestamp: new Date(), location: "Online - Razorpay" },
 //                         { status: "Processing", timestamp: new Date(), location: "Store" }
 //                     ]
@@ -689,8 +689,8 @@
 //             if (paymentDoc) txOrder.paymentId = paymentDoc._id;
 //             await User.updateOne({ _id: txOrder.user._id }, { $set: { cart: [] } }, { session });
 
-//             txOrder.trackingHistory = [
-//                 ...(txOrder.trackingHistory || []),
+//             txOrder.tracking_history = [
+//                 ...(txOrder.tracking_history || []),
 //                 { status: "Order Placed (COD)", timestamp: new Date(), location: "Store" },
 //                 { status: "Processing", timestamp: new Date(), location: "Store" },
 //             ];
@@ -703,7 +703,7 @@
 //             const shiprocketRes = await createShiprocketOrder(finalOrder);
 //             if (shiprocketRes?.shipmentDetails) {
 //                 finalOrder.shipment = shiprocketRes.shipmentDetails;
-//                 finalOrder.trackingHistory.push({
+//                 finalOrder.tracking_history.push({
 //                     status: "Shipment Created",
 //                     timestamp: new Date(),
 //                     location: "Shiprocket",
@@ -718,7 +718,7 @@
 //                 { _id: finalOrder._id },
 //                 {
 //                     $push: {
-//                         trackingHistory: {
+//                         tracking_history: {
 //                             status: "Shipment Creation Failed",
 //                             timestamp: new Date(),
 //                             location: "Shiprocket",
@@ -881,7 +881,7 @@
 //             txOrder.orderStatus = "Processing";
 //             txOrder.isDraft = false;
 
-//             txOrder.trackingHistory.push(
+//             txOrder.tracking_history.push(
 //                 { status: "Payment Successful", timestamp: new Date(), location: "Wallet" },
 //                 { status: "Processing", timestamp: new Date(), location: "Store" }
 //             );
@@ -916,7 +916,7 @@
 
 //             if (shiprocketRes?.shipmentDetails) {
 //                 finalOrder.shipment = shiprocketRes.shipmentDetails;
-//                 finalOrder.trackingHistory.push({
+//                 finalOrder.tracking_history.push({
 //                     status: "Shipment Created",
 //                     timestamp: new Date(),
 //                     location: "Shiprocket"
@@ -927,7 +927,7 @@
 //                     { _id: finalOrder._id },
 //                     {
 //                         $push: {
-//                             trackingHistory: {
+//                             tracking_history: {
 //                                 status: "Shipment Creation Failed",
 //                                 timestamp: new Date(),
 //                                 location: "Shiprocket"
@@ -941,7 +941,7 @@
 //                 { _id: orderId },
 //                 {
 //                     $push: {
-//                         trackingHistory: {
+//                         tracking_history: {
 //                             status: "Shipment Creation Failed",
 //                             timestamp: new Date(),
 //                             location: "Shiprocket"
@@ -1046,8 +1046,8 @@
 //             txOrder.isDraft = false;
 
 
-//             txOrder.trackingHistory = txOrder.trackingHistory || [];
-//             txOrder.trackingHistory.push(
+//             txOrder.tracking_history = txOrder.tracking_history || [];
+//             txOrder.tracking_history.push(
 //                 { status: "Payment Successful", timestamp: new Date(), location: "GiftCard" },
 //                 { status: "Processing", timestamp: new Date(), location: "Store" }
 //             );
@@ -1079,8 +1079,8 @@
 
 //             if (shiprocketRes?.shipmentDetails) {
 //                 finalOrder.shipment = shiprocketRes.shipmentDetails;
-//                 finalOrder.trackingHistory = finalOrder.trackingHistory || [];
-//                 finalOrder.trackingHistory.push({
+//                 finalOrder.tracking_history = finalOrder.tracking_history || [];
+//                 finalOrder.tracking_history.push({
 //                     status: "Shipment Created",
 //                     timestamp: new Date(),
 //                     location: "Shiprocket"
@@ -1089,14 +1089,14 @@
 //             } else {
 //                 await Order.updateOne(
 //                     { _id: finalOrder._id },
-//                     { $push: { trackingHistory: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } } }
+//                     { $push: { tracking_history: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } } }
 //                 );
 //             }
 //         } catch (shipErr) {
 //             console.error("⚠️ Shiprocket Error (GiftCard):", shipErr?.message || shipErr);
 //             await Order.updateOne(
 //                 { _id: finalOrder._id },
-//                 { $push: { trackingHistory: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } } }
+//                 { $push: { tracking_history: { status: "Shipment Creation Failed", timestamp: new Date(), location: "Shiprocket" } } }
 //             );
 //         }
 
@@ -1991,8 +1991,8 @@ export const createRazorpayOrder = async (req, res) => {
         order.paymentStatus = "pending";
         order.orderStatus = "Awaiting Payment";
         order.isDraft = false;   // <-- ADD THIS
-        order.trackingHistory = order.trackingHistory || [];
-        order.trackingHistory.push({ status: "Awaiting Payment", timestamp: new Date(), location: "Store" });
+        order.tracking_history = order.tracking_history || [];
+        order.tracking_history.push({ status: "Awaiting Payment", timestamp: new Date(), location: "Store" });
 
         await order.save();
 
@@ -2121,8 +2121,8 @@ export const verifyRazorpayPayment = async (req, res) => {
 
 
         if (shippingAddress) order.shippingAddress = shippingAddress;
-        order.trackingHistory = order.trackingHistory || [];
-        order.trackingHistory.push({ status: "Payment Captured", timestamp: new Date(), location: "Razorpay" });
+        order.tracking_history = order.tracking_history || [];
+        order.tracking_history.push({ status: "Payment Captured", timestamp: new Date(), location: "Razorpay" });
 
         // Create Payment doc (non-transactional here)
         try {
@@ -2320,7 +2320,7 @@ export const confirmCodOrder = async (req, res) => {
 
 
 
-        order.trackingHistory.push({
+        order.tracking_history.push({
             status: "COD Requested",
             timestamp: new Date(),
             location: "Customer"
@@ -2492,13 +2492,13 @@ export const createWalletPayment = async (req, res) => {
 
             order.transactionId = `WALLET-${Date.now()}`;
 
-            order.trackingHistory = order.trackingHistory || [];
-            order.trackingHistory.push({
+            order.tracking_history = order.tracking_history || [];
+            order.tracking_history.push({
                 status: "Payment Successful",
                 timestamp: new Date(),
                 location: "Wallet"
             });
-            order.trackingHistory.push({
+            order.tracking_history.push({
                 status: "Awaiting Admin Confirmation",
                 timestamp: new Date(),
                 location: "Store"
@@ -2660,8 +2660,8 @@ export const createGiftCardPayment = async (req, res) => {
 
             order.transactionId = `GIFTCARD-${Date.now()}`;
 
-            order.trackingHistory = order.trackingHistory || [];
-            order.trackingHistory.push(
+            order.tracking_history = order.tracking_history || [];
+            order.tracking_history.push(
                 { status: "Payment Successful", timestamp: new Date(), location: "GiftCard" },
                 { status: "Awaiting Admin Confirmation", timestamp: new Date(), location: "Store" }
             );

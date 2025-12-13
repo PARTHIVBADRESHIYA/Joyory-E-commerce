@@ -25,44 +25,132 @@ const shiprocketStatusMap = {
 };
 
 
+// export function computeOrderStatus(shipments = []) {
+//     if (!shipments || shipments.length === 0) return "Pending";
+
+//     const normalize = (s = "") => s.trim().toLowerCase();
+
+//     // Map numeric status / deliveredAt to proper string
+//     const statuses = shipments.map(s => {
+//         if (s.deliveredAt) return "Delivered";
+//         if (s.status === "cancelled") return "Cancelled"; // your cancelled code
+//         if (["shipped", "out for delivery", "in transit"].includes(s.status.toLowerCase()))
+//             return "Shipped";
+
+//         // fallback to last tracking_history status
+//         const lastTracking = s.tracking_history?.[s.tracking_history.length - 1]?.status;
+//         if (lastTracking) return lastTracking;
+//         return "Processing";
+//     });
+
+//     const total = statuses.length;
+//     const count = (s) => statuses.filter(x => normalize(x) === normalize(s)).length;
+//     const has = (s) => count(s) > 0;
+//     const all = (s) => count(s) === total;
+
+//     if (all("delivered")) return "Delivered";
+//     if (all("cancelled")) return "Cancelled";
+//     if (statuses.every(s => ["shipped", "out for delivery", "in transit"].includes(normalize(s))))
+//         return "Shipped";
+
+//     if (has("delivered") && has("cancelled") && !has("shipped") && !has("processing"))
+//         return "Partially Delivered / Cancelled";
+//     if (has("delivered") && !has("cancelled"))
+//         return "Partially Delivered";
+//     if (has("cancelled") && !has("delivered"))
+//         return "Partially Cancelled";
+
+//     if (has("shipped") || has("out for delivery") || has("in transit"))
+//         return "Processing";
+
+//     return "Processing";
+// }
 export function computeOrderStatus(shipments = []) {
-    if (!shipments || shipments.length === 0) return "Pending";
+    if (!Array.isArray(shipments) || shipments.length === 0) {
+        return "Pending";
+    }
 
-    const normalize = (s = "") => s.trim().toLowerCase();
+    const normalize = (s = "") => s.toString().trim().toLowerCase();
 
-    // Map numeric status / deliveredAt to proper string
-    const statuses = shipments.map(s => {
-        if (s.deliveredAt) return "Delivered";
-        if (s.status === "cancelled") return "Cancelled"; // your cancelled code
-        if (["shipped", "out for delivery", "in transit"].includes(s.status.toLowerCase()))
-            return "Shipped";
+    let delivered = 0;
+    let cancelled = 0;
+    let shipped = 0;
+    let processing = 0;
+    let returned = 0;
 
-        // fallback to last trackingHistory status
-        const lastTracking = s.trackingHistory?.[s.trackingHistory.length - 1]?.status;
-        if (lastTracking) return lastTracking;
-        return "Processing";
-    });
+    for (const shipment of shipments) {
 
-    const total = statuses.length;
-    const count = (s) => statuses.filter(x => normalize(x) === normalize(s)).length;
-    const has = (s) => count(s) > 0;
-    const all = (s) => count(s) === total;
+        /** --------------------
+         *  1️⃣ FORWARD STATUS
+         * -------------------- */
+        const forwardStatus = normalize(shipment.status);
 
-    if (all("delivered")) return "Delivered";
-    if (all("cancelled")) return "Cancelled";
-    if (statuses.every(s => ["shipped", "out for delivery", "in transit"].includes(normalize(s))))
-        return "Shipped";
+        if (shipment.deliveredAt || forwardStatus === "delivered") {
+            delivered++;
+        }
+        else if (forwardStatus === "cancelled" || forwardStatus === "rto delivered") {
+            cancelled++;
+        }
+        else if (
+            ["shipped", "in transit", "out for delivery"].includes(forwardStatus)
+        ) {
+            shipped++;
+        }
+        else {
+            processing++;
+        }
 
-    if (has("delivered") && has("cancelled") && !has("shipped") && !has("processing"))
+        /** --------------------
+         *  2️⃣ RETURNS STATUS
+         * -------------------- */
+        if (Array.isArray(shipment.returns) && shipment.returns.length > 0) {
+            for (const ret of shipment.returns) {
+                const rStatus = normalize(ret.status);
+
+                if (
+                    ["refund_initiated", "refunded"].includes(rStatus)
+                ) {
+                    returned++;
+                }
+            }
+        }
+    }
+
+    const total = shipments.length;
+
+    /** --------------------
+     *  3️⃣ FINAL ORDER STATUS
+     * -------------------- */
+
+    // ✅ Fully Delivered
+    if (delivered === total && cancelled === 0) {
+        return returned > 0 ? "Returned" : "Delivered";
+    }
+
+    // ❌ Fully Cancelled
+    if (cancelled === total) {
+        return "Cancelled";
+    }
+
+    // ⚠️ Partial cases
+    if (delivered > 0 && cancelled > 0) {
         return "Partially Delivered / Cancelled";
-    if (has("delivered") && !has("cancelled"))
+    }
+
+    if (delivered > 0 && delivered < total) {
         return "Partially Delivered";
-    if (has("cancelled") && !has("delivered"))
+    }
+
+    if (cancelled > 0 && cancelled < total) {
         return "Partially Cancelled";
+    }
 
-    if (has("shipped") || has("out for delivery") || has("in transit"))
-        return "Processing";
+    // 🚚 Shipping in progress
+    if (shipped > 0) {
+        return "Shipped";
+    }
 
+    // 🔄 Default
     return "Processing";
 }
 
@@ -218,8 +306,8 @@ export const adminConfirmOrder = async (req, res) => {
             txOrder.adminConfirmed = true;
             txOrder.orderStatus = "Processing";
             txOrder.isDraft = false;
-            txOrder.trackingHistory = txOrder.trackingHistory || [];
-            txOrder.trackingHistory.push({ status: "Admin Confirmed", timestamp: new Date(), location: `Admin:${adminUser?._id || "system"}` });
+            txOrder.tracking_history = txOrder.tracking_history || [];
+            txOrder.tracking_history.push({ status: "Admin Confirmed", timestamp: new Date(), location: `Admin:${adminUser?._id || "system"}` });
 
             // Clear user's cart
             if (txOrder.user && txOrder.user._id) {
@@ -245,7 +333,7 @@ export const adminConfirmOrder = async (req, res) => {
                     { _id: finalOrder._id },
                     {
                         $push: {
-                            trackingHistory: {
+                            tracking_history: {
                                 status: "Shipment Created",
                                 timestamp: new Date(),
                                 location: "Shiprocket"
@@ -273,7 +361,7 @@ export const adminConfirmOrder = async (req, res) => {
                     { _id: finalOrder._id },
                     {
                         $push: {
-                            trackingHistory: {
+                            tracking_history: {
                                 status: "Shipment Creation Failed",
                                 timestamp: new Date(),
                                 location: "Shiprocket"
@@ -290,7 +378,7 @@ export const adminConfirmOrder = async (req, res) => {
                     { _id: finalOrder._id },
                     {
                         $push: {
-                            trackingHistory: {
+                            tracking_history: {
                                 status: "Shipment Creation Skipped",
                                 timestamp: new Date(),
                                 location: "System"
@@ -310,7 +398,7 @@ export const adminConfirmOrder = async (req, res) => {
                 { _id: finalOrder._id },
                 {
                     $push: {
-                        trackingHistory: {
+                        tracking_history: {
                             status: "Shipment Creation Failed",
                             timestamp: new Date(),
                             location: "Shiprocket"
@@ -441,7 +529,7 @@ export const adminCancelOrder = async (req, res) => {
 
                     // Update local
                     sh.status = "Cancelled";
-                    sh.trackingHistory.push({
+                    sh.tracking_history.push({
                         status: "Cancelled",
                         timestamp: new Date(),
                         location: `Admin:${adminId}`
@@ -473,7 +561,7 @@ export const adminCancelOrder = async (req, res) => {
             txOrder.orderStatus = finalStatus;
 
             // Tracking
-            txOrder.trackingHistory.push({
+            txOrder.tracking_history.push({
                 status: "Cancelled",
                 timestamp: new Date(),
                 location: `Admin:${adminId}`
@@ -696,7 +784,7 @@ export const getAdminOrderTracking = async (req, res) => {
 
                 products,  // ⬅⬅⬅ ADDED PRODUCT DETAILS INSIDE SHIPMENT
 
-                timeline: buildCourierTimeline(s.trackingHistory || [])
+                timeline: buildCourierTimeline(s.tracking_history || [])
             };
         });
 
@@ -706,7 +794,7 @@ export const getAdminOrderTracking = async (req, res) => {
         let mergedTimeline = [];
 
         shipments.forEach((s, i) => {
-            (s.trackingHistory || []).forEach(event => {
+            (s.tracking_history || []).forEach(event => {
                 mergedTimeline.push({
                     shipmentId: s.shipment_id,
                     shipmentLabel: `Shipment ${i + 1}`,
@@ -862,7 +950,7 @@ export const getOrderSummary = async (req, res) => {
                 { status: cancelRegex },
                 { paymentStatus: cancelRegex },
                 { "cancellation.reason": { $exists: true } },
-                { "trackingHistory.status": cancelRegex }
+                { "tracking_history.status": cancelRegex }
             ],
             createdAt: { $gte: currentStart, $lte: currentEnd }
         };
@@ -874,7 +962,7 @@ export const getOrderSummary = async (req, res) => {
                 { status: cancelRegex },
                 { paymentStatus: cancelRegex },
                 { "cancellation.reason": { $exists: true } },
-                { "trackingHistory.status": cancelRegex }
+                { "tracking_history.status": cancelRegex }
             ],
             createdAt: { $gte: prevStart, $lt: prevEnd }
         };
@@ -947,7 +1035,7 @@ export const getOrderById = async (req, res) => {
         // ✅ TIMELINE WITH HUMAN-READABLE SHIPROCKET STATUS
         const timeline = [];
 
-        (order.trackingHistory || [])
+        (order.tracking_history || [])
             .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
             .forEach(entry => {
                 const cleanStatus =
@@ -1148,7 +1236,7 @@ export const updateOrderStatus = async (req, res) => {
         // leave `Completed` for payment/fulfillment logic only
 
         // Add tracking history entry
-        order.trackingHistory.push({
+        order.tracking_history.push({
             status,
             location: location || "System Update",
             timestamp: new Date()

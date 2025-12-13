@@ -7,7 +7,12 @@ import {
     cancelShipmentReturn,
     markShipmentReturnReceived,
     approveShipmentReturn,
-    rejectShipmentReturn
+    rejectShipmentReturn,
+    getAllReturnsForAdmin,
+    getReturnsSummary,
+    getReturnDetails,
+    getReturnsAnalytics,
+
 } from "../controllers/returnController.js";
 
 import { protect, isAdmin } from "../middlewares/authMiddleware.js";
@@ -47,6 +52,35 @@ router.put("/cancel/:shipment_id/:returnId", protect, cancelShipmentReturn);
 */
 
 // ⭐ Admin approves shipment return & creates Shiprocket return order
+
+router.get(
+    "/admin/summary",
+    protect,
+    isAdmin,
+    getReturnsSummary
+),
+router.get(
+    "/admin/analytics",
+    protect,
+    isAdmin,
+    getReturnsAnalytics
+),
+router.get(
+    "/admin/details/:returnId",
+    protect,
+    isAdmin,
+    getReturnDetails
+)
+
+
+
+
+router.get(
+    "/admin/returns",
+    protect,
+    isAdmin,
+    getAllReturnsForAdmin
+)
 router.put(
     "/admin/approve/:shipment_id/:returnId",
     protect,

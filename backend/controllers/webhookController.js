@@ -568,8 +568,8 @@ export const shiprocketWebhook = async (req, res) => {
         }
 
         // 4️⃣ Append to tracking history
-        if (!order.trackingHistory) order.trackingHistory = [];
-        order.trackingHistory.push({
+        if (!order.tracking_history) order.tracking_history = [];
+        order.tracking_history.push({
             status: current_status || "Unknown",
             timestamp: new Date(),
             location: current_status_location || null

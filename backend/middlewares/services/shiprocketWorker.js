@@ -42,8 +42,8 @@ shiprocketQueue.process(async (job, done) => {
         // ✅ Update order with shipment info
         order.shipment = result.shipmentDetails;
         order.orderStatus = result.shipmentDetails.status || "Shipment Created";
-        order.trackingHistory = order.trackingHistory || [];
-        order.trackingHistory.push({
+        order.tracking_history = order.tracking_history || [];
+        order.tracking_history.push({
             status: "Shipment Created",
             timestamp: new Date(),
             location: "Shiprocket",
@@ -78,7 +78,7 @@ shiprocketQueue.on("failed", async (job, err) => {
             { _id: orderId },
             {
                 $push: {
-                    trackingHistory: {
+                    tracking_history: {
                         status: "Shipment Creation Failed (Max Retries)",
                         reason: err.message,
                         timestamp: new Date(),

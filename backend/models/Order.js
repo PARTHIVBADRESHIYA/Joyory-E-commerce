@@ -70,7 +70,7 @@
 //     ],
 
 //     // Return timeline (SR events)
-//     trackingHistory: [
+//     tracking_history: [
 //         {
 //             status: String,
 //             timestamp: Date,
@@ -187,7 +187,7 @@
 //     ],
 
 //     // 🔥 Timeline for forward shipment
-//     trackingHistory: [
+//     tracking_history: [
 //         {
 //             status: String,
 //             timestamp: Date,
@@ -408,15 +408,22 @@
 import mongoose from 'mongoose';
 
 const ShipmentReturnSchema = new mongoose.Schema({
+
+    type: {
+        type: String,
+        enum: ["return", "replace"],
+        required: true
+    },
+
     // Shiprocket IDs
     shiprocket_order_id: { type: String },  // Changed from shiprocketOrderId
     shipment_id: { type: String },          // Changed from return_shipment_id
-    
+
     // AWB & tracking
     awb_code: { type: String },
     courier_name: { type: String },
     tracking_url: { type: String },
-    
+
     // Status - FIXED: Removed "approved" from enum
     status: {
         type: String,
@@ -471,7 +478,7 @@ const ShipmentReturnSchema = new mongoose.Schema({
     ],
 
     // Tracking timeline
-    tracking_history: [{  // Changed from trackingHistory
+    tracking_history: [{  // Changed from tracking_history
         status: String,
         timestamp: Date,
         location: String,
@@ -505,7 +512,7 @@ const ShipmentReturnSchema = new mongoose.Schema({
         action: String,
         timestamp: { type: Date, default: Date.now },
         performedBy: { type: mongoose.Schema.Types.ObjectId },
-        performedByModel: { type: String, enum: ["User", "Admin"] },
+        performedByModel: { type: String, enum: ["User", "Admin", "System"] },
         notes: String,
         metadata: Object
     }],
@@ -513,25 +520,25 @@ const ShipmentReturnSchema = new mongoose.Schema({
     createdAt: { type: Date, default: Date.now },
     requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     requestedAt: Date,
-    reason: String,
+    reason: { type: String, enum: ["DAMAGED", "WRONG_ITEM", "EXPIRED", "QUALITY_ISSUE", "SIZE_ISSUE", "NO_LONGER_NEEDED", "OTHER"], required: true },
     description: String
 }, { timestamps: true });
 
 const ShipmentSchema = new mongoose.Schema({
     type: { type: String, enum: ["forward"], default: "forward" },
-    
+
     // Shiprocket IDs
     shiprocket_order_id: String,
     shipment_id: String,
-    
+
     // AWB & tracking
     awb_code: String,
     courier_name: String,
     tracking_url: String,
-    
+
     // Status
-    status: { 
-        type: String, 
+    status: {
+        type: String,
         default: "Created",
         enum: [
             "Created",
@@ -575,7 +582,6 @@ const ShipmentSchema = new mongoose.Schema({
     returns: [ShipmentReturnSchema]
 
 });
-
 
 const RefundSchema = new mongoose.Schema({
     amount: Number,
