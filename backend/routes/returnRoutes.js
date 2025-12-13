@@ -54,36 +54,29 @@ router.put("/cancel/:shipment_id/:returnId", protect, cancelShipmentReturn);
 // ⭐ Admin approves shipment return & creates Shiprocket return order
 
 router.get(
-    "/admin/summary",
-    protect,
-    isAdmin,
+    "/admin/summary", isAdmin,
     getReturnsSummary
 ),
-router.get(
-    "/admin/analytics",
-    protect,
-    isAdmin,
-    getReturnsAnalytics
-),
-router.get(
-    "/admin/details/:returnId",
-    protect,
-    isAdmin,
-    getReturnDetails
-)
+    router.get(
+        "/admin/analytics", isAdmin,
+        getReturnsAnalytics
+    ),
+    router.get(
+        "/admin/details/:returnId",
+        isAdmin,
+        getReturnDetails
+    )
 
 
 
 
 router.get(
     "/admin/returns",
-    protect,
     isAdmin,
     getAllReturnsForAdmin
 )
 router.put(
     "/admin/approve/:shipment_id/:returnId",
-    protect,
     isAdmin,
     approveShipmentReturn
 );
@@ -91,7 +84,6 @@ router.put(
 // ❌ Admin rejects shipment return
 router.put(
     "/admin/reject/:shipment_id/:returnId",
-    protect,
     isAdmin,
     rejectShipmentReturn
 );
@@ -99,7 +91,6 @@ router.put(
 // Mark shipment return received and trigger refund
 router.put(
     "/admin/mark-received/:shipment_id/:returnId",
-    protect,
     isAdmin,
     markShipmentReturnReceived
 );
