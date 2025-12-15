@@ -6,8 +6,8 @@ import User from '../../models/User.js';
 import { calculateCartSummary } from "../../middlewares/utils/cartPricingHelper.js";
 import axios from "axios";
 import { getShiprocketToken, createShiprocketOrder } from "../../middlewares/services/shiprocket.js"; // helper to fetch token
-import {sendEmail} from "../../middlewares/utils/emailService.js";
-import {cancelShiprocketShipment } from "../../middlewares/services/shiprocket.js";
+import { sendEmail } from "../../middlewares/utils/emailService.js";
+import { cancelShiprocketShipment } from "../../middlewares/services/shiprocket.js";
 
 function formatCourierStatus(raw) {
   const map = {
@@ -870,9 +870,15 @@ export const cancelShipment = async (req, res) => {
 
   try {
     const { orderId, shipment_id } = req.params;
-    const { reason } = req.body;
+    const { reason } = req.body || {};
     const userId = req.user._id;
 
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Cancellation reason is required"
+      });
+    }
     await session.withTransaction(async () => {
       const order = await Order.findById(orderId).session(session);
 
@@ -884,7 +890,9 @@ export const cancelShipment = async (req, res) => {
       // ❌ Cannot cancel shipped shipments
       const blockedStatuses = ["In Transit", "Out for Delivery", "Delivered"];
       if (blockedStatuses.includes(shipment.status))
-        throw new Error(`Shipment already ${shipment.status}`);
+        throw new Error(
+          `Shipment cannot be cancelled because it is already ${shipment.status}`
+        );
 
       // 🚚 Cancel in Shiprocket
       if (shipment.shiprocket_order_id) {
@@ -935,96 +943,78 @@ export const cancelOrder = async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
-    const { orderId, reason } = req.body;
+    const { orderId } = req.params;
+    const { reason } = req.body || {};
     const userId = req.user?._id;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Cancellation reason is required"
+      });
+    }
+
 
     if (!orderId)
       return res.status(400).json({ success: false, message: "orderId is required" });
 
-    const order = await Order.findById(orderId).populate("user");
+    const order = await Order.findById(orderId)
+      .populate("user")
+      .session(session);
 
     if (!order)
       return res.status(404).json({ success: false, message: "Order not found" });
 
-    // ownership check
+    // 🔐 Ownership check
     if (String(order.user._id) !== String(userId) && !req.user?.isAdmin)
-      return res.status(403).json({ success: false, message: "Unauthorized" });
+      return res.status(403).json({ success: false, message: "This is not your order" });
 
-    // prevent duplicate
+    // ❌ Already cancelled
     if (order.orderStatus === "Cancelled")
       return res.status(400).json({ success: false, message: "Order already cancelled" });
 
+    // 🚫 If shipments already created → block
+    if (order.shipments && order.shipments.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Order cannot be cancelled because shipment has already been created."
+      });
+    }
+
     await session.withTransaction(async () => {
-      const txOrder = await Order.findById(orderId).session(session);
+      order.orderStatus = "Cancelled";
+      order.paymentStatus = order.paid ? "refund_requested" : "cancelled";
 
-      if (!txOrder) throw new Error("Order disappeared during transaction");
-
-      let cancelledAnyShipment = false;
-
-      for (const shipment of txOrder.shipments) {
-        const nonCancelable = ["In Transit", "Out for Delivery", "Delivered"];
-
-        if (nonCancelable.includes(shipment.status)) {
-          continue; // skip shipped/delivered shipments
-        }
-
-        // 🚚 Cancel in Shiprocket
-        if (shipment.shiprocket_order_id) {
-          try {
-            await cancelShiprocketShipment(shipment.shiprocket_order_id);
-          } catch (err) {
-            console.error(
-              "Shiprocket cancel failed:",
-              err?.response?.data || err.message
-            );
-          }
-        }
-
-        shipment.status = "Cancelled";
-        shipment.tracking_history.push({
-          status: "Cancelled",
-          timestamp: new Date(),
-          description: "Shipment cancelled via order cancellation",
-        });
-
-        cancelledAnyShipment = true;
-      }
-
-      if (!cancelledAnyShipment)
-        throw new Error("No shipments eligible for cancellation");
-
-      // 🔁 DERIVE ORDER STATUS FROM SHIPMENTS
-      const shipmentStatuses = txOrder.shipments.map(s => s.status);
-
-      if (shipmentStatuses.every(s => s === "Cancelled")) {
-        txOrder.orderStatus = "Cancelled";
-      } else {
-        txOrder.orderStatus = "Partially Cancelled";
-      }
-
-      txOrder.paymentStatus = txOrder.paid
-        ? "refund_requested"
-        : "cancelled";
-
-      txOrder.cancellation = {
+      order.cancellation = {
         cancelledBy: userId,
         reason,
         requestedAt: new Date(),
         allowed: true,
       };
 
-      await txOrder.save({ session });
+      order.tracking_history = order.tracking_history || [];
+      order.tracking_history.push({
+        status: "Order Cancelled",
+        timestamp: new Date(),
+        location: "Customer",
+      });
+
+      await order.save({ session });
     });
 
-    // ✉️ EMAIL (unchanged)
+    // ✉️ EMAIL
     try {
       await sendEmail(
         order.user.email,
         "Your Joyory Order Has Been Cancelled",
         `
           <p>Hi ${order.user.name},</p>
-          <p>Your order <strong>#${order._id}</strong> has been cancelled.</p>
+          <p>Your order <strong>#${order._id}</strong> has been cancelled successfully.</p>
           <p><strong>Reason:</strong> ${reason || "Not specified"}</p>
+          ${order.paid
+          ? "<p>Your refund will be processed shortly.</p>"
+          : ""
+        }
           <p>Thank you,<br/>Team Joyory</p>
         `
       );
@@ -1034,10 +1024,9 @@ export const cancelOrder = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message:
-        order.paid
-          ? "Order cancellation requested. Refund will be processed separately."
-          : "Order cancelled successfully",
+      message: order.paid
+        ? "Order cancelled. Refund will be processed."
+        : "Order cancelled successfully",
     });
 
   } catch (err) {

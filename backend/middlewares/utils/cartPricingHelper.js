@@ -410,7 +410,6 @@ export const calculateCartSummary = async (user, query = {}) => {
       bagMrp,
       totalSavings,
       bagDiscount: round2(bagMrp - bagPayable),
-      autoDiscount: round2(bagMrp - bagPayable),
       couponDiscount: round2(discountFromCoupon),
       referralPointsDiscount: round2(pointsDiscount),
       giftCardDiscount: round2(giftCardDiscount),

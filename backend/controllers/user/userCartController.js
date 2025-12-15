@@ -1757,7 +1757,6 @@ export const getCartSummary = async (req, res) => {
         bagMrp,
         totalSavings,
         bagDiscount: round2(bagMrp - bagPayable),
-        autoDiscount: round2(bagMrp - bagPayable),
         couponDiscount: round2(discountFromCoupon),
         shippingCharge: round2(shippingCharge),
         shippingMessage,

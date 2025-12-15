@@ -1775,6 +1775,26 @@ const isCodAllowed = ({ pincode, amount, user }) => {
     return true;
 };
 
+export const clearUserCart = async (userId, session = null) => {
+    if (!userId) return;
+
+    const update = {
+        $set: {
+            cart: [],
+            cartSubtotal: 0,
+            cartDiscount: 0,
+            cartUpdatedAt: new Date()
+        }
+    };
+
+    if (session) {
+        await User.updateOne({ _id: userId }, update).session(session);
+    } else {
+        await User.updateOne({ _id: userId }, update);
+    }
+};
+
+
 export const isFraudulentCodOrder = async (order, user, shippingAddress) => {
     const { amount } = order || {};
     const userId = user?._id;
@@ -1994,17 +2014,6 @@ export const createRazorpayOrder = async (req, res) => {
 
         await order.save();
 
-        // notify user
-        try {
-            await sendEmail(
-                order.user.email,
-                "Order created — complete payment",
-                `<p>Hi ${order.user.name || "Customer"},</p>
-                <p>Your order <strong>#${order._id}</strong> has been created. Please complete your payment to proceed. After payment, our team will verify availability and confirm shipment.</p>
-                <p>Regards,<br/>Team Joyory Beauty</p>`
-            );
-        } catch (e) { console.warn("Email send failed:", e); }
-
         res.status(200).json({
             success: true,
             message: "✅ Razorpay order created successfully.",
@@ -2141,14 +2150,74 @@ export const verifyRazorpayPayment = async (req, res) => {
 
         await order.save();
 
-        // notify user
+        await clearUserCart(order.user._id);
+
+
         try {
             await sendEmail(
                 order.user.email,
-                "Payment received — awaiting confirmation",
-                `<p>Hi ${order.user.name},</p>
-                 <p>We've captured your payment for order <strong>#${order._id}</strong>. Our team will verify stock and confirm the order soon. You will receive another email when the order is confirmed.</p>
-                 <p>Regards,<br/>Team Joyory Beauty</p>`
+                `Payment Successful! Order #${order.orderNumber || order._id} Confirmed`,
+                `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; }
+                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+                .content { padding: 30px; background: #f9f9f9; }
+                .order-card { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin: 20px 0; }
+                .status-badge { background: #e8f5e9; color: #2e7d32; padding: 8px 16px; border-radius: 20px; display: inline-block; font-weight: bold; }
+                .btn { display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }
+                .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+                .icon { color: #4CAF50; font-size: 20px; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>🎉 Payment Successful!</h1>
+                    <p>Thank you for your order with Joyory Beauty</p>
+                </div>
+                <div class="content">
+                    <h2>Hi ${order.user.name},</h2>
+                    <p>We've successfully received your payment of <strong>₹${order.amount}</strong> for your order.</p>
+                    
+                    <div class="order-card">
+                        <h3>📦 Order Details</h3>
+                        <p><strong>Order ID:</strong> #${order.orderNumber || order._id}</p>
+                        <p><strong>Payment Method:</strong> ${order.paymentMethod}</p>
+                        <p><strong>Transaction ID:</strong> ${order.transactionId}</p>
+                        <p><strong>Date:</strong> ${new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                        
+                        <div style="margin: 20px 0;">
+                            <span class="status-badge">⏳ Awaiting Admin Confirmation</span>
+                            <p style="margin-top: 10px; color: #666;">Our team will verify stock availability and confirm your order within 24 hours.</p>
+                        </div>
+                    </div>
+                    
+                    <p>🔔 <strong>What's Next?</strong></p>
+                    <ul>
+                        <li>We'll send confirmation once order is verified</li>
+                        <li>You'll receive tracking details after dispatch</li>
+                        <li>Estimated delivery: 5-7 business days</li>
+                    </ul>
+                    
+                    <div style="text-align: center;">
+                        <a href="${process.env.FRONTEND_URL}/orders/${order._id}" class="btn">View Order Details</a>
+                    </div>
+                    
+                    <p style="margin-top: 30px;">Need help? <a href="mailto:support@joyorybeauty.com">Contact our support team</a></p>
+                </div>
+                <div class="footer">
+                    <p>Joyory Beauty Pvt. Ltd.<br>
+                    ${process.env.COMPANY_ADDRESS || ''}</p>
+                    <p>📞 ${process.env.COMPANY_PHONE || 'Customer Care'}</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        `
             );
         } catch (e) { console.warn("Email failed:", e); }
 
@@ -2182,11 +2251,66 @@ export const createCodOrder = async (req, res) => {
             // Send warning email to the user
             await sendEmail(
                 order.user.email,
-                "⚠️ COD Order Rejected (Fraudulent Activity Detected)",
-                `<p>Hi ${order.user.name},</p>
-                <p>Your Cash on Delivery order <strong>#${order._id}</strong> has been rejected because: <em>${fraudCheck.reason}</em>.</p>
-                <p>Please use prepaid payment for secure delivery.</p>
-                <p>Regards,<br/>Team Joyory Beauty</p>`
+                `Important: Your COD Order #${order.orderNumber || order._id} Requires Attention`,
+                `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { padding: 30px; background: #f9f9f9; }
+            .alert-box { background: #fff3cd; border-left: 4px solid #ffc107; padding: 20px; margin: 20px 0; border-radius: 5px; }
+            .btn-primary { display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-decoration: none; border-radius: 5px; }
+            .btn-secondary { display: inline-block; padding: 12px 30px; background: #6c757d; color: white; text-decoration: none; border-radius: 5px; margin-left: 10px; }
+            .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>⚠️ COD Order Update</h1>
+                <p>Action Required for Order #${order.orderNumber || order._id}</p>
+            </div>
+            <div class="content">
+                <h2>Hi ${order.user.name},</h2>
+                <p>We noticed your Cash on Delivery request for order <strong>#${order.orderNumber || order._id}</strong>.</p>
+                
+                <div class="alert-box">
+                    <h3 style="color: #856404;">🛑 Payment Method Update Required</h3>
+                    <p>Due to security measures, COD is not available for this order.</p>
+                    <p><strong>Reason:</strong> ${fraudCheck.reason}</p>
+                </div>
+                
+                <div style="background: white; padding: 25px; border-radius: 10px; margin: 20px 0;">
+                    <h3>🎁 Switch to Prepaid & Get Benefits!</h3>
+                    <p>Complete your order with prepaid payment and enjoy:</p>
+                    <ul>
+                        <li>✅ Faster processing & dispatch</li>
+                        <li>✅ Additional 5% discount on your order</li>
+                        <li>✅ Priority customer support</li>
+                        <li>✅ Guaranteed delivery slot</li>
+                    </ul>
+                </div>
+                
+                <p><strong>Order Amount:</strong> ₹${order.amount}</p>
+                
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="${process.env.FRONTEND_URL}/checkout/payment?orderId=${order._id}" class="btn-primary">Switch to Prepaid Payment</a>
+                    <a href="${process.env.FRONTEND_URL}/help" class="btn-secondary">Need Help?</a>
+                </div>
+                
+                <p style="color: #666;">Your order will be reserved for the next 2 hours. Complete payment to proceed with delivery.</p>
+            </div>
+            <div class="footer">
+                <p>For immediate assistance, call us at ${process.env.COMPANY_PHONE || 'our helpline'}</p>
+                <p>Joyory Beauty - Safe & Secure Shopping</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    `
             );
 
             return res.status(400).json({
@@ -2234,11 +2358,66 @@ export const confirmCodOrder = async (req, res) => {
         if (fraudCheck.isFraud) {
             await sendEmail(
                 order.user.email,
-                "⚠️ COD Order Blocked (Fraud Risk)",
-                `<p>Hi ${order.user.name},</p>
-                <p>Unfortunately we could not proceed with your order <strong>#${order._id}</strong> due to:</p>
-                <p><em>${fraudCheck.reason}</em>.</p>
-                <p>Please try prepaid payment to confirm delivery.</p>`
+                `Important: Your COD Order #${order.orderNumber || order._id} Requires Attention`,
+                `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { padding: 30px; background: #f9f9f9; }
+            .alert-box { background: #fff3cd; border-left: 4px solid #ffc107; padding: 20px; margin: 20px 0; border-radius: 5px; }
+            .btn-primary { display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-decoration: none; border-radius: 5px; }
+            .btn-secondary { display: inline-block; padding: 12px 30px; background: #6c757d; color: white; text-decoration: none; border-radius: 5px; margin-left: 10px; }
+            .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>⚠️ COD Order Update</h1>
+                <p>Action Required for Order #${order.orderNumber || order._id}</p>
+            </div>
+            <div class="content">
+                <h2>Hi ${order.user.name},</h2>
+                <p>We noticed your Cash on Delivery request for order <strong>#${order.orderNumber || order._id}</strong>.</p>
+                
+                <div class="alert-box">
+                    <h3 style="color: #856404;">🛑 Payment Method Update Required</h3>
+                    <p>Due to security measures, COD is not available for this order.</p>
+                    <p><strong>Reason:</strong> ${fraudCheck.reason}</p>
+                </div>
+                
+                <div style="background: white; padding: 25px; border-radius: 10px; margin: 20px 0;">
+                    <h3>🎁 Switch to Prepaid & Get Benefits!</h3>
+                    <p>Complete your order with prepaid payment and enjoy:</p>
+                    <ul>
+                        <li>✅ Faster processing & dispatch</li>
+                        <li>✅ Additional 5% discount on your order</li>
+                        <li>✅ Priority customer support</li>
+                        <li>✅ Guaranteed delivery slot</li>
+                    </ul>
+                </div>
+                
+                <p><strong>Order Amount:</strong> ₹${order.amount}</p>
+                
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="${process.env.FRONTEND_URL}/checkout/payment?orderId=${order._id}" class="btn-primary">Switch to Prepaid Payment</a>
+                    <a href="${process.env.FRONTEND_URL}/help" class="btn-secondary">Need Help?</a>
+                </div>
+                
+                <p style="color: #666;">Your order will be reserved for the next 2 hours. Complete payment to proceed with delivery.</p>
+            </div>
+            <div class="footer">
+                <p>For immediate assistance, call us at ${process.env.COMPANY_PHONE || 'our helpline'}</p>
+                <p>Joyory Beauty - Safe & Secure Shopping</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    `
             );
             return res.status(400).json({ success: false, message: "COD denied: " + fraudCheck.reason });
         }
@@ -2326,13 +2505,96 @@ export const confirmCodOrder = async (req, res) => {
 
         await order.save();
 
-        // notify user
+        await clearUserCart(order.user._id);
+
         await sendEmail(
             order.user.email,
-            "COD Request Received — Awaiting Confirmation",
-            `<p>Hi ${order.user.name},</p>
-             <p>Your COD request for order <strong>#${order._id}</strong> has been received. 
-             Our team will verify stock and confirm the order soon.</p>`
+            `COD Order #${order.orderNumber || order._id} Received Successfully!`,
+            `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { padding: 30px; background: #f9f9f9; }
+            .order-summary { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+            .cod-badge { background: #fff3e0; color: #e65100; padding: 8px 16px; border-radius: 20px; display: inline-block; font-weight: bold; border: 2px dashed #ff9800; }
+            .steps { display: flex; justify-content: space-between; margin: 30px 0; }
+            .step { text-align: center; flex: 1; padding: 15px; }
+            .step-number { background: #4CAF50; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 10px; }
+            .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>📦 COD Order Confirmed!</h1>
+                <p>Pay when your order arrives at your doorstep</p>
+            </div>
+            <div class="content">
+                <h2>Hi ${order.user.name},</h2>
+                <p>Great news! Your Cash on Delivery order has been received successfully.</p>
+                
+                <div class="order-summary">
+                    <h3>Order Summary</h3>
+                    <p><strong>Order ID:</strong> #${order.orderNumber || order._id}</p>
+                    <p><strong>Order Amount:</strong> ₹${order.amount} (Pay on Delivery)</p>
+                    <p><strong>Items:</strong> ${order.products?.length || 0} product(s)</p>
+                    
+                    <div style="margin: 20px 0;">
+                        <span class="cod-badge">💰 Cash on Delivery</span>
+                    </div>
+                    
+                    <p><strong>Delivery Address:</strong><br>
+                    ${order.shippingAddress?.name || ''}<br>
+                    ${order.shippingAddress?.addressLine1 || ''}<br>
+                    ${order.shippingAddress?.city || ''}, ${order.shippingAddress?.state || ''} - ${order.shippingAddress?.pincode || ''}
+                    </p>
+                </div>
+                
+                <h3 style="margin-top: 30px;">📋 Next Steps</h3>
+                <div class="steps">
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <strong>Order Verification</strong>
+                        <p>Our team verifies stock availability</p>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <strong>Dispatch</strong>
+                        <p>Order packed & shipped</p>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <strong>Delivery</strong>
+                        <p>Pay when order arrives</p>
+                    </div>
+                </div>
+                
+                <div style="background: #e8f5e9; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                    <h4>💡 Important Notes:</h4>
+                    <ul>
+                        <li>Please keep exact change ready for delivery</li>
+                        <li>Our delivery executive will call before arrival</li>
+                        <li>Check products before making payment</li>
+                        <li>Contact us within 48 hours for any issues</li>
+                    </ul>
+                </div>
+                
+                <div style="text-align: center; margin-top: 30px;">
+                    <a href="${process.env.FRONTEND_URL}/orders/${order._id}" style="display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; text-decoration: none; border-radius: 5px;">Track Your Order</a>
+                </div>
+            </div>
+            <div class="footer">
+                <p>Questions? Email us at support@joyorybeauty.com or call ${process.env.COMPANY_PHONE || ''}</p>
+                <p>© ${new Date().getFullYear()} Joyory Beauty. All rights reserved.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    `
         );
 
         return res.status(200).json({
@@ -2514,6 +2776,9 @@ export const createWalletPayment = async (req, res) => {
             if (paymentDoc) order.paymentId = paymentDoc._id;
 
             await order.save({ session });
+
+            await clearUserCart(order.user._id, session);
+
         });
 
         const updated = await Order.findById(orderId)
@@ -2522,10 +2787,76 @@ export const createWalletPayment = async (req, res) => {
 
         await sendEmail(
             updated.user.email,
-            "Wallet Payment Received — Awaiting Confirmation",
-            `<p>Hi ${updated.user.name},</p>
-             <p>Your wallet payment for order <strong>#${updated._id}</strong> was successful. 
-             Our team will verify stock and confirm soon.</p>`
+            `🎯 Wallet Payment Successful! Order #${updated.orderNumber || updated._id}`,
+            `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #9c27b0 0%, #673ab7 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { padding: 30px; background: #f9f9f9; }
+            .wallet-card { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin: 20px 0; }
+            .points-used { background: #e1bee7; color: #4a148c; padding: 10px 20px; border-radius: 10px; margin: 15px 0; }
+            .benefits { background: #f3e5f5; padding: 20px; border-radius: 10px; margin: 20px 0; }
+            .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>💳 Wallet Payment Complete!</h1>
+                <p>You've successfully used your Joyory Beauty Wallet</p>
+            </div>
+            <div class="content">
+                <h2>Hi ${updated.user.name},</h2>
+                <p>Smart choice! Your wallet payment for order <strong>#${updated.orderNumber || updated._id}</strong> has been processed successfully.</p>
+                
+                <div class="wallet-card">
+                    <h3>💰 Payment Summary</h3>
+                    <p><strong>Total Order Value:</strong> ₹${updated.amount}</p>
+                    <p><strong>Payment Method:</strong> Joyory Wallet</p>
+                    <p><strong>Transaction ID:</strong> ${updated.transactionId}</p>
+                    
+                    ${updated.pointsUsed > 0 ? `
+                    <div class="points-used">
+                        <p>🎁 <strong>Reward Points Used:</strong> ${updated.pointsUsed} points</p>
+                        <p>💰 <strong>Points Value:</strong> ₹${updated.pointsDiscount || 0}</p>
+                    </div>
+                    ` : ''}
+                    
+                    <p style="color: #4CAF50; font-weight: bold;">✅ Payment Status: Completed</p>
+                </div>
+                
+                <div class="benefits">
+                    <h4>🌟 Wallet Benefits You Enjoyed:</h4>
+                    <ul>
+                        <li>Instant payment processing</li>
+                        <li>No additional payment charges</li>
+                        <li>Secure transaction with rewards</li>
+                        <li>Faster order processing</li>
+                    </ul>
+                </div>
+                
+                <div style="background: #e8f5e9; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                    <h4>📈 Your Wallet Status:</h4>
+                    <p>Keep earning rewards on every purchase! Visit your wallet to check balance and rewards.</p>
+                    <a href="${process.env.FRONTEND_URL}/account/wallet" style="color: #9c27b0; font-weight: bold;">View Wallet Balance →</a>
+                </div>
+                
+                <div style="text-align: center;">
+                    <a href="${process.env.FRONTEND_URL}/orders/${updated._id}" style="display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #9c27b0 0%, #673ab7 100%); color: white; text-decoration: none; border-radius: 5px;">View Order Details</a>
+                </div>
+            </div>
+            <div class="footer">
+                <p>Thank you for using Joyory Beauty Wallet!</p>
+                <p>Earn 5% cashback on every prepaid order</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    `
         );
 
         return res.json({
@@ -2676,6 +3007,10 @@ export const createGiftCardPayment = async (req, res) => {
             if (paymentDoc) order.paymentId = paymentDoc._id;
 
             await order.save({ session });
+
+            await clearUserCart(order.user._id, session);
+
+
         });
 
         const updated = await Order.findById(orderId)
@@ -2684,10 +3019,74 @@ export const createGiftCardPayment = async (req, res) => {
 
         await sendEmail(
             updated.user.email,
-            "Gift Card Payment Received — Awaiting Confirmation",
-            `<p>Hi ${updated.user.name},</p>
-             <p>Your gift card payment for order <strong>#${updated._id}</strong> was successful. 
-             Our team will verify stock and confirm soon.</p>`
+            `🎁 Gift Card Payment Successful! Order #${updated.orderNumber || updated._id}`,
+            `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #ff6b6b 0%, #ff8e53 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { padding: 30px; background: #f9f9f9; }
+            .gift-card-box { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 2px dashed #ff6b6b; }
+            .balance-info { background: #ffebee; padding: 15px; border-radius: 10px; margin: 15px 0; }
+            .share-box { background: #f3e5f5; padding: 20px; border-radius: 10px; margin: 20px 0; text-align: center; }
+            .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🎁 Gift Card Payment Success!</h1>
+                <p>The perfect way to treat yourself or share joy!</p>
+            </div>
+            <div class="content">
+                <h2>Hi ${updated.user.name},</h2>
+                <p>You've successfully redeemed a Joyory Beauty Gift Card for your order. What a lovely way to shop!</p>
+                
+                <div class="gift-card-box">
+                    <h3>💝 Gift Card Details</h3>
+                    <p><strong>Order ID:</strong> #${updated.orderNumber || updated._id}</p>
+                    <p><strong>Gift Card Used:</strong> ${order.giftCardApplied?.code || 'Joyory Gift Card'}</p>
+                    <p><strong>Amount Redeemed:</strong> ₹${order.giftCardDiscount || updated.amount}</p>
+                    <p><strong>Payment Status:</strong> <span style="color: #4CAF50; font-weight: bold;">✅ Fully Paid with Gift Card</span></p>
+                    
+                    <div class="balance-info">
+                        <h4>💰 Remaining Balance:</h4>
+                        <p>Check your gift card balance for future purchases or share with loved ones!</p>
+                        <a href="${process.env.FRONTEND_URL}/gift-cards/balance" style="color: #ff6b6b; font-weight: bold;">Check Gift Card Balance →</a>
+                    </div>
+                </div>
+                
+                <div class="share-box">
+                    <h4>🎉 Spread the Joy!</h4>
+                    <p>Loved shopping with a gift card? Share the joy with friends and family!</p>
+                    <a href="${process.env.FRONTEND_URL}/gift-cards" style="display: inline-block; padding: 10px 20px; background: #ff6b6b; color: white; text-decoration: none; border-radius: 5px; margin-top: 10px;">Send a Gift Card</a>
+                </div>
+                
+                <div style="background: #e8f5e9; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                    <h4>📦 Your Order Status:</h4>
+                    <p>Your order is now being processed. You'll receive:</p>
+                    <ul>
+                        <li>Order confirmation within 24 hours</li>
+                        <li>Shipping updates via SMS & email</li>
+                        <li>Delivery in 5-7 business days</li>
+                    </ul>
+                </div>
+                
+                <div style="text-align: center;">
+                    <a href="${process.env.FRONTEND_URL}/orders/${updated._id}" style="display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #ff6b6b 0%, #ff8e53 100%); color: white; text-decoration: none; border-radius: 5px;">Track Your Order</a>
+                </div>
+            </div>
+            <div class="footer">
+                <p>Gift Cards never expire! Share beauty, spread joy.</p>
+                <p>Joyory Beauty - Where every purchase is special</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    `
         );
 
         return res.json({
