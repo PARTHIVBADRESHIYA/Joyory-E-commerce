@@ -11,7 +11,9 @@ import {
     getUserOrders,
     initiateOrderFromCart,
     getOrderTracking,
-    getShipmentDetails
+    getShipmentDetails,
+    cancelShipment,
+    cancelOrder
 } from '../../controllers/user/userOrderController.js';
 
 import { protect, optionalAuth, guestSession } from '../../middlewares/authMiddleware.js';
@@ -36,5 +38,9 @@ router.get('/orders', protect, getUserOrders);
 router.get("/tracking/:id", protect, getOrderTracking);
 
 router.get("/shipment/:shipment_id", protect, getShipmentDetails);
+
+router.put("/shipment/cancel/:shipment_id", protect, cancelShipment);
+
+router.put("/cancel/:orderId", protect, cancelOrder);
 
 export default router;

@@ -9,7 +9,6 @@ import { applyPromotions } from "../../middlewares/services/promotionEngine.js";
 import GiftCard from "../../models/GiftCard.js";
 import { calculateVariantPrices } from "../../middlewares/services/promotionHelper.js";
 import Promotion from "../../models/Promotion.js";
-import { getPseudoVariant } from "../../middlewares/utils/recommendationService.js";
 import { enrichProductWithStockAndOptions, enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
 import { getRedis } from "../../middlewares/utils/redis.js";
 import crypto from "crypto";

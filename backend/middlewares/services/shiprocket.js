@@ -431,6 +431,8 @@ async function checkSingleShiprocketOrderAndSave(srOrderId) {
 
 //     return { shipments: successfulShipments, failed };
 // }
+
+
 export async function createShiprocketOrder(order) {
     if (!order) throw new Error("Order missing");
 
@@ -471,15 +473,24 @@ export async function createShiprocketOrder(order) {
         if (!orderItem) continue;
 
         for (const a of allocs) {
-            const wh = a.warehouseCode || process.env.DEFAULT_PICKUP_LOCATION || "DEFAULT_WH";
+            const wh = a.warehouseCode || "DEFAULT_WH";
             if (!shipmentsByWarehouse[wh]) shipmentsByWarehouse[wh] = [];
 
-            shipmentsByWarehouse[wh].push({
-                index: idx,
-                product: orderItem,
-                qty: a.qty
-            });
+            const existing = shipmentsByWarehouse[wh].find(
+                x => String(x.product._id) === String(orderItem._id)
+            );
+
+            if (existing) {
+                existing.qty += a.qty;   // ✅ MERGE
+            } else {
+                shipmentsByWarehouse[wh].push({
+                    index: idx,
+                    product: orderItem,
+                    qty: a.qty
+                });
+            }
         }
+
     }
 
     let failed = [];
@@ -592,12 +603,16 @@ export async function createShiprocketOrder(order) {
     }
 
     const successfulShipments = shipmentResults.filter(s => s.success).map(s => s.doc);
+    const shipmentIds = successfulShipments.map(s => s.shipment_id);
 
     // 🚀 FIX APPLIED HERE — removed invalid top-level tracking_history push
     if (successfulShipments.length > 0) {
         try {
             const updateResult = await Order.updateOne(
-                { _id: order._id },
+                {
+                    _id: order._id,
+                    "shipments.shipment_id": { $nin: shipmentIds } // ✅ correct
+                },
                 {
                     $push: { shipments: { $each: successfulShipments } }, // ← ONLY VALID PUSH
                     $set: {
@@ -629,6 +644,207 @@ export async function createShiprocketOrder(order) {
 
     return { shipments: successfulShipments, failed };
 }
+
+//perfect all the things just problem of that ,.. ---> two entries of same shipment in database 
+
+// export async function createShiprocketOrder(order) {
+//     if (!order) throw new Error("Order missing");
+
+//     console.log("🔥 createShiprocketOrder → order:", order._id);
+
+//     const token = await getShiprocketToken();
+
+//     // validate shipping address
+//     const SA = order.shippingAddress || {};
+//     const shippingAddress = {
+//         addressLine1: SA.addressLine1 || SA.address || "",
+//         city: SA.city || SA.town || "",
+//         pincode: SA.pincode ? String(SA.pincode) : "",
+//         state: SA.state || SA.region || "",
+//         phone: SA.phone || order.user?.phone || "0000000000",
+//         email: order.user?.email || "guest@example.com",
+//         name: order.customerName || order.user?.name || "Customer"
+//     };
+
+//     if (!shippingAddress.addressLine1 || !shippingAddress.city || !shippingAddress.pincode || !shippingAddress.state) {
+//         throw new Error("Invalid shipping address");
+//     }
+
+//     // 1) warehouse allocation
+//     let allocationMap;
+//     try {
+//         allocationMap = await allocateWarehousesForOrder(order);
+//     } catch (err) {
+//         console.error("Allocation failed:", err);
+//         throw err;
+//     }
+
+//     // 2) group items per warehouse
+//     const shipmentsByWarehouse = {};
+//     for (const [idxStr, allocs] of Object.entries(allocationMap)) {
+//         const idx = Number(idxStr);
+//         const orderItem = order.products[idx];
+//         if (!orderItem) continue;
+
+//         for (const a of allocs) {
+//             const wh = a.warehouseCode || process.env.DEFAULT_PICKUP_LOCATION || "DEFAULT_WH";
+//             if (!shipmentsByWarehouse[wh]) shipmentsByWarehouse[wh] = [];
+
+//             shipmentsByWarehouse[wh].push({
+//                 index: idx,
+//                 product: orderItem,
+//                 qty: a.qty
+//             });
+//         }
+//     }
+
+//     let failed = [];
+//     const shipmentResults = [];
+
+//     // 3) Shiprocket order creation per warehouse
+//     for (const [warehouseCode, items] of Object.entries(shipmentsByWarehouse)) {
+//         const pickup_location = process.env.SHIPROCKET_PICKUP || "Primary";
+//         const pickup_address_id = process.env.SHIPROCKET_PICKUP_ADDRESS_ID || null;
+
+//         // Build order_items
+//         const order_items = [];
+//         const usedSkus = new Set();
+
+//         for (const it of items) {
+//             const p = it.product;
+//             const sku = p.variant?.sku || p.productId?.variant?.sku || `NO-SKU-${p.productId}`;
+
+//             if (!usedSkus.has(sku + String(it.qty))) {
+//                 usedSkus.add(sku + String(it.qty));
+//                 order_items.push({
+//                     name: p.productId?.name || p.name || "Product",
+//                     sku,
+//                     units: it.qty,
+//                     selling_price: p.price || 0
+//                 });
+//             }
+//         }
+
+//         const shipmentData = {
+//             order_id: `${order.orderId}-${warehouseCode}`,
+//             order_date: new Date(order.createdAt || Date.now()).toISOString().slice(0, 19).replace("T", " "),
+//             pickup_location,
+//             pickup_address_id,
+//             billing_customer_name: shippingAddress.name,
+//             billing_last_name: "",
+//             billing_address: shippingAddress.addressLine1,
+//             billing_city: shippingAddress.city,
+//             billing_pincode: shippingAddress.pincode,
+//             billing_state: shippingAddress.state,
+//             billing_country: "India",
+//             billing_email: shippingAddress.email,
+//             billing_phone: shippingAddress.phone,
+//             shipping_is_billing: true,
+//             order_items,
+//             payment_method: order.paymentMethod === "COD" ? "COD" : "Prepaid",
+//             sub_total: order_items.reduce((s, it) => s + it.selling_price * it.units, 0),
+//             length: 10,
+//             breadth: 10,
+//             height: 10,
+//             weight: Math.max(0.1, order_items.length * 0.2)
+//         };
+
+//         try {
+//             const orderRes = await shiprocketRequest(
+//                 "https://apiv2.shiprocket.in/v1/external/orders/create/adhoc",
+//                 "post",
+//                 shipmentData,
+//                 token
+//             );
+
+//             console.log("🔥 RAW SHIPROCKET RESPONSE:", orderRes.data);
+
+//             const shiprocketOrderId = orderRes.data?.id || orderRes.data?.order_id || null;
+//             const shipmentId = orderRes.data?.shipment_id || orderRes.data?.shipmentId || null;
+
+//             if (!shipmentId) {
+//                 failed.push({ warehouseCode, error: "No shipment_id returned" });
+//                 continue;
+//             }
+
+//             console.log(`✅ Shiprocket order created: ${shipmentId}`);
+
+//             const tracking_history = [
+//                 {
+//                     status: "Order Confirmed",
+//                     timestamp: new Date(),
+//                     location: "Shiprocket",
+//                     description: "Shipment created - AWB assignment in progress"
+//                 }
+//             ];
+
+//             const shipmentDoc = {
+//                 _id: new mongoose.Types.ObjectId(),
+//                 warehouseCode,
+//                 pickup_location,
+//                 pickup_address_id,
+//                 shiprocket_order_id: shiprocketOrderId,
+//                 shipment_id: shipmentId,
+//                 awb_code: null,
+//                 courier_name: null,
+//                 tracking_url: null,
+//                 status: "Awaiting Pickup",
+//                 assignedAt: new Date(),
+//                 expected_delivery: calculateExpectedDelivery(),
+//                 products: items.map(it => ({
+//                     productId: it.product.productId._id || it.product.productId,
+//                     quantity: it.qty,
+//                     price: it.product.price,
+//                     variant: it.product.variant
+//                 })),
+//                 tracking_history
+//             };
+
+//             shipmentResults.push({ success: true, doc: shipmentDoc });
+
+//         } catch (err) {
+//             failed.push({ warehouseCode, error: err.message });
+//         }
+//     }
+
+//     const successfulShipments = shipmentResults.filter(s => s.success).map(s => s.doc);
+
+//     // 🚀 FIX APPLIED HERE — removed invalid top-level tracking_history push
+//     if (successfulShipments.length > 0) {
+//         try {
+//             const updateResult = await Order.updateOne(
+//                 { _id: order._id },
+//                 {
+//                     $push: { shipments: { $each: successfulShipments } }, // ← ONLY VALID PUSH
+//                     $set: {
+//                         primary_shipment: successfulShipments[0]?._id || null,
+//                         orderStatus: "Processing"
+//                     }
+//                 }
+//             );
+
+//             // immediate AWB check
+//             try {
+//                 const srIds = successfulShipments.map(s => s.shiprocket_order_id).filter(Boolean);
+//                 for (const srId of srIds) {
+//                     await checkSingleShiprocketOrderAndSave(srId);
+//                 }
+//             } catch (e) {
+//                 console.warn("Immediate AWB refresh failed:", e);
+//             }
+
+//             console.log("✅ Shipments saved to DB:", updateResult);
+
+//         } catch (dbError) {
+//             console.error("❌ DB UPDATE FAILED:", dbError);
+//             throw new Error("Failed to save shipments to database");
+//         }
+//     } else {
+//         throw new Error("All shipment creations failed");
+//     }
+
+//     return { shipments: successfulShipments, failed };
+// }
 
 function calculateExpectedDelivery() {
     const deliveryDate = new Date();

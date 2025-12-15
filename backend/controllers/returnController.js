@@ -1508,32 +1508,134 @@ export const markShipmentReturnReceived = async (req, res) => {
     }
 };
 
+// export const rejectShipmentReturn = async (req, res) => {
+//     try {
+//         const { shipment_id, returnId } = req.params;
+//         const { reason } = req.body;
+
+//         const order = await Order.findOne({ "shipments.shipment_id": shipment_id }).populate("user");
+//         if (!order) return res.status(404).json({ success: false, message: "Shipment not found" });
+
+//         const shipment = order.shipments.find(s => s.shipment_id === shipment_id);
+//         if (!shipment) return res.status(404).json({ success: false, message: "Shipment not found" });
+
+//         const ret = shipment.returns.id(returnId);
+//         if (!ret) return res.status(404).json({ success: false, message: "Return not found" });
+
+//         if (ret.overallStatus !== "requested") {
+//             return res.status(400).json({ success: false, message: "Already processed" });
+//         }
+
+//         ret.overallStatus = "rejected";
+//         ret.adminRejectionReason = reason;
+
+//         if (!ret.auditTrail) ret.auditTrail = [];
+//         if (!ret.timeline) ret.timeline = [];
+
+//         ret.auditTrail.push({
+//             status: "rejected",
+//             action: "admin_rejected",
+//             notes: reason,
+//             performedBy: req.admin?._id,
+//             performedByModel: "Admin",
+//             timestamp: new Date()
+//         });
+
+//         ret.timeline.push({
+//             status: "rejected",
+//             timestamp: new Date(),
+//             location: "Admin",
+//             description: reason
+//         });
+
+//         await order.save();
+
+//         if (order.user?.email) {
+//             await sendEmail(
+//                 order.user.email,
+//                 `Return Rejected`,
+//                 `<p>Your return request for Shipment #${shipment.shipment_id} has been rejected.</p><p>Reason: ${reason}</p>`
+//             );
+//         }
+
+//         return res.json({ success: true, message: "Return rejected" });
+
+//     } catch (err) {
+//         return res.status(500).json({ success: false, message: err.message });
+//     }
+// };
+
+
+
+
+// ===== ADMIN RETURNS DASHBOARD ENDPOINTS =====
 export const rejectShipmentReturn = async (req, res) => {
     try {
         const { shipment_id, returnId } = req.params;
         const { reason } = req.body;
 
-        const order = await Order.findOne({ "shipments.shipment_id": shipment_id }).populate("user");
-        if (!order) return res.status(404).json({ success: false, message: "Shipment not found" });
-
-        const shipment = order.shipments.find(s => s.shipment_id === shipment_id);
-        if (!shipment) return res.status(404).json({ success: false, message: "Shipment not found" });
-
-        const ret = shipment.returns.id(returnId);
-        if (!ret) return res.status(404).json({ success: false, message: "Return not found" });
-
-        if (ret.overallStatus !== "requested") {
-            return res.status(400).json({ success: false, message: "Already processed" });
+        if (!reason) {
+            return res.status(400).json({
+                success: false,
+                message: "Rejection reason is required"
+            });
         }
 
-        ret.overallStatus = "rejected";
-        ret.adminRejectionReason = reason;
+        // 1️⃣ Find order
+        const order = await Order.findOne({
+            "shipments.shipment_id": shipment_id
+        }).populate("user");
 
-        if (!ret.auditTrail) ret.auditTrail = [];
-        if (!ret.timeline) ret.timeline = [];
+        if (!order) {
+            return res.status(404).json({
+                success: false,
+                message: "Order / Shipment not found"
+            });
+        }
 
-        ret.auditTrail.push({
-            status: "rejected",
+        // 2️⃣ Find shipment
+        const shipment = order.shipments.find(
+            s => s.shipment_id === shipment_id
+        );
+
+        if (!shipment) {
+            return res.status(404).json({
+                success: false,
+                message: "Shipment not found"
+            });
+        }
+
+        // 3️⃣ Find return
+        const ret = shipment.returns.id(returnId);
+        if (!ret) {
+            return res.status(404).json({
+                success: false,
+                message: "Return not found"
+            });
+        }
+
+        // 4️⃣ State validation (STRICT)
+        if (ret.status !== "requested") {
+            return res.status(400).json({
+                success: false,
+                message: `Return already processed (current: ${ret.status})`
+            });
+        }
+
+        // 5️⃣ Update return status
+        ret.status = "cancelled";
+
+        // 6️⃣ Tracking timeline
+        ret.tracking_history.push({
+            status: "cancelled",
+            timestamp: new Date(),
+            location: "Admin",
+            description: reason
+        });
+
+        // 7️⃣ Audit trail
+        ret.audit_trail.push({
+            status: "cancelled",
             action: "admin_rejected",
             notes: reason,
             performedBy: req.admin?._id,
@@ -1541,34 +1643,33 @@ export const rejectShipmentReturn = async (req, res) => {
             timestamp: new Date()
         });
 
-        ret.timeline.push({
-            status: "rejected",
-            timestamp: new Date(),
-            location: "Admin",
-            description: reason
-        });
-
         await order.save();
 
+        // 8️⃣ Notify user
         if (order.user?.email) {
             await sendEmail(
                 order.user.email,
-                `Return Rejected`,
-                `<p>Your return request for Shipment #${shipment.shipment_id} has been rejected.</p><p>Reason: ${reason}</p>`
+                "Return Request Rejected",
+                `
+          <p>Your return request for shipment <b>#${shipment.shipment_id}</b> has been rejected.</p>
+          <p><b>Reason:</b> ${reason}</p>
+        `
             );
         }
 
-        return res.json({ success: true, message: "Return rejected" });
+        return res.json({
+            success: true,
+            message: "Return rejected successfully"
+        });
 
     } catch (err) {
-        return res.status(500).json({ success: false, message: err.message });
+        console.error("❌ rejectShipmentReturn error:", err);
+        return res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 };
-
-
-
-
-// ===== ADMIN RETURNS DASHBOARD ENDPOINTS =====
 
 /**
  * GET /admin/returns/summary

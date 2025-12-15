@@ -6,7 +6,8 @@ import User from '../../models/User.js';
 import { calculateCartSummary } from "../../middlewares/utils/cartPricingHelper.js";
 import axios from "axios";
 import { getShiprocketToken, createShiprocketOrder } from "../../middlewares/services/shiprocket.js"; // helper to fetch token
-
+import {sendEmail} from "../../middlewares/utils/emailService.js";
+import {cancelShiprocketShipment } from "../../middlewares/services/shiprocket.js";
 
 function formatCourierStatus(raw) {
   const map = {
@@ -375,7 +376,7 @@ export const getUserOrders = async (req, res) => {
         const firstProduct = (s.products && s.products[0]) || {};
         const prod = firstProduct.productId || {};
         return {
-          shipmentId: String(s.shipment_id),
+          shipment_id: String(s.shipment_id),
           label: `Shipment ${idx + 1}`,
           status: // map to simple 3-step statuses
             (s.status === "Delivered") ? "Delivered" :
@@ -486,7 +487,7 @@ export const getOrderTracking = async (req, res) => {
       })).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
       return {
-        shipmentId: String(shipment._id),
+        shipment_id: String(shipment._id),
         awbCode: shipment.awb_code || null,
         courierName: shipment.courier_name || null,
         status: shipment.status || "Created",
@@ -863,3 +864,358 @@ export const getShipmentDetails = async (req, res) => {
     });
   }
 };
+
+export const cancelShipment = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  try {
+    const { orderId, shipment_id } = req.params;
+    const { reason } = req.body;
+    const userId = req.user._id;
+
+    await session.withTransaction(async () => {
+      const order = await Order.findById(orderId).session(session);
+
+      if (!order) throw new Error("Order not found");
+
+      const shipment = order.shipments.id(shipment_id);
+      if (!shipment) throw new Error("Shipment not found");
+
+      // ❌ Cannot cancel shipped shipments
+      const blockedStatuses = ["In Transit", "Out for Delivery", "Delivered"];
+      if (blockedStatuses.includes(shipment.status))
+        throw new Error(`Shipment already ${shipment.status}`);
+
+      // 🚚 Cancel in Shiprocket
+      if (shipment.shiprocket_order_id) {
+        await cancelShiprocketShipment(shipment.shiprocket_order_id);
+      }
+
+      // ✅ Update shipment
+      shipment.status = "Cancelled";
+      shipment.tracking_history.push({
+        status: "Cancelled",
+        timestamp: new Date(),
+        description: "Shipment cancelled by user"
+      });
+
+      // 🧮 Recalculate order status
+      const statuses = order.shipments.map(s => s.status);
+
+      if (statuses.every(s => s === "Cancelled")) {
+        order.orderStatus = "Cancelled";
+      } else if (statuses.some(s => s === "Cancelled")) {
+        order.orderStatus = "Partially Cancelled";
+      }
+
+      order.cancellation = {
+        cancelledBy: userId,
+        reason,
+        requestedAt: new Date(),
+        allowed: true
+      };
+
+      await order.save({ session });
+    });
+
+    res.json({
+      success: true,
+      message: "Shipment cancelled successfully"
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(400).json({ success: false, message: err.message });
+  } finally {
+    session.endSession();
+  }
+};
+
+export const cancelOrder = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  try {
+    const { orderId, reason } = req.body;
+    const userId = req.user?._id;
+
+    if (!orderId)
+      return res.status(400).json({ success: false, message: "orderId is required" });
+
+    const order = await Order.findById(orderId).populate("user");
+
+    if (!order)
+      return res.status(404).json({ success: false, message: "Order not found" });
+
+    // ownership check
+    if (String(order.user._id) !== String(userId) && !req.user?.isAdmin)
+      return res.status(403).json({ success: false, message: "Unauthorized" });
+
+    // prevent duplicate
+    if (order.orderStatus === "Cancelled")
+      return res.status(400).json({ success: false, message: "Order already cancelled" });
+
+    await session.withTransaction(async () => {
+      const txOrder = await Order.findById(orderId).session(session);
+
+      if (!txOrder) throw new Error("Order disappeared during transaction");
+
+      let cancelledAnyShipment = false;
+
+      for (const shipment of txOrder.shipments) {
+        const nonCancelable = ["In Transit", "Out for Delivery", "Delivered"];
+
+        if (nonCancelable.includes(shipment.status)) {
+          continue; // skip shipped/delivered shipments
+        }
+
+        // 🚚 Cancel in Shiprocket
+        if (shipment.shiprocket_order_id) {
+          try {
+            await cancelShiprocketShipment(shipment.shiprocket_order_id);
+          } catch (err) {
+            console.error(
+              "Shiprocket cancel failed:",
+              err?.response?.data || err.message
+            );
+          }
+        }
+
+        shipment.status = "Cancelled";
+        shipment.tracking_history.push({
+          status: "Cancelled",
+          timestamp: new Date(),
+          description: "Shipment cancelled via order cancellation",
+        });
+
+        cancelledAnyShipment = true;
+      }
+
+      if (!cancelledAnyShipment)
+        throw new Error("No shipments eligible for cancellation");
+
+      // 🔁 DERIVE ORDER STATUS FROM SHIPMENTS
+      const shipmentStatuses = txOrder.shipments.map(s => s.status);
+
+      if (shipmentStatuses.every(s => s === "Cancelled")) {
+        txOrder.orderStatus = "Cancelled";
+      } else {
+        txOrder.orderStatus = "Partially Cancelled";
+      }
+
+      txOrder.paymentStatus = txOrder.paid
+        ? "refund_requested"
+        : "cancelled";
+
+      txOrder.cancellation = {
+        cancelledBy: userId,
+        reason,
+        requestedAt: new Date(),
+        allowed: true,
+      };
+
+      await txOrder.save({ session });
+    });
+
+    // ✉️ EMAIL (unchanged)
+    try {
+      await sendEmail(
+        order.user.email,
+        "Your Joyory Order Has Been Cancelled",
+        `
+          <p>Hi ${order.user.name},</p>
+          <p>Your order <strong>#${order._id}</strong> has been cancelled.</p>
+          <p><strong>Reason:</strong> ${reason || "Not specified"}</p>
+          <p>Thank you,<br/>Team Joyory</p>
+        `
+      );
+    } catch (err) {
+      console.error("Email failed:", err.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message:
+        order.paid
+          ? "Order cancellation requested. Refund will be processed separately."
+          : "Order cancelled successfully",
+    });
+
+  } catch (err) {
+    console.error("❌ Cancel order error:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Cancel order failed",
+    });
+  } finally {
+    await session.endSession();
+  }
+};
+
+// export const cancelOrder = async (req, res) => {
+//   const session = await mongoose.startSession();
+//   try {
+//     const { orderId, reason } = req.body;
+//     const userId = req.user?._id;
+
+//     if (!orderId)
+//       return res.status(400).json({ success: false, message: "orderId is required" });
+
+//     const order = await Order.findById(orderId)
+//       .populate("products.productId")
+//       .populate("user");
+
+//     if (!order)
+//       return res.status(404).json({ success: false, message: "Order not found" });
+
+//     // ensure owner
+//     if (String(order.user._id) !== String(userId) && !req.user?.isAdmin)
+//       return res.status(403).json({ success: false, message: "Unauthorized" });
+
+//     // prevent duplicate cancellation
+//     if (order.orderStatus === "Cancelled")
+//       return res.status(400).json({ success: false, message: "Order already cancelled" });
+
+//     // cannot cancel after shipping
+//     const nonCancelableStatuses = ["Shipped", "Out for Delivery", "Delivered"];
+//     if (nonCancelableStatuses.includes(order.orderStatus))
+//       return res.status(400).json({
+//         success: false,
+//         message: `Order cannot be cancelled once ${order.orderStatus}`
+//       });
+
+//     await session.withTransaction(async () => {
+//       const txOrder = await Order.findById(orderId)
+//         .session(session)
+//         .populate("products.productId");
+
+//       if (!txOrder) throw new Error("Order disappeared during transaction");
+
+//       // ⭐⭐⭐ REVERSE STOCK & SALES — only if admin confirmed ⭐⭐⭐
+//       if (txOrder.adminConfirmed) {
+//         for (const item of txOrder.products) {
+//           const product = await Product.findById(item.productId._id).session(session);
+//           if (!product) continue;
+
+//           const qty = Number(item.quantity || 0);
+
+//           if (item.variant?.sku) {
+//             const variantIndex = product.variants.findIndex(v => v.sku === item.variant.sku);
+//             if (variantIndex !== -1) {
+//               const variant = product.variants[variantIndex];
+
+//               // restore stock
+//               variant.stock += qty;
+
+//               // reduce sales
+//               variant.sales = Math.max(0, (variant.sales || 0) - qty);
+//             }
+//           } else {
+//             product.quantity += qty;
+//           }
+
+//           // restore product-wide sales
+//           product.sales = Math.max(0, (product.sales || 0) - qty);
+
+//           // update total stock if variants exist
+//           if (product.variants?.length > 0) {
+//             product.quantity = product.variants.reduce(
+//               (s, v) => s + (Number(v.stock) || 0),
+//               0
+//             );
+//           }
+
+//           // status update
+//           if (product.quantity <= 0) product.status = "Out of stock";
+//           else if (product.thresholdValue != null && product.quantity < product.thresholdValue)
+//             product.status = "Low stock";
+//           else product.status = "In-stock";
+
+//           await product.save({ session });
+//         }
+//       }
+
+//       // cancel in shiprocket
+//       if (txOrder.shipment?.shiprocket_order_id) {
+//         try {
+//           await cancelShiprocketShipment(txOrder.shipment.shiprocket_order_id);
+//         } catch (err) {
+//           console.error("Shiprocket cancel failed:", err?.response?.data || err.message);
+//         }
+//       }
+
+//       txOrder.orderStatus = "Cancelled";
+//       txOrder.paymentStatus = txOrder.paid ? "refund_requested" : "cancelled";
+
+//       txOrder.cancellation = {
+//         cancelledBy: userId,
+//         reason,
+//         requestedAt: new Date(),
+//         allowed: true,
+//       };
+
+//       // refund setup
+//       if (txOrder.paid) {
+//         txOrder.refund = {
+//           amount: txOrder.amount,
+//           method: null,
+//           status: "requested",
+//           reason,
+//           requestedBy: userId,
+//           refundAudit: [
+//             {
+//               status: "requested",
+//               changedBy: userId,
+//               changedByModel: "User",
+//               note: "Refund requested automatically after cancellation",
+//             },
+//           ],
+//         };
+//       }
+
+//       await txOrder.save({ session });
+//     });
+
+//     const refundMethodsAvailable = order.paid
+//       ? [
+//         { method: "razorpay", label: "Original Payment Method" },
+//         { method: "wallet", label: "Joyory Wallet" },
+//       ]
+//       : [];
+
+//     // -----------------------------------------------
+//     // 📩 SEND EMAIL TO USER — SAME STYLE AS GIFT CARD
+//     // -----------------------------------------------
+//     try {
+//       await sendEmail(
+//         order.user.email,
+//         "Your Joyory Order Has Been Cancelled",
+//         `
+//                 <p>Hi ${order.user.name},</p>
+//                 <p>Your order <strong>#${order._id}</strong> has been successfully cancelled.</p>
+//                 <p><strong>Reason:</strong> ${reason || "Not specified"}</p>
+//                 ${order.paid
+//           ? `<p>A refund request has been created. Please select your preferred refund method in your Joyory dashboard.</p>`
+//           : `<p>Since this order was unpaid, no refund is required.</p>`
+//         }
+//                 <p>Thank you,<br/>Team Joyory</p>
+//             `
+//       );
+//     } catch (emailErr) {
+//       console.error("Email sending failed:", emailErr.message);
+//     }
+//     // -------------------------------------------------
+
+//     return res.status(200).json({
+//       success: true,
+//       message: order.paid
+//         ? "Order cancelled. Refund initiated — choose refund method."
+//         : "Order cancelled successfully.",
+//       refundMethodsAvailable,
+//     });
+//   } catch (err) {
+//     console.error("❌ Cancel order error:", err);
+//     res.status(500).json({ success: false, message: "Cancel order failed" });
+//   } finally {
+//     await session.endSession();
+//   }
+// };

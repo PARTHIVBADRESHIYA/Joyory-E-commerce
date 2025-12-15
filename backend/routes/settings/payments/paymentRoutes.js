@@ -1,6 +1,6 @@
 import express from 'express';
 import { verifyAdminOrTeamMember, authenticateUser, verifyOrderOwnership } from '../../../middlewares/authMiddleware.js';
-import { filterPaymentsByDate, getDashboardSummary, getPaymentsFiltered, payForOrder, createWalletPayment,createGiftCardPayment,cancelOrder, setRefundMethod, setPaymentMethod, getActivePaymentMethods, createCodOrder, confirmCodOrder, createRazorpayOrder, verifyRazorpayPayment } from '../../../controllers/settings/payments/paymentController.js';
+import { filterPaymentsByDate, getDashboardSummary, getPaymentsFiltered, payForOrder, createWalletPayment,createGiftCardPayment, setRefundMethod, setPaymentMethod, getActivePaymentMethods, createCodOrder, confirmCodOrder, createRazorpayOrder, verifyRazorpayPayment } from '../../../controllers/settings/payments/paymentController.js';
 // import { userPaymentValidation } from "../../../middlewares/paymentValidation.js";
 
 const router = express.Router();
@@ -28,8 +28,6 @@ router.post('/cod/confirm', authenticateUser, confirmCodOrder);
 router.post('/wallet', authenticateUser, createWalletPayment);
 
 router.post('/giftcard', authenticateUser, createGiftCardPayment);
-
-router.post('/cancel', authenticateUser, cancelOrder);
 
 router.post('/refund-method', authenticateUser, setRefundMethod);
 

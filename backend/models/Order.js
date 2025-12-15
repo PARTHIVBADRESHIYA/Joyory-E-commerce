@@ -491,7 +491,7 @@ const ShipmentReturnSchema = new mongoose.Schema({
         checkedAt: Date,
         notes: String,
         images: [String],
-        status: { type: String, enum: ["passed", "failed"] }
+        status: { type: String, enum: ["pending", "passed", "failed"] }
     },
 
     // Refund
