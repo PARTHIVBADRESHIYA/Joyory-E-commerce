@@ -509,66 +509,75 @@ async function trackShipmentTimeline() {
 }
 
 async function processForwardTimeline(orderId, shipment, token) {
-    try {
-        const res = await safeShiprocketGet(
-            `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${shipment.awb_code}`,
-            token
-        );
-        if (!res) return;
+  try {
+    const res = await safeShiprocketGet(
+      `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${shipment.awb_code}`,
+      token
+    );
+    if (!res?.data?.tracking_data) return;
 
-        const data = res.data?.tracking_data;
-        if (!data) return;
+    const trackingData = res.data.tracking_data;
+    const activities = trackingData.shipment_track_activities || [];
 
-        const raw = data.shipment_track_activities || [];
-        const existing = shipment.tracking_history || [];
+    if (!activities.length) return;
 
-        const newEvents = raw
-            .map(ev => ({
-                status: ev.activity,
-                description: ev.activity,
-                location: ev.location || "N/A",
-                timestamp: new Date(ev.date)
-            }))
-            .filter(ev =>
-                !existing.some(e =>
-                    e.status === ev.status &&
-                    Math.abs(new Date(e.timestamp) - ev.timestamp) < 60000
-                )
-            );
+    const existing = shipment.tracking_history || [];
 
-        if (!newEvents.length) return;
+    const newEvents = activities
+      .map(ev => ({
+        status: ev.activity,               // ✅ EXACT text
+        description: ev.activity,          // ✅ EXACT text
+        location: ev.location || "N/A",
+        timestamp: new Date(ev.date)
+      }))
+      .filter(ev =>
+        !existing.some(e =>
+          e.status === ev.status &&
+          Math.abs(new Date(e.timestamp) - ev.timestamp) < 60000
+        )
+      );
 
-        const normalizedStatus = normalizeShipmentStatus(
-            SHIPROCKET_STATUS_MAP[data.shipment_status] || raw.at(-1)?.activity
-        );
+    if (!newEvents.length) return;
 
-        await Order.updateOne(
-            { _id: orderId, "shipments._id": shipment._id },
-            {
-                $push: { "shipments.$.tracking_history": { $each: newEvents } },
-                $set: {
-                    "shipments.$.status": normalizedStatus,
-                    "shipments.$.lastTrackingAttemptAt": new Date()
-                }
-            }
-        );
+    // 🔹 Normalize ONLY for shipment.status
+    const normalizedStatus = normalizeShipmentStatus(
+      trackingData.shipment_status ||
+      activities[activities.length - 1]?.activity
+    );
 
-        const order = await Order.findById(orderId);
-        order.orderStatus = computeOrderStatus(order.shipments);
-        await order.save();
+    await Order.updateOne(
+      { _id: orderId, "shipments._id": shipment._id },
+      {
+        $push: {
+          "shipments.$.tracking_history": { $each: newEvents }
+        },
+        $set: {
+          "shipments.$.status": normalizedStatus,
+          "shipments.$.courier_name": trackingData.shipment_track?.[0]?.courier_name || shipment.courier_name,
+          "shipments.$.tracking_url": `https://shiprocket.co/tracking/${shipment.awb_code}`,
+          "shipments.$.lastTrackingAttemptAt": new Date()
+        }
+      }
+    );
 
-    } catch (err) {
-        console.error("❌ processForwardTimeline error:", err.message);
-    }
+    // 🔁 Update order status
+    const order = await Order.findById(orderId);
+    order.orderStatus = computeOrderStatus(order.shipments);
+    await order.save();
+
+  } catch (err) {
+    console.error("❌ processForwardTimeline error:", err.message);
+  }
 }
+
 
 /* -------------------------------------------------------------------------- */
 /*                                   START                                     */
 /* -------------------------------------------------------------------------- */
 export function startTrackingJob() {
 
-    cron.schedule("* * * * *", trackShipments);          // Forward AWB
-    cron.schedule("*/2 * * * *", trackShipmentTimeline); // Forward Timeline
+    cron.schedule("* * * * *", trackShipmentTimeline);          // Forward AWB
+    cron.schedule("*/2 * * * *", trackShipments); // Forward Timeline
     cron.schedule("*/3 * * * *", trackReturnAWBAssignment);
     cron.schedule("*/4 * * * *", trackReturnTimeline);
 
