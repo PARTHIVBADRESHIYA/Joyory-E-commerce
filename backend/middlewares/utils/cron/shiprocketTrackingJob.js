@@ -325,15 +325,16 @@ import { trackReturnAWBAssignment, trackReturnTimeline } from "./returnCron.js";
 
 const shiprocketLimit = pLimit(5);
 
-const SR_DEBUG = true;
+const SR_DEBUG = false;
 
 function srLog(...args) {
     if (SR_DEBUG) console.log("🚚 [SHIPROCKET]", ...args);
 }
 
 function srErr(...args) {
-    if (SR_DEBUG) console.error("❌ [SHIPROCKET]", ...args);
+    console.error("❌ [SHIPROCKET]", ...args);
 }
+
 
 
 /* -------------------------------------------------------------------------- */
@@ -788,10 +789,6 @@ async function processForwardTimeline(orderId, shipment, token) {
 
         const trackingData = res.data.tracking_data;
 
-        // 🧾 FULL RAW PAYLOAD (DEBUG SAFE)
-        srLog("🧾 FULL TRACKING DATA:");
-        console.dir(trackingData, { depth: null });
-
         const snapshot = trackingData.shipment_track?.[0];
 
         // 🚫 CANCELLED AT COURIER LEVEL
@@ -848,8 +845,6 @@ async function processForwardTimeline(orderId, shipment, token) {
             !isNaN(e.timestamp)
         );
 
-        srLog(`📜 Total parsed events=${events.length}`);
-
         if (!events.length) {
             srLog("⏭️ No valid tracking events");
             return;
@@ -903,7 +898,6 @@ async function processForwardTimeline(orderId, shipment, token) {
             }
         );
 
-        srLog("💾 DB Update Result:", updateResult);
 
         /* -------------------------------------------------
            📦 ORDER STATUS UPDATE

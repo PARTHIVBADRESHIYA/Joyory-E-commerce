@@ -438,20 +438,20 @@ import axios from "axios";
 import * as cheerio from "cheerio";
 import Order from "../../../models/Order.js";
 import { getShiprocketToken } from "../../services/shiprocket.js";
-import {safeShiprocketGet} from "./shiprocketTrackingJob.js";
+import { safeShiprocketGet } from "./shiprocketTrackingJob.js";
 import { addRefundJob } from "../../services/refundQueue.js";
 import pLimit from "p-limit";
 
 const shiprocketLimit = pLimit(5); // SAFE concurrency
 
-const SR_DEBUG = true;
+const SR_DEBUG = false;
 
 function srLog(...args) {
     if (SR_DEBUG) console.log("🚚 [SHIPROCKET]", ...args);
 }
 
 function srErr(...args) {
-    if (SR_DEBUG) console.error("❌ [SHIPROCKET]", ...args);
+    console.error("❌ [SHIPROCKET]", ...args);
 }
 
 export function deepSearch(obj, keys) {
@@ -651,10 +651,8 @@ export async function trackReturnTimeline() {
         const results = await Promise.allSettled(tasks);
 
         srLog(
-            `✅ Return timeline done | Success=${
-                results.filter(r => r.status === "fulfilled").length
-            }, Failed=${
-                results.filter(r => r.status === "rejected").length
+            `✅ Return timeline done | Success=${results.filter(r => r.status === "fulfilled").length
+            }, Failed=${results.filter(r => r.status === "rejected").length
             }`
         );
 
