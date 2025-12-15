@@ -438,10 +438,21 @@ import axios from "axios";
 import * as cheerio from "cheerio";
 import Order from "../../../models/Order.js";
 import { getShiprocketToken } from "../../services/shiprocket.js";
+import {safeShiprocketGet} from "./shiprocketTrackingJob.js";
 import { addRefundJob } from "../../services/refundQueue.js";
 import pLimit from "p-limit";
 
 const shiprocketLimit = pLimit(5); // SAFE concurrency
+
+const SR_DEBUG = true;
+
+function srLog(...args) {
+    if (SR_DEBUG) console.log("🚚 [SHIPROCKET]", ...args);
+}
+
+function srErr(...args) {
+    if (SR_DEBUG) console.error("❌ [SHIPROCKET]", ...args);
+}
 
 export function deepSearch(obj, keys) {
     let found = null;
@@ -583,13 +594,15 @@ async function processReturnAWB(orderId, shipmentId, ret, token) {
         return;
     }
 }
-
 export async function trackReturnTimeline() {
-    console.log("📍 Return Timeline Tracker Running...");
+    srLog("⏰ Cron started: Return Shipment Timeline");
 
     try {
         const token = await getShiprocketToken();
-        if (!token) return;
+        if (!token) {
+            srErr("❌ Shiprocket token not found");
+            return;
+        }
 
         const orders = await Order.find({
             "shipments.returns": {
@@ -598,72 +611,321 @@ export async function trackReturnTimeline() {
                     status: { $nin: ["delivered_to_warehouse", "refunded", "cancelled"] }
                 }
             }
-        }).select("_id shipments");
+        });
+
+        srLog(`📦 Orders with active returns: ${orders.length}`);
 
         const tasks = [];
+        const processedAwbs = new Set();
 
         for (const order of orders) {
             for (const shipment of order.shipments) {
                 for (const ret of shipment.returns || []) {
+
                     if (!ret.awb_code) continue;
+
+                    if (
+                        ret.lastTrackingAttemptAt &&
+                        Date.now() - new Date(ret.lastTrackingAttemptAt).getTime() < 5 * 60 * 1000
+                    ) continue;
+
+                    if (processedAwbs.has(ret.awb_code)) continue;
+                    processedAwbs.add(ret.awb_code);
 
                     tasks.push(
                         shiprocketLimit(() =>
-                            processReturnTimeline(order._id, shipment._id, ret, token)
+                            processReturnTimeline(
+                                order._id,
+                                shipment._id,
+                                ret,
+                                token
+                            )
                         )
                     );
                 }
             }
         }
 
-        await Promise.allSettled(tasks);
+        srLog(`🚀 Total return tracking calls: ${tasks.length}`);
+
+        const results = await Promise.allSettled(tasks);
+
+        srLog(
+            `✅ Return timeline done | Success=${
+                results.filter(r => r.status === "fulfilled").length
+            }, Failed=${
+                results.filter(r => r.status === "rejected").length
+            }`
+        );
 
     } catch (err) {
-        console.error("❌ Return timeline cron failed:", err.message);
+        srErr("❌ Return timeline cron crashed:", err);
     }
 }
 
 async function processReturnTimeline(orderId, shipmentId, ret, token) {
+    srLog(`🔁 Return tracking started | Order=${orderId} | AWB=${ret.awb_code}`);
+
     try {
-        const res = await axios.get(
-            `https://apiv2.shiprocket.in/v1/external/courier/track/return/awb/${ret.awb_code}`,
-            { headers: { Authorization: `Bearer ${token}` } }
+        const url = `https://apiv2.shiprocket.in/v1/external/courier/track/return/awb/${ret.awb_code}`;
+        srLog(`🌐 API CALL → ${url}`);
+
+        const res = await safeShiprocketGet(url, token);
+
+        if (!res?.data?.tracking_data) {
+            srLog(`⏳ RETURN TRACKING NOT READY | AWB=${ret.awb_code}`);
+
+            await Order.updateOne(
+                { _id: orderId },
+                {
+                    $set: {
+                        "shipments.$[s].returns.$[r].lastTrackingAttemptAt": new Date()
+                    }
+                },
+                { arrayFilters: [{ "s._id": shipmentId }, { "r._id": ret._id }] }
+            );
+            return;
+        }
+
+        const trackingData = res.data.tracking_data;
+
+        // 🧾 FULL RAW PAYLOAD (CRITICAL)
+        srLog("🧾 FULL RETURN TRACKING DATA:");
+        console.dir(trackingData, { depth: null });
+
+        const snapshot = trackingData.shipment_track?.[0];
+
+        /* -------------------------------------------------
+           🚫 CANCELLED AT COURIER LEVEL
+        -------------------------------------------------- */
+        if (
+            snapshot?.current_status === "Canceled" ||
+            trackingData.shipment_status === 8
+        ) {
+            srLog(`🚫 RETURN CANCELLED BY COURIER | AWB=${ret.awb_code}`);
+
+            await Order.updateOne(
+                { _id: orderId },
+                {
+                    $set: {
+                        "shipments.$[s].returns.$[r].status": "cancelled",
+                        "shipments.$[s].returns.$[r].lastTrackingAttemptAt": new Date()
+                    }
+                },
+                { arrayFilters: [{ "s._id": shipmentId }, { "r._id": ret._id }] }
+            );
+            return;
+        }
+
+        /* -------------------------------------------------
+           🧠 COLLECT EVENTS (SAME AS FORWARD)
+        -------------------------------------------------- */
+
+        let events = [];
+
+        // 1️⃣ REAL ACTIVITIES
+        if (Array.isArray(trackingData.shipment_track_activities)) {
+            events.push(
+                ...trackingData.shipment_track_activities.map(ev => ({
+                    status: ev.activity,
+                    description: ev.activity,
+                    location: ev.location || "N/A",
+                    timestamp: ev.date ? new Date(ev.date) : null
+                }))
+            );
+        }
+
+        // 2️⃣ CURRENT SNAPSHOT
+        if (snapshot?.current_status && snapshot?.updated_time_stamp) {
+            events.push({
+                status: snapshot.current_status,
+                description: snapshot.current_status,
+                location: snapshot.destination || "N/A",
+                timestamp: new Date(snapshot.updated_time_stamp)
+            });
+        }
+
+        // 🛡️ HARD SAFETY FILTER
+        events = events.filter(e =>
+            e.status &&
+            e.timestamp instanceof Date &&
+            !isNaN(e.timestamp)
         );
 
-        const trackingData = res.data?.tracking_data;
-        if (!trackingData) return;
+        srLog(`📜 Parsed return events=${events.length}`);
 
-        const events =
-            trackingData.shipment_track_activities?.map(ev => ({
-                status: mapActivityToStatus(ev.activity || ev.status),
-                timestamp: new Date(ev.date || ev.timestamp),
-                location: ev.location || "N/A",
-                description: ev.activity || ev.status
-            })) || [];
-
-        let status = ret.status;
-        if (trackingData.shipment_status === "Delivered") {
-            status = "delivered_to_warehouse";
+        if (!events.length) {
+            srLog(`⏭️ No valid return events | AWB=${ret.awb_code}`);
+            return;
         }
+
+        /* -------------------------------------------------
+           🔁 DEDUPLICATION (FORWARD LOGIC)
+        -------------------------------------------------- */
+
+        const existing = ret.tracking_history || [];
+
+        const newEvents = events.filter(ev =>
+            !existing.some(e =>
+                e.status === ev.status &&
+                Math.abs(new Date(e.timestamp) - ev.timestamp) < 60000
+            )
+        );
+
+        if (!newEvents.length) {
+            srLog(`⏭️ No new return events | AWB=${ret.awb_code}`);
+            return;
+        }
+
+        /* -------------------------------------------------
+           🔄 STATUS NORMALIZATION (ONLY AT END)
+        -------------------------------------------------- */
+
+        let newStatus = ret.status;
+
+        const finalStatus =
+            trackingData.shipment_status ||
+            snapshot?.current_status ||
+            newEvents[newEvents.length - 1].status;
+
+        if (
+            finalStatus === "Delivered" ||
+            finalStatus === "Delivered to Warehouse"
+        ) {
+            newStatus = "delivered_to_warehouse";
+        }
+
+        /* -------------------------------------------------
+           💾 DB UPDATE (SAFE + ATOMIC)
+        -------------------------------------------------- */
 
         await Order.updateOne(
             { _id: orderId },
             {
+                $push: {
+                    "shipments.$[s].returns.$[r].tracking_history": {
+                        $each: newEvents
+                    }
+                },
                 $set: {
-                    "shipments.$[s].returns.$[r].tracking_history": events,
-                    "shipments.$[s].returns.$[r].status": status
+                    "shipments.$[s].returns.$[r].status": newStatus,
+                    "shipments.$[s].returns.$[r].lastTrackingAttemptAt": new Date()
                 }
             },
             { arrayFilters: [{ "s._id": shipmentId }, { "r._id": ret._id }] }
         );
 
-        if (status === "delivered_to_warehouse") {
+        srLog(`💾 RETURN UPDATED | AWB=${ret.awb_code} | Status=${newStatus}`);
+
+        /* -------------------------------------------------
+           💸 REFUND (ONLY ONCE)
+        -------------------------------------------------- */
+
+        if (newStatus === "delivered_to_warehouse" && !ret.refundInitiated) {
+            srLog(`💸 REFUND QUEUED | AWB=${ret.awb_code}`);
+
             await addRefundJob(orderId, shipmentId, ret._id);
+
+            await Order.updateOne(
+                { _id: orderId },
+                {
+                    $set: {
+                        "shipments.$[s].returns.$[r].refundInitiated": true
+                    }
+                },
+                { arrayFilters: [{ "s._id": shipmentId }, { "r._id": ret._id }] }
+            );
         }
-    } catch {
-        return;
+
+    } catch (err) {
+        srErr(
+            `❌ RETURN TIMELINE FAILED | AWB=${ret.awb_code} | Order=${orderId}`,
+            err
+        );
     }
 }
+
+
+// export async function trackReturnTimeline() {
+//     console.log("📍 Return Timeline Tracker Running...");
+
+//     try {
+//         const token = await getShiprocketToken();
+//         if (!token) return;
+
+//         const orders = await Order.find({
+//             "shipments.returns": {
+//                 $elemMatch: {
+//                     awb_code: { $ne: null },
+//                     status: { $nin: ["delivered_to_warehouse", "refunded", "cancelled"] }
+//                 }
+//             }
+//         }).select("_id shipments");
+
+//         const tasks = [];
+
+//         for (const order of orders) {
+//             for (const shipment of order.shipments) {
+//                 for (const ret of shipment.returns || []) {
+//                     if (!ret.awb_code) continue;
+
+//                     tasks.push(
+//                         shiprocketLimit(() =>
+//                             processReturnTimeline(order._id, shipment._id, ret, token)
+//                         )
+//                     );
+//                 }
+//             }
+//         }
+
+//         await Promise.allSettled(tasks);
+
+//     } catch (err) {
+//         console.error("❌ Return timeline cron failed:", err.message);
+//     }
+// }
+
+// async function processReturnTimeline(orderId, shipmentId, ret, token) {
+//     try {
+//         const res = await axios.get(
+//             `https://apiv2.shiprocket.in/v1/external/courier/track/return/awb/${ret.awb_code}`,
+//             { headers: { Authorization: `Bearer ${token}` } }
+//         );
+
+//         const trackingData = res.data?.tracking_data;
+//         if (!trackingData) return;
+
+//         const events =
+//             trackingData.shipment_track_activities?.map(ev => ({
+//                 status: mapActivityToStatus(ev.activity || ev.status),
+//                 timestamp: new Date(ev.date || ev.timestamp),
+//                 location: ev.location || "N/A",
+//                 description: ev.activity || ev.status
+//             })) || [];
+
+//         let status = ret.status;
+//         if (trackingData.shipment_status === "Delivered") {
+//             status = "delivered_to_warehouse";
+//         }
+
+//         await Order.updateOne(
+//             { _id: orderId },
+//             {
+//                 $set: {
+//                     "shipments.$[s].returns.$[r].tracking_history": events,
+//                     "shipments.$[s].returns.$[r].status": status
+//                 }
+//             },
+//             { arrayFilters: [{ "s._id": shipmentId }, { "r._id": ret._id }] }
+//         );
+
+//         if (status === "delivered_to_warehouse") {
+//             await addRefundJob(orderId, shipmentId, ret._id);
+//         }
+//     } catch {
+//         return;
+//     }
+// }
 
 
 

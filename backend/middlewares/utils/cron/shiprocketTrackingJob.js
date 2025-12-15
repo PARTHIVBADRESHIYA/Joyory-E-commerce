@@ -325,20 +325,57 @@ import { trackReturnAWBAssignment, trackReturnTimeline } from "./returnCron.js";
 
 const shiprocketLimit = pLimit(5);
 
+const SR_DEBUG = true;
+
+function srLog(...args) {
+    if (SR_DEBUG) console.log("🚚 [SHIPROCKET]", ...args);
+}
+
+function srErr(...args) {
+    if (SR_DEBUG) console.error("❌ [SHIPROCKET]", ...args);
+}
+
+
 /* -------------------------------------------------------------------------- */
 /*                               SAFE API CALL                                 */
 /* -------------------------------------------------------------------------- */
-async function safeShiprocketGet(url, token) {
+// export async function safeShiprocketGet(url, token) {
+//     try {
+//         return await axios.get(url, {
+//             headers: { Authorization: `Bearer ${token}` },
+//             timeout: 10000
+//         });
+//     } catch (err) {
+//         if ([500, 429].includes(err.response?.status)) return null;
+//         throw err;
+//     }
+// }
+
+export async function safeShiprocketGet(url, token) {
     try {
         return await axios.get(url, {
             headers: { Authorization: `Bearer ${token}` },
             timeout: 10000
         });
     } catch (err) {
-        if ([500, 429].includes(err.response?.status)) return null;
+
+        const status = err.response?.status;
+
+        // ⏳ Return tracking NOT READY (very common)
+        if (status === 404) {
+            return { _notReady: true };
+        }
+
+        // 🔁 Temporary Shiprocket issues
+        if ([500, 429].includes(status)) {
+            return null;
+        }
+
+        // ❌ Real failure
         throw err;
     }
 }
+
 
 /* -------------------------------------------------------------------------- */
 /*                              STATUS NORMALIZER                               */
@@ -369,10 +406,13 @@ export const SHIPROCKET_STATUS_MAP = {
 };
 
 const TRACKABLE_STATUSES = [
+    "AWB Assigned",
     "Pickup Scheduled",
+    "Manifested",
     "Pickup Done",
     "In Transit",
-    "Out for Delivery"
+    "Out for Delivery",
+    "Delivered"
 ];
 
 /* -------------------------------------------------------------------------- */
@@ -468,12 +508,215 @@ async function processForwardShipment(orderId, shipment, token) {
 /* -------------------------------------------------------------------------- */
 /*                           FORWARD – TIMELINE CRON                            */
 /* -------------------------------------------------------------------------- */
+// async function trackShipmentTimeline() {
+//     srLog("⏰ Cron started: Forward Shipment Timeline");
+
+//     // if (!(await acquireLock("forward-timeline-cron"))) {
+//     //     srLog("🔒 Lock already acquired, skipping this run");
+//     //     return;
+//     // }
+
+//     try {
+//         const token = await getShiprocketToken();
+//         if (!token) {
+//             srErr("❌ Shiprocket token not found");
+//             return;
+//         }
+
+//         srLog("✅ Shiprocket token acquired");
+
+//         const orders = await Order.find({
+//             shipments: {
+//                 $elemMatch: {
+//                     awb_code: { $ne: null },
+//                     status: { $nin: ["Delivered", "Cancelled", "RTO Delivered"] }
+//                 }
+//             }
+//         });
+
+//         srLog(`📦 Orders eligible for tracking: ${orders.length}`);
+
+//         const tasks = [];
+
+//         for (const order of orders) {
+//             srLog(`➡️ Order ${order._id} | Shipments: ${order.shipments.length}`);
+
+//             for (const shipment of order.shipments) {
+//                 srLog(
+//                     `   📦 Shipment ${shipment._id} | AWB=${shipment.awb_code} | Status=${shipment.status}`
+//                 );
+
+//                 if (!shipment.awb_code) {
+//                     srLog("   ⏭️ Skipped: AWB not assigned");
+//                     continue;
+//                 }
+
+//                 if (!TRACKABLE_STATUSES.includes(shipment.status)) {
+//                     srLog(`   ⏭️ Skipped: Status not trackable (${shipment.status})`);
+//                     continue;
+//                 }
+
+//                 if (
+//                     shipment.lastTrackingAttemptAt &&
+//                     Date.now() - new Date(shipment.lastTrackingAttemptAt).getTime() < 5 * 60 * 1000
+//                 ) {
+//                     srLog("   ⏭️ Skipped: Throttled (5 min rule)");
+//                     continue;
+//                 }
+
+//                 srLog("   🚀 Added to tracking queue");
+
+//                 tasks.push(
+//                     shiprocketLimit(() =>
+//                         processForwardTimeline(order._id, shipment, token)
+//                     )
+//                 );
+//             }
+//         }
+
+//         srLog(`🚀 Total Shiprocket API calls: ${tasks.length}`);
+
+//         const results = await Promise.allSettled(tasks);
+
+//         const success = results.filter(r => r.status === "fulfilled").length;
+//         const failed = results.filter(r => r.status === "rejected").length;
+
+//         srLog(`✅ Timeline updates done | Success=${success}, Failed=${failed}`);
+
+//     } catch (err) {
+//         srErr("❌ Forward timeline cron crashed:", err.message);
+//     }
+// }
+
+// async function processForwardTimeline(orderId, shipment, token) {
+//     srLog(`🔍 Tracking started | Order=${orderId} | Shipment=${shipment._id}`);
+
+//     try {
+//         const url = `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${shipment.awb_code}`;
+//         srLog(`🌐 API CALL → ${url}`);
+
+//         const res = await safeShiprocketGet(url, token);
+
+//         if (!res) {
+//             srErr("❌ No response from Shiprocket");
+//             return;
+//         }
+
+//         if (!res.data?.tracking_data) {
+//             srErr("❌ tracking_data missing in response");
+//             srLog("RAW RESPONSE:", JSON.stringify(res.data, null, 2));
+//             return;
+//         }
+
+//         srLog("📡 RAW SHIPROCKET RESPONSE:");
+//         console.dir(res.data, { depth: null });
+
+
+//         const trackingData = res.data.tracking_data;
+
+//         // 🧾 FULL RAW SHIPROCKET PAYLOAD
+//         srLog("🧾 FULL TRACKING DATA:");
+//         console.dir(trackingData, { depth: null });
+
+//         srLog(
+//             `📦 Tracking fetched | SR Status=${trackingData.shipment_status}`
+//         );
+//         const activities = Array.isArray(trackingData.shipment_track_activities)
+//             ? trackingData.shipment_track_activities
+//             : [];
+
+//         srLog(`📜 Activities count=${activities.length}`);
+
+//         if (!activities.length) {
+//             srLog("⏭️ No activities yet from courier");
+//             return;
+//         }
+
+//         const existing = shipment.tracking_history || [];
+//         srLog(`🗂️ Existing DB events=${existing.length}`);
+
+//         const newEvents = activities
+//             .map(ev => {
+//                 srLog(
+//                     `   🆕 Activity → "${ev.activity}" @ ${ev.location} | ${ev.date}`
+//                 );
+
+//                 return {
+//                     status: ev.activity,
+//                     description: ev.activity,
+//                     location: ev.location || "N/A",
+//                     timestamp: new Date(ev.date)
+//                 };
+//             })
+//             .filter(ev =>
+//                 !existing.some(e =>
+//                     e.status === ev.status &&
+//                     Math.abs(new Date(e.timestamp) - ev.timestamp) < 60000
+//                 )
+//             );
+
+//         srLog(`🆕 New events to save=${newEvents.length}`);
+
+//         if (!newEvents.length) {
+//             srLog("⏭️ All activities already saved");
+//             return;
+//         }
+
+//         const normalizedStatus = normalizeShipmentStatus(
+//             trackingData.shipment_status ||
+//             activities[activities.length - 1]?.activity
+//         );
+
+//         srLog(`🔁 Normalized shipment status=${normalizedStatus}`);
+
+//         const updateResult = await Order.updateOne(
+//             { _id: orderId, "shipments._id": shipment._id },
+//             {
+//                 $push: {
+//                     "shipments.$.tracking_history": { $each: newEvents }
+//                 },
+//                 $set: {
+//                     "shipments.$.status": normalizedStatus,
+//                     "shipments.$.courier_name":
+//                         trackingData.shipment_track?.[0]?.courier_name || shipment.courier_name,
+//                     "shipments.$.tracking_url":
+//                         `https://shiprocket.co/tracking/${shipment.awb_code}`,
+//                     "shipments.$.lastTrackingAttemptAt": new Date()
+//                 }
+//             }
+//         );
+
+//         srLog("💾 DB Update Result:", updateResult);
+
+//         const order = await Order.findById(orderId);
+//         const prevStatus = order.orderStatus;
+
+//         order.orderStatus = computeOrderStatus(order.shipments);
+//         await order.save();
+
+//         srLog(
+//             `📦 Order status updated | ${prevStatus} → ${order.orderStatus}`
+//         );
+
+//     } catch (err) {
+//         srErr(
+//             `❌ Timeline failed | Order=${orderId} | Shipment=${shipment._id}`,
+//             err.message
+//         );
+//     }
+// }
+
 async function trackShipmentTimeline() {
-    if (!(await acquireLock("forward-timeline-cron"))) return;
+    srLog("⏰ Cron started: Forward Shipment Timeline");
 
     try {
         const token = await getShiprocketToken();
-        if (!token) return;
+        if (!token) {
+            srErr("❌ Shiprocket token not found");
+            return;
+        }
+
+        srLog("✅ Shiprocket token acquired");
 
         const orders = await Order.find({
             shipments: {
@@ -484,9 +727,14 @@ async function trackShipmentTimeline() {
             }
         });
 
+        srLog(`📦 Orders eligible for tracking: ${orders.length}`);
+
         const tasks = [];
+        const processedAwbs = new Set(); // 🔒 prevent duplicate API calls
 
         for (const order of orders) {
+            srLog(`➡️ Order ${order._id} | Shipments=${order.shipments.length}`);
+
             for (const shipment of order.shipments) {
                 if (!shipment.awb_code) continue;
                 if (!TRACKABLE_STATUSES.includes(shipment.status)) continue;
@@ -496,78 +744,185 @@ async function trackShipmentTimeline() {
                     Date.now() - new Date(shipment.lastTrackingAttemptAt).getTime() < 5 * 60 * 1000
                 ) continue;
 
-                tasks.push(shiprocketLimit(() =>
-                    processForwardTimeline(order._id, shipment, token)
-                ));
+                if (processedAwbs.has(shipment.awb_code)) {
+                    srLog(`⏭️ Skipped duplicate AWB ${shipment.awb_code}`);
+                    continue;
+                }
+
+                processedAwbs.add(shipment.awb_code);
+
+                tasks.push(
+                    shiprocketLimit(() =>
+                        processForwardTimeline(order._id, shipment, token)
+                    )
+                );
             }
         }
 
-        await Promise.allSettled(tasks);
+        srLog(`🚀 Total Shiprocket API calls: ${tasks.length}`);
+
+        const results = await Promise.allSettled(tasks);
+
+        srLog(
+            `✅ Timeline done | Success=${results.filter(r => r.status === "fulfilled").length
+            }, Failed=${results.filter(r => r.status === "rejected").length}`
+        );
+
     } catch (err) {
-        console.error("❌ Forward timeline cron error:", err.message);
+        srErr("❌ Forward timeline cron crashed:", err);
     }
 }
 
 async function processForwardTimeline(orderId, shipment, token) {
-  try {
-    const res = await safeShiprocketGet(
-      `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${shipment.awb_code}`,
-      token
-    );
-    if (!res?.data?.tracking_data) return;
+    srLog(`🔍 Tracking started | Order=${orderId} | Shipment=${shipment._id}`);
 
-    const trackingData = res.data.tracking_data;
-    const activities = trackingData.shipment_track_activities || [];
+    try {
+        const url = `https://apiv2.shiprocket.in/v1/external/courier/track/awb/${shipment.awb_code}`;
+        srLog(`🌐 API CALL → ${url}`);
 
-    if (!activities.length) return;
-
-    const existing = shipment.tracking_history || [];
-
-    const newEvents = activities
-      .map(ev => ({
-        status: ev.activity,               // ✅ EXACT text
-        description: ev.activity,          // ✅ EXACT text
-        location: ev.location || "N/A",
-        timestamp: new Date(ev.date)
-      }))
-      .filter(ev =>
-        !existing.some(e =>
-          e.status === ev.status &&
-          Math.abs(new Date(e.timestamp) - ev.timestamp) < 60000
-        )
-      );
-
-    if (!newEvents.length) return;
-
-    // 🔹 Normalize ONLY for shipment.status
-    const normalizedStatus = normalizeShipmentStatus(
-      trackingData.shipment_status ||
-      activities[activities.length - 1]?.activity
-    );
-
-    await Order.updateOne(
-      { _id: orderId, "shipments._id": shipment._id },
-      {
-        $push: {
-          "shipments.$.tracking_history": { $each: newEvents }
-        },
-        $set: {
-          "shipments.$.status": normalizedStatus,
-          "shipments.$.courier_name": trackingData.shipment_track?.[0]?.courier_name || shipment.courier_name,
-          "shipments.$.tracking_url": `https://shiprocket.co/tracking/${shipment.awb_code}`,
-          "shipments.$.lastTrackingAttemptAt": new Date()
+        const res = await safeShiprocketGet(url, token);
+        if (!res?.data?.tracking_data) {
+            srErr("❌ Invalid Shiprocket response");
+            return;
         }
-      }
-    );
 
-    // 🔁 Update order status
-    const order = await Order.findById(orderId);
-    order.orderStatus = computeOrderStatus(order.shipments);
-    await order.save();
+        const trackingData = res.data.tracking_data;
 
-  } catch (err) {
-    console.error("❌ processForwardTimeline error:", err.message);
-  }
+        // 🧾 FULL RAW PAYLOAD (DEBUG SAFE)
+        srLog("🧾 FULL TRACKING DATA:");
+        console.dir(trackingData, { depth: null });
+
+        const snapshot = trackingData.shipment_track?.[0];
+
+        // 🚫 CANCELLED AT COURIER LEVEL
+        if (
+            snapshot?.current_status === "Canceled" ||
+            trackingData.shipment_status === 8
+        ) {
+            srLog("🚫 Shipment CANCELLED at courier");
+
+            await Order.updateOne(
+                { _id: orderId, "shipments._id": shipment._id },
+                {
+                    $set: {
+                        "shipments.$.status": "Cancelled",
+                        "shipments.$.lastTrackingAttemptAt": new Date()
+                    }
+                }
+            );
+            return;
+        }
+
+        /* -------------------------------------------------
+           🧠 COLLECT EVENTS FROM BOTH SOURCES
+        -------------------------------------------------- */
+
+        let events = [];
+
+        // 1️⃣ shipment_track_activities (PRIMARY)
+        if (Array.isArray(trackingData.shipment_track_activities)) {
+            events.push(
+                ...trackingData.shipment_track_activities.map(ev => ({
+                    status: ev.activity,
+                    description: ev.activity,
+                    location: ev.location || "N/A",
+                    timestamp: ev.date ? new Date(ev.date) : null
+                }))
+            );
+        }
+
+        // 2️⃣ shipment_track snapshot (FALLBACK / CURRENT STATE)
+        if (snapshot?.current_status && snapshot?.updated_time_stamp) {
+            events.push({
+                status: snapshot.current_status,
+                description: snapshot.current_status,
+                location: snapshot.destination || "N/A",
+                timestamp: new Date(snapshot.updated_time_stamp)
+            });
+        }
+
+        // 🛡️ HARD SAFETY FILTER (NO GARBAGE)
+        events = events.filter(e =>
+            e.status &&
+            e.timestamp instanceof Date &&
+            !isNaN(e.timestamp)
+        );
+
+        srLog(`📜 Total parsed events=${events.length}`);
+
+        if (!events.length) {
+            srLog("⏭️ No valid tracking events");
+            return;
+        }
+
+        /* -------------------------------------------------
+           🔁 DEDUPLICATION
+        -------------------------------------------------- */
+
+        const existing = shipment.tracking_history || [];
+
+        const newEvents = events.filter(ev =>
+            !existing.some(e =>
+                e.status === ev.status &&
+                Math.abs(new Date(e.timestamp) - ev.timestamp) < 60000
+            )
+        );
+
+        if (!newEvents.length) {
+            srLog("⏭️ No new tracking events");
+            return;
+        }
+
+        /* -------------------------------------------------
+           🔄 STATUS NORMALIZATION
+        -------------------------------------------------- */
+
+        const normalizedStatus = normalizeShipmentStatus(
+            trackingData.shipment_status ||
+            newEvents[newEvents.length - 1].status
+        );
+
+        /* -------------------------------------------------
+           💾 DB UPDATE
+        -------------------------------------------------- */
+
+        const updateResult = await Order.updateOne(
+            { _id: orderId, "shipments._id": shipment._id },
+            {
+                $push: {
+                    "shipments.$.tracking_history": { $each: newEvents }
+                },
+                $set: {
+                    "shipments.$.status": normalizedStatus,
+                    "shipments.$.courier_name":
+                        snapshot?.courier_name || shipment.courier_name,
+                    "shipments.$.tracking_url":
+                        `https://shiprocket.co/tracking/${shipment.awb_code}`,
+                    "shipments.$.lastTrackingAttemptAt": new Date()
+                }
+            }
+        );
+
+        srLog("💾 DB Update Result:", updateResult);
+
+        /* -------------------------------------------------
+           📦 ORDER STATUS UPDATE
+        -------------------------------------------------- */
+
+        const order = await Order.findById(orderId);
+        const prevStatus = order.orderStatus;
+
+        order.orderStatus = computeOrderStatus(order.shipments);
+        await order.save();
+
+        srLog(`📦 Order status updated | ${prevStatus} → ${order.orderStatus}`);
+
+    } catch (err) {
+        srErr(
+            `❌ Timeline failed | Order=${orderId} | Shipment=${shipment._id}`,
+            err
+        );
+    }
 }
 
 
@@ -576,8 +931,8 @@ async function processForwardTimeline(orderId, shipment, token) {
 /* -------------------------------------------------------------------------- */
 export function startTrackingJob() {
 
-    cron.schedule("* * * * *", trackShipmentTimeline);          // Forward AWB
-    cron.schedule("*/2 * * * *", trackShipments); // Forward Timeline
+    cron.schedule("* * * * *", trackShipments);          // Forward AWB
+    cron.schedule("*/2 * * * *", trackShipmentTimeline); // Forward Timeline
     cron.schedule("*/3 * * * *", trackReturnAWBAssignment);
     cron.schedule("*/4 * * * *", trackReturnTimeline);
 
