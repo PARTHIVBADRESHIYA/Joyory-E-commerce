@@ -1983,10 +1983,19 @@ export const getTopSellingProducts = async (req, res) => {
                     ? p.variants.map(v => v.hex).filter(Boolean)
                     : (p.colorOptions || []);
 
+                const firstVariantImage =
+                    Array.isArray(p.variants) &&
+                        p.variants.length &&
+                        Array.isArray(p.variants[0].images) &&
+                        p.variants[0].images.length
+                        ? p.variants[0].images[0]
+                        : null;
+
+
                 return {
                     _id: p._id,
                     name: p.name,
-                    image: p.image || (p.images?.[0] || null),
+                    image: firstVariantImage,
                     shadeOptions,
                     colorOptions
                 };

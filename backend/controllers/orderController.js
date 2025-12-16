@@ -529,11 +529,14 @@ export const adminCancelOrder = async (req, res) => {
 
                     // Update local
                     sh.status = "Cancelled";
+                    sh.tracking_history = sh.tracking_history || [];
+
                     sh.tracking_history.push({
                         status: "Cancelled",
                         timestamp: new Date(),
                         location: `Admin:${adminId}`
                     });
+
                 }
             }
             else if (txOrder.shipment?.shiprocket_order_id) {
@@ -560,7 +563,8 @@ export const adminCancelOrder = async (req, res) => {
             const finalStatus = computeOrderStatus(txOrder.shipments || []);
             txOrder.orderStatus = finalStatus;
 
-            // Tracking
+            txOrder.tracking_history = txOrder.tracking_history || [];
+
             txOrder.tracking_history.push({
                 status: "Cancelled",
                 timestamp: new Date(),
@@ -1173,7 +1177,7 @@ export const getOrderById = async (req, res) => {
         const tax = order.taxAmount || 0;
 
         const totalPrice = order.amount; // FINAL AMOUNT STORED IN ORDER
-        const totalSavings = order.totalSavings || 0;   
+        const totalSavings = order.totalSavings || 0;
 
         // FINAL RESPONSE
         const response = {
