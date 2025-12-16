@@ -559,9 +559,7 @@ export const adminCancelOrder = async (req, res) => {
                 allowed: true
             };
 
-            // ⭐ Recompute orderStatus using all shipments mixed statuses
-            const finalStatus = computeOrderStatus(txOrder.shipments || []);
-            txOrder.orderStatus = finalStatus;
+            txOrder.orderStatus = "Cancelled";
 
             txOrder.tracking_history = txOrder.tracking_history || [];
 

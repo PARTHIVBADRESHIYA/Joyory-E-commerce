@@ -111,7 +111,7 @@ export const formatProductCard = async (product, promotions = []) => {
 /**
  * Active promotions ⚡ cache 5 mins
  */
-const getActivePromotions = async () => {
+export const getActivePromotions = async () => {
     const redis = getRedis();
     const redisKey = "activePromotions";
     const cached = await redis.get(redisKey);
@@ -150,7 +150,7 @@ const getActivePromotions = async () => {
 
 //     return trending.slice(0, limit);
 // };
-const getTrendingProducts = async (limit) => {
+export const getTrendingProducts = async (limit) => {
     const redis = getRedis();
     const redisKey = "trendingProducts:top50";
 
@@ -289,33 +289,6 @@ export const getRecommendations = async ({ mode, productId, categorySlug, skinTy
             case "moreLikeThis": {
                 const product = await Product.findById(productId).lean();
                 if (!product) return { success: false, products: [], message: "Product not found" };
-
-                // products = await Product.find({
-                //     _id: { $ne: product._id },
-                //     category: product.category,
-                //     brand: product.brand,
-                //     isDeleted: { $ne: true },
-                //     isPublished: true
-                // }).sort({ sales: -1 }).limit(limit).lean();
-
-                // products = await Product.aggregate([
-                //     {
-                //         $match: {
-                //             _id: { $ne: product._id },
-                //             category: product.category,
-                //             brand: product.brand,
-                //             isDeleted: { $ne: true },
-                //             isPublished: true
-                //         }
-                //     },
-                //     {
-                //         $addFields: {
-                //             totalSales: VARIANT_SALES_EXPR
-                //         }
-                //     },
-                //     { $sort: { totalSales: -1 } },
-                //     { $limit: limit }
-                // ]);
 
                 products = await Product.aggregate([
                     {

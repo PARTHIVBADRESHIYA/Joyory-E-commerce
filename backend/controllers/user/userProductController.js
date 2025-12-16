@@ -1089,7 +1089,7 @@ import SkinType from '../../models/SkinType.js';
 import Formulation from "../../models/shade/Formulation.js";
 import Category from '../../models/Category.js';
 import { getDescendantCategoryIds } from '../../middlewares/utils/categoryUtils.js';
-import { getRecommendations } from '../../middlewares/utils/recommendationService.js';
+import { getRecommendations, getTrendingProducts } from '../../middlewares/utils/recommendationService.js';
 import { getRedis } from '../../middlewares/utils/redis.js';
 import { PRODUCT_CACHE_VERSION } from '../../middlewares/utils/cacheUtils.js';
 import { enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
@@ -1532,233 +1532,333 @@ export const getAllProducts = async (req, res) => {
     }
 };
 
+// export const getProductsByCategory = async (req, res) => {
+//     try {
+//         const slug = req.params.slug.toLowerCase();
+
+//         const redis = getRedis();  // 🔥 REQUIRED 
+//         // 🔥 Redis Cache Key
+//         const redisKey = `cat:${slug}:${JSON.stringify(req.query)}`;
+
+//         // 🔥 Check Cache first
+//         const cached = await redis.get(redisKey);
+//         if (cached) {
+//             return res.status(200).json(JSON.parse(cached));
+//         }
+
+//         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
+
+//         page = Number(page) || 1;
+//         limit = Number(limit) || 12;
+
+//         // Convert filters to arrays
+//         ["skinTypes", "brandIds", "formulations", "finishes"].forEach(key => {
+//             const val = queryFilters[key];
+//             if (val && typeof val === "string") queryFilters[key] = [val];
+//         });
+
+//         // 1️⃣ Find category (optimized)
+//         const category = mongoose.Types.ObjectId.isValid(slug)
+//             ? await Category.findById(slug)
+//                 .select("name slug bannerImage thumbnailImage ancestors")
+//                 .lean()
+//             : await Category.findOne({ slug })
+//                 .select("name slug bannerImage thumbnailImage ancestors")
+//                 .lean();
+
+//         if (!category)
+//             return res.status(404).json({ message: "Category not found" });
+
+//         if (req.user?._id) {
+//             await User.findByIdAndUpdate(
+//                 req.user._id,
+//                 [
+//                     {
+//                         $set: {
+//                             recentCategoryViews: {
+//                                 $slice: [
+//                                     {
+//                                         $concatArrays: [
+//                                             [
+//                                                 {
+//                                                     category: {
+//                                                         _id: category._id,
+//                                                         name: category.name,
+//                                                         slug: category.slug
+//                                                     },
+//                                                     viewedAt: new Date()
+//                                                 }
+//                                             ],
+//                                             {
+//                                                 $filter: {
+//                                                     input: "$recentCategoryViews",
+//                                                     as: "item",
+//                                                     cond: { $ne: ["$$item.category._id", category._id] }
+//                                                 }
+//                                             }
+//                                         ]
+//                                     },
+//                                     20
+//                                 ]
+//                             }
+//                         }
+//                     }
+//                 ]
+//             );
+//         }
+
+
+//         // 3️⃣ category + descendants (optimized)
+//         const descendantIds = await getDescendantCategoryIds(category._id);
+//         const validIds = descendantIds
+//             .filter(id => mongoose.Types.ObjectId.isValid(id))
+//             .map(id => new mongoose.Types.ObjectId(id));
+
+//         validIds.push(category._id);
+
+//         // 4️⃣ Build filters
+//         const filters = normalizeFilters(queryFilters);
+//         filters.categoryIds = validIds.map(id => id.toString());
+
+//         const finalFilter = await applyDynamicFilters(filters);
+//         finalFilter.isPublished = true;
+
+//         // 5️⃣ Sorting
+//         const sortOptions = {
+//             recent: { createdAt: -1 },
+//             priceLowToHigh: { price: 1 },
+//             priceHighToLow: { price: -1 },
+//             rating: { avgRating: -1 }
+//         };
+
+//         // 6️⃣ Query total + products
+//         const total = await Product.countDocuments(finalFilter);
+
+//         const products = await Product.find(finalFilter)
+//             .populate("brand", "name slug isActive")
+//             .populate("category", "name slug")
+//             .populate("skinTypes", "name slug isActive")
+//             .populate("formulation", "name slug isActive")
+//             .sort(sortOptions[sort] || { createdAt: -1 })
+//             .skip((page - 1) * limit)
+//             .limit(limit)
+//             .lean();
+
+//         if (!products.length) {
+//             const msg = queryFilters.search
+//                 ? `No products found matching “${queryFilters.search}” in this category.`
+//                 : (filters.minPrice || filters.maxPrice || filters.brandIds?.length)
+//                     ? `No products found with the selected filters in this category.`
+//                     : `No products available in ${category.name} at the moment.`;
+
+//             return res.status(200).json({
+//                 category,
+//                 breadcrumb: [],
+//                 products: [],
+//                 pagination: { page, limit, total: 0, totalPages: 0, hasMore: false },
+//                 message: msg,
+//             });
+//         }
+
+//         // 7️⃣ Active promotions (optimized)
+//         const now = new Date();
+//         const promotions = await Promotion.find({
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now }
+//         })
+//             .lean();
+
+//         // 8️⃣ Enrich products (unchanged behavior)
+//         const enrichedProducts = await enrichProductsUnified(products, promotions);
+
+//         // 9️⃣ Stock messages (optimized)
+//         for (const prod of enrichedProducts) {
+//             if (!Array.isArray(prod.variants)) continue;
+
+//             for (const v of prod.variants) {
+//                 const s = v.stock ?? 0;
+//                 if (s <= 0) v.stockMessage = "⛔ Currently out of stock — check back soon!";
+//                 else if (s === 1) v.stockMessage = "🔥 Almost gone! Only 1 left in stock.";
+//                 else if (s <= 3) v.stockMessage = `⚡ Hurry! Just ${s} piece${s > 1 ? "s" : ""} remaining.`;
+//                 else if (s < 10) v.stockMessage = `💨 Only a few left — ${s} available!`;
+//                 else v.stockMessage = null;
+//             }
+//         }
+
+//         // 🔟 Ensure slug exists
+//         const { generateUniqueSlug } = await import("../../middlewares/utils/slug.js");
+//         for (const prod of enrichedProducts) {
+//             if (!prod.slug) {
+//                 const newSlug = await generateUniqueSlug(Product, prod.name);
+//                 await Product.findByIdAndUpdate(prod._id, { slug: newSlug });
+//                 prod.slug = newSlug;
+//             }
+//         }
+
+//         // 11️⃣ Keep original relations (your exact logic)
+//         const productsWithRelations = enrichedProducts.map((p, i) => ({
+//             ...p,
+//             brand: products[i].brand,
+//             category: products[i].category,
+//             skinTypes: products[i].skinTypes,
+//             formulation: products[i].formulation
+//         }));
+
+//         // 12️⃣ Breadcrumbs (optimized)
+//         let ancestors = [];
+//         if (category.ancestors?.length) {
+//             const ancestorDocs = await Category.find({
+//                 _id: { $in: category.ancestors }
+//             })
+//                 .select("name slug")
+//                 .lean();
+
+//             const lookup = new Map(
+//                 ancestorDocs.map(a => [String(a._id), a])
+//             );
+
+//             ancestors = category.ancestors
+//                 .map(id => lookup.get(String(id)))
+//                 .filter(Boolean);
+//         }
+
+//         // 🟢 Save to Redis (cache 60 seconds)
+//         await redis.set(redisKey, JSON.stringify({
+//             category,
+//             breadcrumb: ancestors,
+//             products: productsWithRelations,
+//             pagination: {
+//                 page,
+//                 limit,
+//                 total,
+//                 totalPages: Math.ceil(total / limit),
+//                 hasMore: page < Math.ceil(total / limit)
+//             },
+//             message: null
+//         }), "EX", 60);
+
+
+//         // 13️⃣ Response
+//         return res.status(200).json({
+//             category,
+//             breadcrumb: ancestors,
+//             products: productsWithRelations,
+//             pagination: {
+//                 page,
+//                 limit,
+//                 total,
+//                 totalPages: Math.ceil(total / limit),
+//                 hasMore: page < Math.ceil(total / limit)
+//             },
+//             message: null
+//         });
+
+//     } catch (err) {
+//         console.error("❌ getProductsByCategory error:", err);
+//         return res.status(500).json({
+//             message: "Oops! Something went wrong while fetching products. Please try again.",
+//         });
+//     }
+// };
 export const getProductsByCategory = async (req, res) => {
     try {
         const slug = req.params.slug.toLowerCase();
+        const redis = getRedis();
 
-        const redis = getRedis();  // 🔥 REQUIRED 
-        // 🔥 Redis Cache Key
-        const redisKey = `cat:${slug}:${JSON.stringify(req.query)}`;
-
-        // 🔥 Check Cache first
+        const redisKey = `cat:v2:${slug}:${JSON.stringify(req.query)}`;
         const cached = await redis.get(redisKey);
-        if (cached) {
-            return res.status(200).json(JSON.parse(cached));
-        }
+        if (cached) return res.json(JSON.parse(cached));
 
         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
+        page = +page || 1;
+        limit = +limit || 12;
 
-        page = Number(page) || 1;
-        limit = Number(limit) || 12;
-
-        // Convert filters to arrays
-        ["skinTypes", "brandIds", "formulations", "finishes"].forEach(key => {
-            const val = queryFilters[key];
-            if (val && typeof val === "string") queryFilters[key] = [val];
+        // Normalize filters
+        ["skinTypes", "brandIds", "formulations", "finishes"].forEach(k => {
+            if (typeof queryFilters[k] === "string") queryFilters[k] = [queryFilters[k]];
         });
 
-        // 1️⃣ Find category (optimized)
-        const category = mongoose.Types.ObjectId.isValid(slug)
-            ? await Category.findById(slug)
-                .select("name slug bannerImage thumbnailImage ancestors")
-                .lean()
-            : await Category.findOne({ slug })
-                .select("name slug bannerImage thumbnailImage ancestors")
-                .lean();
+        // 🔹 Category
+        const category = await Category.findOne({ slug })
+            .select("name slug ancestors bannerImage thumbnailImage")
+            .lean();
 
-        if (!category)
+        if (!category) {
             return res.status(404).json({ message: "Category not found" });
-
-        if (req.user?._id) {
-            await User.findByIdAndUpdate(
-                req.user._id,
-                [
-                    {
-                        $set: {
-                            recentCategoryViews: {
-                                $slice: [
-                                    {
-                                        $concatArrays: [
-                                            [
-                                                {
-                                                    category: {
-                                                        _id: category._id,
-                                                        name: category.name,
-                                                        slug: category.slug
-                                                    },
-                                                    viewedAt: new Date()
-                                                }
-                                            ],
-                                            {
-                                                $filter: {
-                                                    input: "$recentCategoryViews",
-                                                    as: "item",
-                                                    cond: { $ne: ["$$item.category._id", category._id] }
-                                                }
-                                            }
-                                        ]
-                                    },
-                                    20
-                                ]
-                            }
-                        }
-                    }
-                ]
-            );
         }
 
+        // 🔹 Cached descendants
+        const descKey = `cat_desc:${category._id}`;
+        let categoryIds = await redis.get(descKey);
 
-        // 3️⃣ category + descendants (optimized)
-        const descendantIds = await getDescendantCategoryIds(category._id);
-        const validIds = descendantIds
-            .filter(id => mongoose.Types.ObjectId.isValid(id))
-            .map(id => new mongoose.Types.ObjectId(id));
+        if (!categoryIds) {
+            const descendants = await getDescendantCategoryIds(category._id);
+            categoryIds = [category._id, ...descendants];
+            await redis.set(descKey, JSON.stringify(categoryIds), "EX", 3600);
+        } else {
+            categoryIds = JSON.parse(categoryIds);
+        }
 
-        validIds.push(category._id);
-
-        // 4️⃣ Build filters
+        // 🔹 Filters
         const filters = normalizeFilters(queryFilters);
-        filters.categoryIds = validIds.map(id => id.toString());
+        filters.categoryIds = categoryIds.map(String);
 
         const finalFilter = await applyDynamicFilters(filters);
         finalFilter.isPublished = true;
 
-        // 5️⃣ Sorting
-        const sortOptions = {
+        // 🔹 Sort
+        const sortMap = {
             recent: { createdAt: -1 },
-            priceLowToHigh: { price: 1 },
-            priceHighToLow: { price: -1 },
+            priceLowToHigh: { minPrice: 1 },
+            priceHighToLow: { maxPrice: -1 },
             rating: { avgRating: -1 }
         };
 
-        // 6️⃣ Query total + products
-        const total = await Product.countDocuments(finalFilter);
-
+        // 🔹 Products (NO writes, lean only)
         const products = await Product.find(finalFilter)
-            .populate("brand", "name slug isActive")
+            .select("name slug price discountedPrice minPrice maxPrice brand category variants avgRating")
+            .populate("brand", "name slug")
             .populate("category", "name slug")
-            .populate("skinTypes", "name slug isActive")
-            .populate("formulation", "name slug isActive")
-            .sort(sortOptions[sort] || { createdAt: -1 })
+            .sort(sortMap[sort] || sortMap.recent)
             .skip((page - 1) * limit)
             .limit(limit)
             .lean();
 
-        if (!products.length) {
-            const msg = queryFilters.search
-                ? `No products found matching “${queryFilters.search}” in this category.`
-                : (filters.minPrice || filters.maxPrice || filters.brandIds?.length)
-                    ? `No products found with the selected filters in this category.`
-                    : `No products available in ${category.name} at the moment.`;
-
-            return res.status(200).json({
-                category,
-                breadcrumb: [],
-                products: [],
-                pagination: { page, limit, total: 0, totalPages: 0, hasMore: false },
-                message: msg,
-            });
+        // 🔹 Promotions (cached)
+        let promotions = await redis.get("active_promotions");
+        if (!promotions) {
+            promotions = await Promotion.find({
+                status: "active",
+                startDate: { $lte: new Date() },
+                endDate: { $gte: new Date() }
+            }).lean();
+            await redis.set("active_promotions", JSON.stringify(promotions), "EX", 120);
+        } else {
+            promotions = JSON.parse(promotions);
         }
 
-        // 7️⃣ Active promotions (optimized)
-        const now = new Date();
-        const promotions = await Promotion.find({
-            status: "active",
-            startDate: { $lte: now },
-            endDate: { $gte: now }
-        })
-            .lean();
+        const enriched = await enrichProductsUnified(products, promotions);
 
-        // 8️⃣ Enrich products (unchanged behavior)
-        const enrichedProducts = await enrichProductsUnified(products, promotions);
-
-        // 9️⃣ Stock messages (optimized)
-        for (const prod of enrichedProducts) {
-            if (!Array.isArray(prod.variants)) continue;
-
-            for (const v of prod.variants) {
-                const s = v.stock ?? 0;
-                if (s <= 0) v.stockMessage = "⛔ Currently out of stock — check back soon!";
-                else if (s === 1) v.stockMessage = "🔥 Almost gone! Only 1 left in stock.";
-                else if (s <= 3) v.stockMessage = `⚡ Hurry! Just ${s} piece${s > 1 ? "s" : ""} remaining.`;
-                else if (s < 10) v.stockMessage = `💨 Only a few left — ${s} available!`;
-                else v.stockMessage = null;
-            }
-        }
-
-        // 🔟 Ensure slug exists
-        const { generateUniqueSlug } = await import("../../middlewares/utils/slug.js");
-        for (const prod of enrichedProducts) {
-            if (!prod.slug) {
-                const newSlug = await generateUniqueSlug(Product, prod.name);
-                await Product.findByIdAndUpdate(prod._id, { slug: newSlug });
-                prod.slug = newSlug;
-            }
-        }
-
-        // 11️⃣ Keep original relations (your exact logic)
-        const productsWithRelations = enrichedProducts.map((p, i) => ({
-            ...p,
-            brand: products[i].brand,
-            category: products[i].category,
-            skinTypes: products[i].skinTypes,
-            formulation: products[i].formulation
-        }));
-
-        // 12️⃣ Breadcrumbs (optimized)
-        let ancestors = [];
-        if (category.ancestors?.length) {
-            const ancestorDocs = await Category.find({
-                _id: { $in: category.ancestors }
-            })
-                .select("name slug")
-                .lean();
-
-            const lookup = new Map(
-                ancestorDocs.map(a => [String(a._id), a])
-            );
-
-            ancestors = category.ancestors
-                .map(id => lookup.get(String(id)))
-                .filter(Boolean);
-        }
-
-        // 🟢 Save to Redis (cache 60 seconds)
-        await redis.set(redisKey, JSON.stringify({
+        const response = {
             category,
-            breadcrumb: ancestors,
-            products: productsWithRelations,
+            breadcrumb: [],
+            products: enriched,
             pagination: {
                 page,
                 limit,
-                total,
-                totalPages: Math.ceil(total / limit),
-                hasMore: page < Math.ceil(total / limit)
-            },
-            message: null
-        }), "EX", 60);
+                total: enriched.length,
+                totalPages: Math.ceil(enriched.length / limit),
+                hasMore: enriched.length === limit
+            }
+        };
 
-
-        // 13️⃣ Response
-        return res.status(200).json({
-            category,
-            breadcrumb: ancestors,
-            products: productsWithRelations,
-            pagination: {
-                page,
-                limit,
-                total,
-                totalPages: Math.ceil(total / limit),
-                hasMore: page < Math.ceil(total / limit)
-            },
-            message: null
-        });
+        await redis.set(redisKey, JSON.stringify(response), "EX", 120);
+        return res.json(response);
 
     } catch (err) {
-        console.error("❌ getProductsByCategory error:", err);
-        return res.status(500).json({
-            message: "Oops! Something went wrong while fetching products. Please try again.",
-        });
+        console.error("❌ getProductsByCategory:", err);
+        return res.status(500).json({ message: "Failed to load products" });
     }
 };
 
@@ -1964,42 +2064,73 @@ export const getSingleProduct = async (req, res) => {
     }
 };
 
+// export const getTopSellingProducts = async (req, res) => {
+//     try {
+//         const topProducts = await Product.find({ isPublished: true })
+//             .sort({ sales: -1 })
+//             .limit(10)
+//             .select("_id name images variants shadeOptions colorOptions image")
+//             .lean();
+
+//         return res.status(200).json({
+//             success: true,
+//             products: topProducts.map(p => {
+//                 const shadeOptions = Array.isArray(p.variants) && p.variants.length
+//                     ? p.variants.map(v => v.shadeName).filter(Boolean)
+//                     : (p.shadeOptions || []);
+
+//                 const colorOptions = Array.isArray(p.variants) && p.variants.length
+//                     ? p.variants.map(v => v.hex).filter(Boolean)
+//                     : (p.colorOptions || []);
+
+//                 const firstVariantImage =
+//                     Array.isArray(p.variants) &&
+//                         p.variants.length &&
+//                         Array.isArray(p.variants[0].images) &&
+//                         p.variants[0].images.length
+//                         ? p.variants[0].images[0]
+//                         : null;
+
+
+//                 return {
+//                     _id: p._id,
+//                     name: p.name,
+//                     image: firstVariantImage,
+//                     shadeOptions,
+//                     colorOptions
+//                 };
+//             })
+//         });
+
+//     } catch (error) {
+//         console.error("🔥 Failed to fetch top sellers:", error);
+//         return res.status(500).json({
+//             success: false,
+//             message: "Failed to fetch top selling products",
+//             error: error.message
+//         });
+//     }
+// };
+
 export const getTopSellingProducts = async (req, res) => {
     try {
-        const topProducts = await Product.find({ isPublished: true })
-            .sort({ sales: -1 })
-            .limit(10)
-            .select("_id name images variants shadeOptions colorOptions image")
-            .lean();
+        const products = await getTrendingProducts(10);
+
+        const formatted = products.map(p => {
+
+            const firstVariantImage =
+                p.variants?.[0]?.images?.[0] || null;
+
+            return {
+                _id: p._id,
+                name: p.name,
+                image: firstVariantImage
+            };
+        });
 
         return res.status(200).json({
             success: true,
-            products: topProducts.map(p => {
-                const shadeOptions = Array.isArray(p.variants) && p.variants.length
-                    ? p.variants.map(v => v.shadeName).filter(Boolean)
-                    : (p.shadeOptions || []);
-
-                const colorOptions = Array.isArray(p.variants) && p.variants.length
-                    ? p.variants.map(v => v.hex).filter(Boolean)
-                    : (p.colorOptions || []);
-
-                const firstVariantImage =
-                    Array.isArray(p.variants) &&
-                        p.variants.length &&
-                        Array.isArray(p.variants[0].images) &&
-                        p.variants[0].images.length
-                        ? p.variants[0].images[0]
-                        : null;
-
-
-                return {
-                    _id: p._id,
-                    name: p.name,
-                    image: firstVariantImage,
-                    shadeOptions,
-                    colorOptions
-                };
-            })
+            products: formatted
         });
 
     } catch (error) {
@@ -2011,7 +2142,6 @@ export const getTopSellingProducts = async (req, res) => {
         });
     }
 };
-
 
 export const getTopCategories = async (req, res) => {
     try {
