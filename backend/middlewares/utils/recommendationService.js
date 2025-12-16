@@ -4,6 +4,7 @@ import Product from "../../models/Product.js";
 import Promotion from "../../models/Promotion.js";
 import Category from "../../models/Category.js";
 import Order from "../../models/Order.js";
+import User from "../../models/User.js";
 import ProductViewLog from "../../models/ProductViewLog.js";
 import SkinType from "../../models/SkinType.js";
 import { buildOptions, normalizeImages } from "../../controllers/user/userProductController.js";
@@ -372,60 +373,143 @@ export const getRecommendations = async ({ mode, productId, categorySlug, skinTy
                 message = fallbackFrom ? `More like this (showing from ${fallbackFrom})` : "More like this";
                 break;
             }
-
             case "boughtTogether": {
-                const orders = await Order.aggregate([
-                    { $unwind: "$products" },
-                    { $match: { "products.productId": { $ne: new mongoose.Types.ObjectId(productId) } } },
-                    { $group: { _id: "$products.productId", count: { $sum: 1 } } },
-                    { $sort: { count: -1 } },
-                    { $limit: limit }
+                const pid = new mongoose.Types.ObjectId(productId);
+
+                // 1️⃣ Real "bought together" aggregation
+                const boughtTogetherAgg = await Order.aggregate([
+                    {
+                        // Orders that REALLY include this product
+                        $match: {
+                            "products.productId": pid
+                        }
+                    },
+                    {
+                        // Expand products inside those orders
+                        $unwind: "$products"
+                    },
+                    {
+                        // Exclude the same product
+                        $match: {
+                            "products.productId": { $ne: pid }
+                        }
+                    },
+                    {
+                        // Weight by quantity (stronger signal)
+                        $group: {
+                            _id: "$products.productId",
+                            score: { $sum: "$products.quantity" }
+                        }
+                    },
+                    {
+                        $sort: { score: -1 }
+                    },
+                    {
+                        $limit: limit
+                    }
                 ]);
 
-                products = await getProductsByIds(orders.map(o => o._id), limit);
+                products = await getProductsByIds(
+                    boughtTogetherAgg.map(o => o._id),
+                    limit
+                );
 
+                // 2️⃣ Fallback → category chain (ONLY if empty)
                 let fallbackFrom = null;
-                if (!products.length) {
-                    const prod = await Product.findById(productId).lean();
-                    if (prod?.category) {
-                        const fallback = await fallbackCategoryChain(prod.category);
-                        products = fallback.products;
-                        fallbackFrom = fallback.fallbackFrom ? `parent category: ${fallback.fallbackFrom}` : null;
-                    }
-                }
 
-                if (!products.length) {
-                    products = await trendingProducts();
-                    fallbackFrom = "trending products";
-                }
-
-                message = fallbackFrom ? `Frequently bought together (showing from ${fallbackFrom})` : "Frequently bought together";
-                break;
-            }
-
-            case "alsoViewed": {
-                const viewed = await ProductViewLog.find({ userId }).sort({ createdAt: -1 }).limit(limit).lean();
-                const viewedIds = viewed.map(v => v.productId).filter(Boolean);
-                products = await getProductsByIds(viewedIds, limit);
-
-                let fallbackFrom = null;
                 if (!products.length && productId) {
                     const prod = await Product.findById(productId).lean();
                     if (prod?.category) {
                         const fallback = await fallbackCategoryChain(prod.category);
                         products = fallback.products;
-                        fallbackFrom = fallback.fallbackFrom ? `parent category: ${fallback.fallbackFrom}` : null;
+                        fallbackFrom = fallback.fallbackFrom
+                            ? `parent category: ${fallback.fallbackFrom}`
+                            : "same category";
                     }
                 }
 
+                // 3️⃣ LAST fallback → trending
                 if (!products.length) {
                     products = await trendingProducts();
                     fallbackFrom = "trending products";
                 }
 
-                message = fallbackFrom ? `Also viewed (showing from ${fallbackFrom})` : "Also viewed by others";
+                message = fallbackFrom
+                    ? `Frequently bought together (showing from ${fallbackFrom})`
+                    : "Frequently bought together";
+
                 break;
             }
+
+            case "alsoViewed": {
+                const user = await User.findById(userId)
+                    .select("recentlyViewed recentCategoryViews")
+                    .lean();
+
+                let fallbackFrom = null;
+
+                /* ----------------------------------
+                   1️⃣ Recently viewed products
+                ---------------------------------- */
+                if (user?.recentlyViewed?.length) {
+                    const viewedProductIds = user.recentlyViewed
+                        .sort((a, b) => new Date(b.viewedAt) - new Date(a.viewedAt))
+                        .map(v => v.product)
+                        .filter(Boolean);
+
+                    products = await getProductsByIds(viewedProductIds, limit);
+                }
+
+                /* ----------------------------------
+                   2️⃣ Recently viewed categories
+                ---------------------------------- */
+                if (!products.length && user?.recentCategoryViews?.length) {
+                    const categoryIds = user.recentCategoryViews
+                        .sort((a, b) => new Date(b.viewedAt) - new Date(a.viewedAt))
+                        .map(c => c.category)
+                        .filter(Boolean);
+
+                    for (const catId of categoryIds) {
+                        const categoryProducts = await Product.aggregate([
+                            {
+                                $match: {
+                                    category: mongoose.Types.ObjectId(catId),
+                                    isDeleted: { $ne: true },
+                                    isPublished: true
+                                }
+                            },
+                            {
+                                $addFields: {
+                                    totalSales: VARIANT_SALES_EXPR
+                                }
+                            },
+                            { $sort: { totalSales: -1 } },
+                            { $limit: limit }
+                        ]);
+
+                        if (categoryProducts.length) {
+                            products = categoryProducts;
+                            fallbackFrom = "recently viewed category";
+                            break;
+                        }
+                    }
+                }
+
+                /* ----------------------------------
+                   3️⃣ Final fallback → Trending
+                ---------------------------------- */
+                if (!products.length) {
+                    products = await trendingProducts();
+                    fallbackFrom = "trending products";
+                }
+
+                message = fallbackFrom
+                    ? `Also viewed (showing from ${fallbackFrom})`
+                    : "Also viewed by you";
+
+                break;
+            }
+
 
             case "skinType": {
                 const skinType = await SkinType.findOne({ slug: skinTypeSlug, isDeleted: false }).lean();

@@ -1,7 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import Product from '../../models/Product.js';
-import Order from '../../models/Order.js';
+import Order from '../../models/Order.js';    
 import User from '../../models/User.js';
 import { calculateCartSummary } from "../../middlewares/utils/cartPricingHelper.js";
 import axios from "axios";
@@ -939,106 +939,6 @@ export const cancelShipment = async (req, res) => {
   }
 };
 
-// export const cancelOrder = async (req, res) => {
-//   const session = await mongoose.startSession();
-
-//   try {
-//     const { orderId } = req.params;
-//     const { reason } = req.body || {};
-//     const userId = req.user?._id;
-
-//     if (!reason || !reason.trim()) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Cancellation reason is required"
-//       });
-//     }
-
-
-//     if (!orderId)
-//       return res.status(400).json({ success: false, message: "orderId is required" });
-
-//     const order = await Order.findById(orderId)
-//       .populate("user")
-//       .session(session);
-
-//     if (!order)
-//       return res.status(404).json({ success: false, message: "Order not found" });
-
-//     // 🔐 Ownership check
-//     if (String(order.user._id) !== String(userId) && !req.user?.isAdmin)
-//       return res.status(403).json({ success: false, message: "This is not your order" });
-
-//     // ❌ Already cancelled
-//     if (order.orderStatus === "Cancelled")
-//       return res.status(400).json({ success: false, message: "Order already cancelled" });
-
-//     // 🚫 If shipments already created → block
-//     if (order.shipments && order.shipments.length > 0) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Order cannot be cancelled because shipment has already been created."
-//       });
-//     }
-
-//     await session.withTransaction(async () => {
-//       order.orderStatus = "Cancelled";
-//       order.paymentStatus = order.paid ? "refund_requested" : "cancelled";
-
-//       order.cancellation = {
-//         cancelledBy: userId,
-//         reason,
-//         requestedAt: new Date(),
-//         allowed: true,
-//       };
-
-//       order.tracking_history = order.tracking_history || [];
-//       order.tracking_history.push({
-//         status: "Order Cancelled",
-//         timestamp: new Date(),
-//         location: "Customer",
-//       });
-
-//       await order.save({ session });
-//     });
-
-//     // ✉️ EMAIL
-//     try {
-//       await sendEmail(
-//         order.user.email,
-//         "Your Joyory Order Has Been Cancelled",
-//         `
-//           <p>Hi ${order.user.name},</p>
-//           <p>Your order <strong>#${order._id}</strong> has been cancelled successfully.</p>
-//           <p><strong>Reason:</strong> ${reason || "Not specified"}</p>
-//           ${order.paid
-//           ? "<p>Your refund will be processed shortly.</p>"
-//           : ""
-//         }
-//           <p>Thank you,<br/>Team Joyory</p>
-//         `
-//       );
-//     } catch (err) {
-//       console.error("Email failed:", err.message);
-//     }
-
-//     return res.status(200).json({
-//       success: true,
-//       message: order.paid
-//         ? "Order cancelled. Refund will be processed."
-//         : "Order cancelled successfully",
-//     });
-
-//   } catch (err) {
-//     console.error("❌ Cancel order error:", err);
-//     return res.status(500).json({
-//       success: false,
-//       message: err.message || "Cancel order failed",
-//     });
-//   } finally {
-//     await session.endSession();
-//   }
-// };
 export const cancelOrder = async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -1047,21 +947,6 @@ export const cancelOrder = async (req, res) => {
     const { reason } = req.body || {};
     const userId = req.user?._id;
 
-    console.log("=== CANCEL ORDER REQUEST ===");
-    console.log("Order ID:", orderId);
-    console.log("Reason:", reason);
-    console.log("User ID:", userId);
-    console.log("User object:", req.user);
-
-    // Check if user is authenticated
-    if (!userId) {
-      console.error("❌ No user ID found in request");
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required. Please log in."
-      });
-    }
-
     if (!reason || !reason.trim()) {
       return res.status(400).json({
         success: false,
@@ -1069,60 +954,27 @@ export const cancelOrder = async (req, res) => {
       });
     }
 
-    if (!orderId) {
-      return res.status(400).json({
-        success: false,
-        message: "orderId is required"
-      });
-    }
+
+    if (!orderId)
+      return res.status(400).json({ success: false, message: "orderId is required" });
 
     const order = await Order.findById(orderId)
       .populate("user")
       .session(session);
 
-    if (!order) {
-      console.error("❌ Order not found:", orderId);
-      return res.status(404).json({
-        success: false,
-        message: "Order not found"
-      });
-    }
-
-    console.log("Found order:", {
-      orderId: order._id,
-      orderUser: order.user?._id?.toString(),
-      currentUser: userId.toString(),
-      isAdmin: req.user?.isAdmin
-    });
+    if (!order)
+      return res.status(404).json({ success: false, message: "Order not found" });
 
     // 🔐 Ownership check
-    const orderUserId = order.user?._id?.toString();
-    const currentUserId = userId.toString();
-
-    if (orderUserId !== currentUserId && !req.user?.isAdmin) {
-      console.error("❌ Permission denied:", {
-        orderUserId,
-        currentUserId,
-        isAdmin: req.user?.isAdmin
-      });
-      return res.status(403).json({
-        success: false,
-        message: "This is not your order"
-      });
-    }
+    if (String(order.user._id) !== String(userId) && !req.user?.isAdmin)
+      return res.status(403).json({ success: false, message: "This is not your order" });
 
     // ❌ Already cancelled
-    if (order.orderStatus === "Cancelled") {
-      console.log("❌ Order already cancelled");
-      return res.status(400).json({
-        success: false,
-        message: "Order already cancelled"
-      });
-    }
+    if (order.orderStatus === "Cancelled")
+      return res.status(400).json({ success: false, message: "Order already cancelled" });
 
     // 🚫 If shipments already created → block
     if (order.shipments && order.shipments.length > 0) {
-      console.log("❌ Shipments exist:", order.shipments.length);
       return res.status(400).json({
         success: false,
         message: "Order cannot be cancelled because shipment has already been created."
@@ -1150,8 +1002,6 @@ export const cancelOrder = async (req, res) => {
       await order.save({ session });
     });
 
-    console.log("✅ Order cancelled successfully");
-
     // ✉️ EMAIL
     try {
       await sendEmail(
@@ -1168,9 +1018,8 @@ export const cancelOrder = async (req, res) => {
           <p>Thank you,<br/>Team Joyory</p>
         `
       );
-      console.log("✅ Email sent to:", order.user.email);
     } catch (err) {
-      console.error("❌ Email failed:", err.message);
+      console.error("Email failed:", err.message);
     }
 
     return res.status(200).json({
@@ -1178,7 +1027,6 @@ export const cancelOrder = async (req, res) => {
       message: order.paid
         ? "Order cancelled. Refund will be processed."
         : "Order cancelled successfully",
-      order: order // Add the updated order to response
     });
 
   } catch (err) {
@@ -1191,3 +1039,172 @@ export const cancelOrder = async (req, res) => {
     await session.endSession();
   }
 };
+
+// export const cancelOrder = async (req, res) => {
+//   const session = await mongoose.startSession();
+//   try {
+//     const { orderId, reason } = req.body;
+//     const userId = req.user?._id;
+
+//     if (!orderId)
+//       return res.status(400).json({ success: false, message: "orderId is required" });
+
+//     const order = await Order.findById(orderId)
+//       .populate("products.productId")
+//       .populate("user");
+
+//     if (!order)
+//       return res.status(404).json({ success: false, message: "Order not found" });
+
+//     // ensure owner
+//     if (String(order.user._id) !== String(userId) && !req.user?.isAdmin)
+//       return res.status(403).json({ success: false, message: "Unauthorized" });
+
+//     // prevent duplicate cancellation
+//     if (order.orderStatus === "Cancelled")
+//       return res.status(400).json({ success: false, message: "Order already cancelled" });
+
+//     // cannot cancel after shipping
+//     const nonCancelableStatuses = ["Shipped", "Out for Delivery", "Delivered"];
+//     if (nonCancelableStatuses.includes(order.orderStatus))
+//       return res.status(400).json({
+//         success: false,
+//         message: `Order cannot be cancelled once ${order.orderStatus}`
+//       });
+
+//     await session.withTransaction(async () => {
+//       const txOrder = await Order.findById(orderId)
+//         .session(session)
+//         .populate("products.productId");
+
+//       if (!txOrder) throw new Error("Order disappeared during transaction");
+
+//       // ⭐⭐⭐ REVERSE STOCK & SALES — only if admin confirmed ⭐⭐⭐
+//       if (txOrder.adminConfirmed) {
+//         for (const item of txOrder.products) {
+//           const product = await Product.findById(item.productId._id).session(session);
+//           if (!product) continue;
+
+//           const qty = Number(item.quantity || 0);
+
+//           if (item.variant?.sku) {
+//             const variantIndex = product.variants.findIndex(v => v.sku === item.variant.sku);
+//             if (variantIndex !== -1) {
+//               const variant = product.variants[variantIndex];
+
+//               // restore stock
+//               variant.stock += qty;
+
+//               // reduce sales
+//               variant.sales = Math.max(0, (variant.sales || 0) - qty);
+//             }
+//           } else {
+//             product.quantity += qty;
+//           }
+
+//           // restore product-wide sales
+//           product.sales = Math.max(0, (product.sales || 0) - qty);
+
+//           // update total stock if variants exist
+//           if (product.variants?.length > 0) {
+//             product.quantity = product.variants.reduce(
+//               (s, v) => s + (Number(v.stock) || 0),
+//               0
+//             );
+//           }
+
+//           // status update
+//           if (product.quantity <= 0) product.status = "Out of stock";
+//           else if (product.thresholdValue != null && product.quantity < product.thresholdValue)
+//             product.status = "Low stock";
+//           else product.status = "In-stock";
+
+//           await product.save({ session });
+//         }
+//       }
+
+//       // cancel in shiprocket
+//       if (txOrder.shipment?.shiprocket_order_id) {
+//         try {
+//           await cancelShiprocketShipment(txOrder.shipment.shiprocket_order_id);
+//         } catch (err) {
+//           console.error("Shiprocket cancel failed:", err?.response?.data || err.message);
+//         }
+//       }
+
+//       txOrder.orderStatus = "Cancelled";
+//       txOrder.paymentStatus = txOrder.paid ? "refund_requested" : "cancelled";
+
+//       txOrder.cancellation = {
+//         cancelledBy: userId,
+//         reason,
+//         requestedAt: new Date(),
+//         allowed: true,
+//       };
+
+//       // refund setup
+//       if (txOrder.paid) {
+//         txOrder.refund = {
+//           amount: txOrder.amount,
+//           method: null,
+//           status: "requested",
+//           reason,
+//           requestedBy: userId,
+//           refundAudit: [
+//             {
+//               status: "requested",
+//               changedBy: userId,
+//               changedByModel: "User",
+//               note: "Refund requested automatically after cancellation",
+//             },
+//           ],
+//         };
+//       }
+
+//       await txOrder.save({ session });
+//     });
+
+//     const refundMethodsAvailable = order.paid
+//       ? [
+//         { method: "razorpay", label: "Original Payment Method" },
+//         { method: "wallet", label: "Joyory Wallet" },
+//       ]
+//       : [];
+
+//     // -----------------------------------------------
+//     // 📩 SEND EMAIL TO USER — SAME STYLE AS GIFT CARD
+//     // -----------------------------------------------
+//     try {
+//       await sendEmail(
+//         order.user.email,
+//         "Your Joyory Order Has Been Cancelled",
+//         `
+//                 <p>Hi ${order.user.name},</p>
+//                 <p>Your order <strong>#${order._id}</strong> has been successfully cancelled.</p>
+//                 <p><strong>Reason:</strong> ${reason || "Not specified"}</p>
+//                 ${order.paid
+//           ? `<p>A refund request has been created. Please select your preferred refund method in your Joyory dashboard.</p>`
+//           : `<p>Since this order was unpaid, no refund is required.</p>`
+//         }
+//                 <p>Thank you,<br/>Team Joyory</p>
+//             `
+//       );
+//     } catch (emailErr) {
+//       console.error("Email sending failed:", emailErr.message);
+//     }
+//     // -------------------------------------------------
+
+//     return res.status(200).json({
+//       success: true,
+//       message: order.paid
+//         ? "Order cancelled. Refund initiated — choose refund method."
+//         : "Order cancelled successfully.",
+//       refundMethodsAvailable,
+//     });
+//   } catch (err) {
+//     console.error("❌ Cancel order error:", err);
+//     res.status(500).json({ success: false, message: "Cancel order failed" });
+//   } finally {
+//     await session.endSession();
+//   }
+// };
