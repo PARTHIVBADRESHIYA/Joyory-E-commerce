@@ -4,7 +4,44 @@ import Order from "../../models/Order.js";
 import mongoose from "mongoose";
 import { formatProductCard, getRecommendations } from "../../middlewares/utils/recommendationService.js";
 import { enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
+import { getRedis } from "../../middlewares/utils/redis.js";
+import Promotion from "../../models/Promotion.js";
 
+export async function getEnrichedProductsByIds(productIds, cacheKey, ttl = 60) {
+    const redis = getRedis();
+
+    // 🔥 Redis hit
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+        return JSON.parse(cached);
+    }
+
+    // Fetch products
+    const products = await Product.find({
+        _id: { $in: productIds },
+        isPublished: true
+    })
+        .select(
+            "name slug mrp price discountedPrice variants images brand category avgRating totalRatings"
+        )
+        .populate("brand", "name slug")
+        .populate("category", "name slug")
+        .lean();
+
+    // Promotions (same logic as product page)
+    const now = new Date();
+    const promotions = await Promotion.find({
+        status: "active",
+        startDate: { $lte: now },
+        endDate: { $gte: now }
+    }).lean();
+
+    const enriched = await enrichProductsUnified(products, promotions);
+
+    await redis.set(cacheKey, JSON.stringify(enriched), "EX", ttl);
+
+    return enriched;
+}
 
 // export const getHomepageSections = async (req, res) => {
 //     try {
@@ -123,11 +160,130 @@ import { enrichProductsUnified } from "../../middlewares/services/productHelpers
 //         });
 //     }
 // };
+// export const getHomepageSections = async (req, res) => {
+//     try {  
+//         const sections = [];
+
+//         const productsAgg = await Product.aggregate([
+//             {
+//                 $match: {
+//                     isDeleted: { $ne: true },
+//                     isPublished: true
+//                 }
+//             },
+//             {
+//                 $addFields: {
+//                     topVariant: {
+//                         $arrayElemAt: [
+//                             {
+//                                 $sortArray: {
+//                                     input: "$variants",
+//                                     sortBy: { sales: -1 }
+//                                 }
+//                             },
+//                             0
+//                         ]
+//                     }
+//                 }
+//             },
+//             {
+//                 $project: {
+//                     name: 1,
+//                     createdAt: 1,
+//                     views: 1,
+//                     totalSales: {
+//                         $sum: {
+//                             $map: {
+//                                 input: "$variants",
+//                                 as: "v",
+//                                 in: { $ifNull: ["$$v.sales", 0] }
+//                             }
+//                         }
+//                     },
+//                     image: {
+//                         $cond: [
+//                             { $gt: [{ $size: "$topVariant.images" }, 0] },
+//                             { $arrayElemAt: ["$topVariant.images", 0] },
+//                             null
+//                         ]
+//                     }
+//                 }
+//             },
+//             {
+//                 $facet: {
+//                     trending: [
+//                         { $sort: { totalSales: -1 } },
+//                         { $limit: 10 }
+//                     ],
+//                     newArrivals: [
+//                         { $sort: { createdAt: -1 } },
+//                         { $limit: 10 }
+//                     ],
+//                     topSelling: [
+//                         { $sort: { totalSales: -1 } },
+//                         { $limit: 10 }
+//                     ],
+//                     mostViewed: [
+//                         { $sort: { views: -1 } },
+//                         { $limit: 10 }
+//                     ]
+//                 }
+//             }
+//         ]);
+
+//         const data = productsAgg[0] || {};
+
+//         const mapMinimal = (list = []) =>
+//             list.map(p => ({
+//                 _id: p._id,
+//                 name: p.name,
+//                 image: p.image
+//             }));
+
+//         sections.push({
+//             title: "Trending Now",
+//             products: mapMinimal(data.trending)
+//         });
+
+//         sections.push({
+//             title: "New Arrivals",
+//             products: mapMinimal(data.newArrivals)
+//         });
+
+//         sections.push({
+//             title: "Top Selling",
+//             products: mapMinimal(data.topSelling)
+//         });
+
+//         sections.push({
+//             title: "Most Viewed",
+//             products: mapMinimal(data.mostViewed)
+//         });
+
+//         return res.json({
+//             success: true,
+//             sections
+//         });
+
+//     } catch (err) {
+//         console.error("🔥 Homepage Sections Error:", err);
+//         return res.status(500).json({
+//             success: false,
+//             message: "Failed to fetch homepage sections"
+//         });
+//     }
+// };
 export const getHomepageSections = async (req, res) => {
     try {
-        const sections = [];
+        const redis = getRedis();
+        const cacheKey = "homepage:v2";
 
-        const productsAgg = await Product.aggregate([
+        const cached = await redis.get(cacheKey);
+        if (cached) {
+            return res.json(JSON.parse(cached));
+        }
+
+        const agg = await Product.aggregate([
             {
                 $match: {
                     isDeleted: { $ne: true },
@@ -136,24 +292,6 @@ export const getHomepageSections = async (req, res) => {
             },
             {
                 $addFields: {
-                    topVariant: {
-                        $arrayElemAt: [
-                            {
-                                $sortArray: {
-                                    input: "$variants",
-                                    sortBy: { sales: -1 }
-                                }
-                            },
-                            0
-                        ]
-                    }
-                }
-            },
-            {
-                $project: {
-                    name: 1,
-                    createdAt: 1,
-                    views: 1,
                     totalSales: {
                         $sum: {
                             $map: {
@@ -162,13 +300,6 @@ export const getHomepageSections = async (req, res) => {
                                 in: { $ifNull: ["$$v.sales", 0] }
                             }
                         }
-                    },
-                    image: {
-                        $cond: [
-                            { $gt: [{ $size: "$topVariant.images" }, 0] },
-                            { $arrayElemAt: ["$topVariant.images", 0] },
-                            null
-                        ]
                     }
                 }
             },
@@ -176,57 +307,59 @@ export const getHomepageSections = async (req, res) => {
                 $facet: {
                     trending: [
                         { $sort: { totalSales: -1 } },
-                        { $limit: 10 }
+                        { $limit: 10 },
+                        { $project: { _id: 1 } }
                     ],
                     newArrivals: [
                         { $sort: { createdAt: -1 } },
-                        { $limit: 10 }
+                        { $limit: 10 },
+                        { $project: { _id: 1 } }
                     ],
                     topSelling: [
                         { $sort: { totalSales: -1 } },
-                        { $limit: 10 }
+                        { $limit: 10 },
+                        { $project: { _id: 1 } }
                     ],
                     mostViewed: [
                         { $sort: { views: -1 } },
-                        { $limit: 10 }
+                        { $limit: 10 },
+                        { $project: { _id: 1 } }
                     ]
                 }
             }
         ]);
 
-        const data = productsAgg[0] || {};
+        const data = agg[0] || {};
 
-        const mapMinimal = (list = []) =>
-            list.map(p => ({
-                _id: p._id,
-                name: p.name,
-                image: p.image
-            }));
+        // Extract IDs
+        const ids = list => list.map(p => p._id);
 
-        sections.push({
-            title: "Trending Now",
-            products: mapMinimal(data.trending)
-        });
+        // 🔥 SAME enrichment as product page
+        const [
+            trending,
+            newArrivals,
+            topSelling,
+            mostViewed
+        ] = await Promise.all([
+            getEnrichedProductsByIds(ids(data.trending), "home:trending"),
+            getEnrichedProductsByIds(ids(data.newArrivals), "home:new"),
+            getEnrichedProductsByIds(ids(data.topSelling), "home:top"),
+            getEnrichedProductsByIds(ids(data.mostViewed), "home:viewed")
+        ]);
 
-        sections.push({
-            title: "New Arrivals",
-            products: mapMinimal(data.newArrivals)
-        });
-
-        sections.push({
-            title: "Top Selling",
-            products: mapMinimal(data.topSelling)
-        });
-
-        sections.push({
-            title: "Most Viewed",
-            products: mapMinimal(data.mostViewed)
-        });
-
-        return res.json({
+        const response = {
             success: true,
-            sections
-        });
+            sections: [
+                { title: "Trending Now", products: trending },
+                { title: "New Arrivals", products: newArrivals },
+                { title: "Top Selling", products: topSelling },
+                { title: "Most Viewed", products: mostViewed }
+            ]
+        };
+
+        await redis.set(cacheKey, JSON.stringify(response), "EX", 120);
+
+        return res.json(response);
 
     } catch (err) {
         console.error("🔥 Homepage Sections Error:", err);

@@ -1094,6 +1094,7 @@ import { getRedis } from '../../middlewares/utils/redis.js';
 import { PRODUCT_CACHE_VERSION } from '../../middlewares/utils/cacheUtils.js';
 import { enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
 import mongoose from 'mongoose';
+import { getEnrichedProductsByIds } from "../../controllers/user/recommendationController.js";
 
 
 let _promoCache = { ts: 0, data: null, ttl: 5000 }; // ttl in ms (5s)
@@ -2112,33 +2113,74 @@ export const getSingleProduct = async (req, res) => {
 //     }
 // };
 
+// export const getTopSellingProducts = async (req, res) => {
+//     try {
+//         const products = await getTrendingProducts(10);
+
+//         const formatted = products.map(p => {
+
+//             const firstVariantImage =
+//                 p.variants?.[0]?.images?.[0] || null;
+
+//             return {
+//                 _id: p._id,
+//                 name: p.name,
+//                 image: firstVariantImage
+//             };
+//         });
+
+//         return res.status(200).json({
+//             success: true,
+//             products: formatted
+//         });
+
+//     } catch (error) {
+//         console.error("🔥 Failed to fetch top sellers:", error);
+//         return res.status(500).json({
+//             success: false,
+//             message: "Failed to fetch top selling products",
+//             error: error.message
+//         });
+//     }
+// };
 export const getTopSellingProducts = async (req, res) => {
     try {
-        const products = await getTrendingProducts(10);
+        const redis = getRedis();
+        const cacheKey = "top-selling:v2";
 
-        const formatted = products.map(p => {
+        // 1️⃣ Redis cache
+        const cached = await redis.get(cacheKey);
+        if (cached) {
+            return res.json(JSON.parse(cached));
+        }
 
-            const firstVariantImage =
-                p.variants?.[0]?.images?.[0] || null;
+        // 2️⃣ Use SAME LOGIC as before
+        const trendingProducts = await getTrendingProducts(10);
 
-            return {
-                _id: p._id,
-                name: p.name,
-                image: firstVariantImage
-            };
-        });
+        // 3️⃣ Extract ONLY IDs (IMPORTANT)
+        const ids = trendingProducts.map(p => p._id);
 
-        return res.status(200).json({
+        // 4️⃣ SAME enrichment as homepage
+        const enrichedProducts = await getEnrichedProductsByIds(
+            ids,
+            "top-selling"
+        );
+
+        const response = {
             success: true,
-            products: formatted
-        });
+            products: enrichedProducts
+        };
+
+        // 5️⃣ Cache final response
+        await redis.set(cacheKey, JSON.stringify(response), "EX", 120);
+
+        return res.status(200).json(response);
 
     } catch (error) {
         console.error("🔥 Failed to fetch top sellers:", error);
         return res.status(500).json({
             success: false,
-            message: "Failed to fetch top selling products",
-            error: error.message
+            message: "Failed to fetch top selling products"
         });
     }
 };
