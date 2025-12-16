@@ -128,28 +128,7 @@ export const getActivePromotions = async () => {
     return promotions;
 };
 
-/**
- * Trending products ⚡ cache top 50
- */
-// const getTrendingProducts = async (limit) => {
-//     const redis = getRedis();
-//     const redisKey = `trendingProducts:top50`;
-//     const cached = await redis.get(redisKey);
-//     let trending = [];
 
-//     if (cached) trending = JSON.parse(cached);
-//     else {
-//         trending = await Product.find({
-//             sales: { $gt: 0 },
-//             isDeleted: { $ne: true },
-//             isPublished: true
-//         }).sort({ sales: -1 }).limit(50).lean();
-
-//         await redis.set(redisKey, JSON.stringify(trending), "EX", 300);
-//     }
-
-//     return trending.slice(0, limit);
-// };
 export const getTrendingProducts = async (limit) => {
     const redis = getRedis();
     const redisKey = "trendingProducts:top50";
@@ -199,18 +178,6 @@ const getProductsByIds = async (ids, limit) => {
 /**
  * Fallback category chain products
  */
-// const getFallbackProducts = async (categoryId, limit) => {
-//     const chain = await getCategoryFallbackChain(await Category.findById(categoryId).lean());
-//     for (const cat of chain) {
-//         const prods = await Product.find({
-//             category: cat._id,
-//             isDeleted: { $ne: true },
-//             isPublished: true
-//         }).sort({ sales: -1 }).limit(limit).lean();
-//         if (prods.length) return { products: prods, fallbackFrom: cat.name };
-//     }
-//     return { products: [], fallbackFrom: null };
-// };
 
 const getFallbackProducts = async (categoryId, limit) => {
     const chain = await getCategoryFallbackChain(
@@ -244,14 +211,7 @@ const getFallbackProducts = async (categoryId, limit) => {
 };
 
 
-/**
- * Skin type products batch query
- */
-// const getSkinTypeProducts = async (skinTypeId, categoryIds = [], limit) => {
-//     const filter = { skinTypes: skinTypeId, isDeleted: { $ne: true }, isPublished: true };
-//     if (categoryIds.length) filter.category = { $in: categoryIds };
-//     return await Product.find(filter).sort({ sales: -1 }).limit(limit).lean();
-// };
+
 const getSkinTypeProducts = async (skinTypeId, categoryIds = [], limit) => {
     const match = {
         skinTypes: skinTypeId,
@@ -477,8 +437,8 @@ export const getRecommendations = async ({ mode, productId, categorySlug, skinTy
                 }
 
                 message = fallbackFrom
-                    ? `Also viewed (showing from ${fallbackFrom})`
-                    : "Also viewed by you";
+                    ? ` showing from ${fallbackFrom})`
+                    : "You May Also Like";
 
                 break;
             }
@@ -564,3 +524,64 @@ export const getRecommendations = async ({ mode, productId, categorySlug, skinTy
         return { success: false, products: [], message: "Server error", error: err.message };
     }
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * Skin type products batch query
+ */
+// const getSkinTypeProducts = async (skinTypeId, categoryIds = [], limit) => {
+//     const filter = { skinTypes: skinTypeId, isDeleted: { $ne: true }, isPublished: true };
+//     if (categoryIds.length) filter.category = { $in: categoryIds };
+//     return await Product.find(filter).sort({ sales: -1 }).limit(limit).lean();
+// };
+
+
+// const getFallbackProducts = async (categoryId, limit) => {
+//     const chain = await getCategoryFallbackChain(await Category.findById(categoryId).lean());
+//     for (const cat of chain) {
+//         const prods = await Product.find({
+//             category: cat._id,
+//             isDeleted: { $ne: true },
+//             isPublished: true
+//         }).sort({ sales: -1 }).limit(limit).lean();
+//         if (prods.length) return { products: prods, fallbackFrom: cat.name };
+//     }
+//     return { products: [], fallbackFrom: null };
+// };
+
+
+/**
+ * Trending products ⚡ cache top 50
+ */
+// const getTrendingProducts = async (limit) => {
+//     const redis = getRedis();
+//     const redisKey = `trendingProducts:top50`;
+//     const cached = await redis.get(redisKey);
+//     let trending = [];
+
+//     if (cached) trending = JSON.parse(cached);
+//     else {
+//         trending = await Product.find({
+//             sales: { $gt: 0 },
+//             isDeleted: { $ne: true },
+//             isPublished: true
+//         }).sort({ sales: -1 }).limit(50).lean();
+
+//         await redis.set(redisKey, JSON.stringify(trending), "EX", 300);
+//     }
+
+//     return trending.slice(0, limit);
+// };

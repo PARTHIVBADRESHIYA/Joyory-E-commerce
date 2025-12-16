@@ -2,7 +2,7 @@ import Product from "../../models/Product.js";
 import User from "../../models/User.js";
 import Order from "../../models/Order.js";
 import mongoose from "mongoose";
-import { formatProductCard, getRecommendations } from "../../middlewares/utils/recommendationService.js";
+import { formatProductCard, getRecommendations, getActivePromotions } from "../../middlewares/utils/recommendationService.js";
 import { enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
 import { getRedis } from "../../middlewares/utils/redis.js";
 import Promotion from "../../models/Promotion.js";
@@ -273,92 +273,161 @@ export async function getEnrichedProductsByIds(productIds, cacheKey, ttl = 60) {
 //         });
 //     }
 // };
+// export const getHomepageSections = async (req, res) => {
+//     try {
+//         const redis = getRedis();
+//         const cacheKey = "homepage:v2";
+
+//         const cached = await redis.get(cacheKey);
+//         if (cached) {
+//             return res.json(JSON.parse(cached));
+//         }
+
+//         const agg = await Product.aggregate([
+//             {
+//                 $match: {
+//                     isDeleted: { $ne: true },
+//                     isPublished: true
+//                 }
+//             },
+//             {
+//                 $addFields: {
+//                     totalSales: {
+//                         $sum: {
+//                             $map: {
+//                                 input: "$variants",
+//                                 as: "v",
+//                                 in: { $ifNull: ["$$v.sales", 0] }
+//                             }
+//                         }
+//                     }
+//                 }
+//             },
+//             {
+//                 $facet: {
+//                     trending: [
+//                         { $sort: { totalSales: -1 } },
+//                         { $limit: 10 },
+//                         { $project: { _id: 1 } }
+//                     ],
+//                     newArrivals: [
+//                         { $sort: { createdAt: -1 } },
+//                         { $limit: 10 },
+//                         { $project: { _id: 1 } }
+//                     ],
+//                     topSelling: [
+//                         { $sort: { totalSales: -1 } },
+//                         { $limit: 10 },
+//                         { $project: { _id: 1 } }
+//                     ],
+//                     mostViewed: [
+//                         { $sort: { views: -1 } },
+//                         { $limit: 10 },
+//                         { $project: { _id: 1 } }
+//                     ]
+//                 }
+//             }
+//         ]);
+
+//         const data = agg[0] || {};
+
+//         // Extract IDs
+//         const ids = list => list.map(p => p._id);
+
+//         // 🔥 SAME enrichment as product page
+//         const [
+//             trending,
+//             newArrivals,
+//             topSelling,
+//             mostViewed
+//         ] = await Promise.all([
+//             getEnrichedProductsByIds(ids(data.trending), "home:trending"),
+//             getEnrichedProductsByIds(ids(data.newArrivals), "home:new"),
+//             getEnrichedProductsByIds(ids(data.topSelling), "home:top"),
+//             getEnrichedProductsByIds(ids(data.mostViewed), "home:viewed")
+//         ]);
+
+//         const response = {
+//             success: true,
+//             sections: [
+//                 { title: "Trending Now", products: trending },
+//                 { title: "New Arrivals", products: newArrivals },
+//                 { title: "Top Selling", products: topSelling },
+//                 { title: "Most Viewed", products: mostViewed }
+//             ]
+//         };
+
+//         await redis.set(cacheKey, JSON.stringify(response), "EX", 120);
+
+//         return res.json(response);
+
+//     } catch (err) {
+//         console.error("🔥 Homepage Sections Error:", err);
+//         return res.status(500).json({
+//             success: false,
+//             message: "Failed to fetch homepage sections"
+//         });
+//     }
+// };
 export const getHomepageSections = async (req, res) => {
     try {
         const redis = getRedis();
-        const cacheKey = "homepage:v2";
+        const cacheKey = "homepage:v3";
 
         const cached = await redis.get(cacheKey);
-        if (cached) {
-            return res.json(JSON.parse(cached));
-        }
+        if (cached) return res.json(JSON.parse(cached));
 
-        const agg = await Product.aggregate([
+        const userId = req.user?._id || null;
+
+        /* -------------------------
+           1️⃣ New Arrivals (STATIC)
+        ------------------------- */
+        const newArrivalsAgg = await Product.aggregate([
             {
                 $match: {
                     isDeleted: { $ne: true },
                     isPublished: true
                 }
             },
-            {
-                $addFields: {
-                    totalSales: {
-                        $sum: {
-                            $map: {
-                                input: "$variants",
-                                as: "v",
-                                in: { $ifNull: ["$$v.sales", 0] }
-                            }
-                        }
-                    }
-                }
-            },
-            {
-                $facet: {
-                    trending: [
-                        { $sort: { totalSales: -1 } },
-                        { $limit: 10 },
-                        { $project: { _id: 1 } }
-                    ],
-                    newArrivals: [
-                        { $sort: { createdAt: -1 } },
-                        { $limit: 10 },
-                        { $project: { _id: 1 } }
-                    ],
-                    topSelling: [
-                        { $sort: { totalSales: -1 } },
-                        { $limit: 10 },
-                        { $project: { _id: 1 } }
-                    ],
-                    mostViewed: [
-                        { $sort: { views: -1 } },
-                        { $limit: 10 },
-                        { $project: { _id: 1 } }
-                    ]
-                }
-            }
+            { $sort: { createdAt: -1 } },
+            { $limit: 10 }
         ]);
 
-        const data = agg[0] || {};
+        const newArrivals = await enrichProductsUnified(
+            newArrivalsAgg,
+            await getActivePromotions()
+        );
 
-        // Extract IDs
-        const ids = list => list.map(p => p._id);
-
-        // 🔥 SAME enrichment as product page
+        /* -------------------------
+           2️⃣ Recommendation-based sections
+        ------------------------- */
         const [
-            trending,
-            newArrivals,
-            topSelling,
-            mostViewed
+            trendingRes,
+            mostViewedRes
         ] = await Promise.all([
-            getEnrichedProductsByIds(ids(data.trending), "home:trending"),
-            getEnrichedProductsByIds(ids(data.newArrivals), "home:new"),
-            getEnrichedProductsByIds(ids(data.topSelling), "home:top"),
-            getEnrichedProductsByIds(ids(data.mostViewed), "home:viewed")
+            getRecommendations({ mode: "default", limit: 10 }),
+            getRecommendations({ mode: "alsoViewed", userId, limit: 10 })
         ]);
 
         const response = {
             success: true,
             sections: [
-                { title: "Trending Now", products: trending },
-                { title: "New Arrivals", products: newArrivals },
-                { title: "Top Selling", products: topSelling },
-                { title: "Most Viewed", products: mostViewed }
+                {
+                    title: "Trending Now",
+                    products: trendingRes.products
+                },
+                {
+                    title: "New Arrivals",
+                    products: newArrivals
+                },
+                {
+                    title: "Most Viewed",
+                    products: mostViewedRes.products
+                }
             ]
         };
 
         await redis.set(cacheKey, JSON.stringify(response), "EX", 120);
-
         return res.json(response);
 
     } catch (err) {
