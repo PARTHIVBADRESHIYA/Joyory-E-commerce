@@ -1,13 +1,45 @@
 import express from "express";
 import mongoose from "mongoose";
 import Product from '../../models/Product.js';
-import Order from '../../models/Order.js';    
+import Order from '../../models/Order.js';
 import User from '../../models/User.js';
 import { calculateCartSummary } from "../../middlewares/utils/cartPricingHelper.js";
 import axios from "axios";
 import { getShiprocketToken, createShiprocketOrder } from "../../middlewares/services/shiprocket.js"; // helper to fetch token
 import { sendEmail } from "../../middlewares/utils/emailService.js";
 import { cancelShiprocketShipment } from "../../middlewares/services/shiprocket.js";
+
+
+export function mapShipmentToUIStatus(shipment) {
+  if (!shipment) return "Confirmed";
+
+  // 1️⃣ Delivered
+  if (
+    shipment.status === "Delivered" ||
+    shipment.status === "RTO Delivered"
+  ) {
+    return "Delivered";
+  }
+
+  // 2️⃣ Shipped
+  const shippedStatuses = [
+    "AWB Assigned",
+    "Pickup Scheduled",
+    "Pickup Done",
+    "In Transit",
+    "Out for Delivery",
+    "Shipped",
+    "Awaiting Pickup"
+  ];
+
+  if (shippedStatuses.includes(shipment.status)) {
+    return "Shipped";
+  }
+
+  // 3️⃣ Default
+  return "Confirmed";
+}
+
 
 function formatCourierStatus(raw) {
   const map = {
@@ -378,10 +410,8 @@ export const getUserOrders = async (req, res) => {
         return {
           shipment_id: String(s.shipment_id),
           label: `Shipment ${idx + 1}`,
-          status: // map to simple 3-step statuses
-            (s.status === "Delivered") ? "Delivered" :
-              (["Shipped", "Out for Delivery", "In Transit", "Picked Up", "Awaiting Pickup"].includes(s.status)) ? "Shipped" :
-                "Confirmed",
+          status: mapShipmentToUIStatus(s),
+
           date: s.deliveredAt || s.expected_delivery || o.createdAt,
           products: [
             {
@@ -393,22 +423,13 @@ export const getUserOrders = async (req, res) => {
         };
       });
 
-      // derive top-level simplified status for UI (Confirmed / Shipped / Delivered)
-      const topStatus = deriveOrderStatusFromShipments(o.shipments || []);
-      const simpleTopStatus =
-        topStatus === "Delivered" ? "Delivered" :
-          (topStatus === "Partially Shipped" || topStatus === "Shipped" || topStatus === "Out for Delivery") ? "Shipped" :
-            "Confirmed";
-
       return {
         _id: o._id,
         orderId: o.orderId,
         orderNumber: o.orderNumber,
         date: o.createdAt,
-        status: simpleTopStatus,
         amount: o.amount,
-        shipments,
-        expectedDelivery: calculateOrderExpectedDelivery(o.shipments || [])
+        shipments
       };
     });
 
@@ -689,6 +710,8 @@ export const getOrderTracking = async (req, res) => {
 //     });
 //   }
 // };
+
+
 export const getShipmentDetails = async (req, res) => {
   try {
     const { shipment_id } = req.params;
@@ -724,7 +747,7 @@ export const getShipmentDetails = async (req, res) => {
     // ------------------------------------------------------------------
     // FINAL SHIPMENT STATUS (DIRECTLY FROM SCHEMA FIELD)
     // ------------------------------------------------------------------
-    const finalShipmentStatus = shipment.status || "Created";
+    const finalShipmentStatus = mapShipmentToUIStatus(shipment);
 
     // ------------------------------------------------------------------
     // BUILD PRODUCT LIST (schema-accurate)
@@ -943,7 +966,7 @@ export const cancelOrder = async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
-    const { orderId } = req.params; 
+    const { orderId } = req.params;
     const { reason } = req.body || {};
     const userId = req.user?._id;
 

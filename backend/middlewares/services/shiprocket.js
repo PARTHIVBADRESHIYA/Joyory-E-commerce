@@ -24,59 +24,138 @@ export async function getPickupWarehouse(productItem) {
 }
 
 
+// export function deepSearch(obj, keys) {
+//     let found = null;
+//     function search(o) {
+//         if (!o || typeof o !== "object") return;
+//         for (let k of Object.keys(o)) {
+//             if (keys.includes(k)) found = o[k];
+//             if (typeof o[k] === "object") search(o[k]);
+//         }
+//     }
+//     search(obj);
+//     return found;
+// }
+// services/shiprocket.js
+
 export function deepSearch(obj, keys) {
-    let found = null;
+    const visited = new Set();
+
     function search(o) {
-        if (!o || typeof o !== "object") return;
-        for (let k of Object.keys(o)) {
-            if (keys.includes(k)) found = o[k];
-            if (typeof o[k] === "object") search(o[k]);
+        if (!o || typeof o !== "object") return null;
+        if (visited.has(o)) return null;
+        visited.add(o);
+
+        for (const k of Object.keys(o)) {
+            if (keys.includes(k) && o[k] != null && o[k] !== "") {
+                return o[k];
+            }
+            if (typeof o[k] === "object") {
+                const found = search(o[k]);
+                if (found != null) return found;
+            }
         }
+        return null;
     }
-    search(obj);
-    return found;
+
+    return search(obj);
 }
 
-export function extractAWBFromShiprocket(data, srShipment) {
-    // Try find shipment inside array
-    const awb =
-        deepSearch(srShipment, ["awb_code", "awb", "waybill", "last_mile_awb"]) ||
-        deepSearch(data, ["awb_code", "awb", "waybill", "last_mile_awb"]) ||
-        null;
+export function extractAWBFromShiprocket(payload, shipmentId) {
+    // ✅ Normalize ALL payloads into shipment array
+    const shipments = [];
 
-    const courier =
-        deepSearch(srShipment, [
-            "courier_name",
-            "courier_company",
-            "assigned_courier",
-            "last_mile_courier",
-            "last_mile_courier_name",
-            "lm_courier_name",
-            "lm_courier",
-            "courier",
-        ]) ||
-        deepSearch(srShipment?.last_mile, [
-            "courier_name",
-            "courier_company",
-            "courier_code",
-        ]) ||
-        deepSearch(data, [
-            "courier_name",
-            "courier_company",
-            "assigned_courier",
-            "last_mile_courier",
-            "last_mile_courier_name",
-            "lm_courier_name",
-        ]) ||
-        null;
+    if (payload?.shipment_id || payload?.id) {
+        shipments.push(payload);
+    }
+
+    if (Array.isArray(payload?.shipments)) {
+        shipments.push(...payload.shipments);
+    }
+
+    if (Array.isArray(payload?.data?.shipments)) {
+        shipments.push(...payload.data.shipments);
+    }
+
+    if (Array.isArray(payload?.data)) {
+        shipments.push(...payload.data);
+    }
+
+    const targetShipment = shipments.find(s =>
+        String(s.shipment_id || s.id) === String(shipmentId)
+    );
+
+    if (!targetShipment) return null;
+
+    const awb = deepSearch(targetShipment, [
+        "awb_code",
+        "awb",
+        "waybill",
+        "last_mile_awb"
+    ]);
+
+    if (!awb) return null;
+
+    const courier = deepSearch(targetShipment, [
+        "courier_name",
+        "courier_company",
+        "assigned_courier",
+        "last_mile_courier",
+        "last_mile_courier_name",
+        "lm_courier_name",
+        "lm_courier",
+        "courier"
+    ]);
 
     const trackUrl =
-        deepSearch(srShipment, ["tracking_url", "track_url", "trackingLink"]) ||
-        deepSearch(data, ["tracking_url", "track_url"]) ||
-        (awb ? `https://shiprocket.co/tracking/${awb}` : null);
+        deepSearch(targetShipment, ["tracking_url", "track_url", "trackingLink"]) ||
+        `https://shiprocket.co/tracking/${awb}`;
 
-    return { awb, courier, trackUrl, srShipment };
+    return { awb, courier, trackUrl };
 }
+
+
+
+// export function extractAWBFromShiprocket(data, srShipment) {
+//     // Try find shipment inside array
+//     const awb =
+//         deepSearch(srShipment, ["awb_code", "awb", "waybill", "last_mile_awb"]) ||
+//         deepSearch(data, ["awb_code", "awb", "waybill", "last_mile_awb"]) ||
+//         null;
+
+//     const courier =
+//         deepSearch(srShipment, [
+//             "courier_name",
+//             "courier_company",
+//             "assigned_courier",
+//             "last_mile_courier",
+//             "last_mile_courier_name",
+//             "lm_courier_name",
+//             "lm_courier",
+//             "courier",
+//         ]) ||
+//         deepSearch(srShipment?.last_mile, [
+//             "courier_name",
+//             "courier_company",
+//             "courier_code",
+//         ]) ||
+//         deepSearch(data, [
+//             "courier_name",
+//             "courier_company",
+//             "assigned_courier",
+//             "last_mile_courier",
+//             "last_mile_courier_name",
+//             "lm_courier_name",
+//         ]) ||
+//         null;
+
+//     const trackUrl =
+//         deepSearch(srShipment, ["tracking_url", "track_url", "trackingLink"]) ||
+//         deepSearch(data, ["tracking_url", "track_url"]) ||
+//         (awb ? `https://shiprocket.co/tracking/${awb}` : null);
+
+//     return { awb, courier, trackUrl, srShipment };
+// }
 
 // 🔑 Get and cache Shiprocket token
 export async function getShiprocketToken(forceRefresh = false) {

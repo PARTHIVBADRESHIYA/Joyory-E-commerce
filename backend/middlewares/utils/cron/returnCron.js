@@ -437,7 +437,7 @@ import cron from "node-cron";
 import axios from "axios";
 import * as cheerio from "cheerio";
 import Order from "../../../models/Order.js";
-import { getShiprocketToken } from "../../services/shiprocket.js";
+import { getShiprocketToken, extractAWBFromShiprocket} from "../../services/shiprocket.js";
 import { safeShiprocketGet } from "./shiprocketTrackingJob.js";
 import { addRefundJob } from "../../services/refundQueue.js";
 import pLimit from "p-limit";
@@ -454,53 +454,7 @@ function srErr(...args) {
     console.error("❌ [SHIPROCKET]", ...args);
 }
 
-export function deepSearch(obj, keys) {
-    let found = null;
-    function search(o) {
-        if (!o || typeof o !== "object") return;
-        for (let k of Object.keys(o)) {
-            if (keys.includes(k)) found = o[k];
-            if (typeof o[k] === "object") search(o[k]);
-        }
-    }
-    search(obj);
-    return found;
-}
 
-export function extractAWBFromShiprocket(data, srShipment) {
-    const awb =
-        deepSearch(srShipment, ["awb_code", "awb", "waybill", "last_mile_awb"]) ||
-        deepSearch(data, ["awb_code", "awb", "waybill", "last_mile_awb"]) ||
-        null;
-
-    const courier =
-        deepSearch(srShipment, [
-            "courier_name",
-            "courier_company",
-            "assigned_courier",
-            "last_mile_courier",
-            "last_mile_courier_name",
-            "lm_courier_name",
-            "lm_courier",
-            "courier",
-        ]) ||
-        deepSearch(data, [
-            "courier_name",
-            "courier_company",
-            "assigned_courier",
-            "last_mile_courier",
-            "last_mile_courier_name",
-            "lm_courier_name",
-        ]) ||
-        null;
-
-    const trackUrl =
-        deepSearch(srShipment, ["tracking_url", "track_url", "trackingLink"]) ||
-        deepSearch(data, ["tracking_url", "track_url"]) ||
-        (awb ? `https://shiprocket.co/tracking/${awb}` : null);
-
-    return { awb, courier, trackUrl, srShipment };
-}
 
 export const SHIPROCKET_STATUS_MAP = {
     1: "AWB Assigned",
