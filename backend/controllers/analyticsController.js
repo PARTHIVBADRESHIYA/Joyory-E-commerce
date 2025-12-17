@@ -310,11 +310,11 @@ export const getAnalyticsDashboard = async (req, res) => {
             countOrders: revenueData.countOrders || 0,
         };
 
-
         const netRevenue =
             revenue.totalUserPaidRevenue
-            - totalGSTCollected
+            - revenue.totalGSTCollected
             - totalRefundLoss;
+
         const completedCount = revenue.countOrders;
         const AOV = completedCount ? Number((revenue.totalUserPaidRevenue / completedCount).toFixed(2)) : 0;
 

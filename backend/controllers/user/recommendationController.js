@@ -389,9 +389,19 @@ export const getHomepageSections = async (req, res) => {
                     isPublished: true
                 }
             },
+            {
+                $lookup: {
+                    from: "brands",           // 👈 Brand collection
+                    localField: "brand",
+                    foreignField: "_id",
+                    as: "brand"
+                }
+            },
+            { $unwind: { path: "$brand", preserveNullAndEmptyArrays: true } },
             { $sort: { createdAt: -1 } },
             { $limit: 10 }
         ]);
+
 
         const newArrivals = await enrichProductsUnified(
             newArrivalsAgg,

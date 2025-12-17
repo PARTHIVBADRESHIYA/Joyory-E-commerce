@@ -526,11 +526,31 @@ export const enrichProductsUnified = async (products, promotions = [], options =
             const avgRating = Math.round((review.avg || 0) * 10) / 10;
             const totalRatings = review.count || 0;
 
+            const normalizeBrand = (brand) => {
+                if (!brand) return null;
+
+                // populated brand
+                if (typeof brand === "object" && brand.name) {
+                    return {
+                        _id: brand._id,
+                        name: brand.name,
+                        slug: brand.slug || null,
+                    };
+                }
+
+                // fallback (ObjectId only)
+                return {
+                    _id: brand,
+                    name: null
+                };
+            };
+
+
             const finalEnriched = {
                 _id: enriched._id,
                 name: enriched.name,
-                brand: enriched.brand || null,
-                mrp,
+                // ✅ FIXED BRAND FIELD
+                brand: normalizeBrand(enriched.brand),
                 price,
                 discountPercent,
                 discountAmount: mrp - price,

@@ -434,14 +434,14 @@ import "./middlewares/utils/cron/promotionScheduler.js";
 import "./middlewares/utils/cron/cleanUpOrders.js";
 
 import "./middlewares/utils/cron/shiprocketRetry.js";
-import { startTrackingJob } from "./middlewares/utils/cron/shiprocketTrackingJob.js";
+// import { startTrackingJob } from "./middlewares/utils/cron/shiprocketTrackingJob.js";
 
-import "./middlewares/utils/cron/autoPayout.js";
-import "./middlewares/utils/cron/returnCron.js";
+// import "./middlewares/utils/cron/autoPayout.js";
+// import "./middlewares/utils/cron/returnCron.js";
 
-// ================= START CRON JOBS =================
-startTrackingJob();
-console.log("🚀 Shiprocket tracking job started...");
+// // ================= START CRON JOBS =================
+// startTrackingJob();
+// console.log("🚀 Shiprocket tracking job started...");
 
 // 🔹 Routes
 import authRoutes from "./routes/authRoutes.js";

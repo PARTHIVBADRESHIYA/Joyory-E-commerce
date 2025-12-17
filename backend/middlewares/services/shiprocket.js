@@ -348,7 +348,7 @@ async function checkSingleShiprocketOrderAndSave(srOrderId) {
 //                 awb_code: null, // Will be populated by tracking job
 //                 courier_name: null, // Will be populated by tracking job
 //                 tracking_url: null, // Will be populated by tracking job
-//                 status: "Awaiting Pickup",
+//                 status: "Pickup Scheduled",
 //                 assignedAt: new Date(),
 //                 expected_delivery: calculateExpectedDelivery(),
 //                 products: items.map(it => ({
@@ -583,7 +583,7 @@ export async function createShiprocketOrder(order) {
                 awb_code: null,
                 courier_name: null,
                 tracking_url: null,
-                status: "Awaiting Pickup",
+                status: "Pickup Scheduled",
                 assignedAt: new Date(),
                 expected_delivery: calculateExpectedDelivery(),
                 products: items.map(it => ({
@@ -788,7 +788,7 @@ export async function createShiprocketOrder(order) {
 //                 awb_code: null,
 //                 courier_name: null,
 //                 tracking_url: null,
-//                 status: "Awaiting Pickup",
+//                 status: "Pickup Scheduled",
 //                 assignedAt: new Date(),
 //                 expected_delivery: calculateExpectedDelivery(),
 //                 products: items.map(it => ({
@@ -933,7 +933,7 @@ export async function retryFailedShipments(maxRetries = 3) {
     // Find orders with failed shipment statuses
     const failedOrders = await Order.find({
         "shipments.status": {
-            $in: ["Failed", "Created (AWB not assigned)", "Awaiting Pickup"]
+            $in: ["Failed", "Created (AWB not assigned)", "Pickup Scheduled"]
         },
         orderStatus: { $ne: "Cancelled" }
     });
