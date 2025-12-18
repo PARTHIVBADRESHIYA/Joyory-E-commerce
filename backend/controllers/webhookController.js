@@ -197,58 +197,81 @@ export const razorpayWebhook = async (req, res) => {
         }
 
         // ----------------------------------------------------
-        // 💸 REFUND EVENTS
+        // 💸 REFUND EVENTS (RETURN LEVEL – FINAL)
         // ----------------------------------------------------
         if (event.startsWith("refund.")) {
             const refund = eventPayload.payload?.refund?.entity;
-            if (!refund) return res.status(200).json({ status: "ignored", reason: "missing_refund_entity" });
+            if (!refund) {
+                return res.status(200).json({ status: "ignored", reason: "missing_refund_entity" });
+            }
 
+            // 1️⃣ Find order containing this return refund
             const order = await Order.findOne({
-                $or: [
-                    { "refund.gatewayRefundId": refund.id },
-                    { transactionId: refund.payment_id },
-                ],
+                "shipments.returns.refund.gatewayRefundId": refund.id
             }).populate("user");
 
-            if (!order) return res.status(200).json({ status: "ignored", reason: "order_not_found" });
+            if (!order) {
+                return res.status(200).json({ status: "ignored", reason: "order_not_found" });
+            }
 
+            // 2️⃣ Find exact return inside shipments
+            let matchedReturn = null;
+
+            for (const shipment of order.shipments) {
+                const ret = shipment.returns.find(
+                    r => r.refund?.gatewayRefundId === refund.id
+                );
+                if (ret) {
+                    matchedReturn = ret;
+                    break;
+                }
+            }
+
+            if (!matchedReturn) {
+                return res.status(200).json({ status: "ignored", reason: "return_not_found" });
+            }
+
+            // 3️⃣ Handle refund lifecycle correctly
             if (event === "refund.created") {
-                order.refund.status = "initiated";
+                // Razorpay accepted refund request
+                matchedReturn.refund.status = "processing";
                 await order.save();
             }
 
             if (event === "refund.processed") {
-                order.refund.status = "completed";
-                order.paymentStatus = "refunded";
-                order.refund.refundedAt = new Date();
-                await order.save();
+                // Refund completed at Razorpay side
+                if (matchedReturn.refund.status !== "completed") {
+                    matchedReturn.refund.status = "completed";
+                    matchedReturn.refund.refundedAt = new Date();
+                    await order.save();
 
-                const methodLabel =
-                    order.refund.method === "razorpay"
-                        ? "Original Payment Method"
-                        : order.refund.method === "wallet"
-                            ? "Joyory Wallet"
-                            : "Manual UPI";
-
-                await sendEmail(
-                    order.user.email,
-                    "✅ Your Refund Has Been Processed",
-                    `
-            <p>Hi ${order.user.name},</p>
-            <p>Your refund for Order <strong>#${order._id}</strong> has been successfully processed.</p>
-            <p><strong>Amount:</strong> ₹${order.refund.amount}</p>
-            <p><strong>Method:</strong> ${methodLabel}</p>
-            <p>It may take some time to reflect based on your provider.</p>
-            <p>Regards,<br/>Team Joyory Beauty</p>
-          `
-                );
+                    // 📧 SEND EMAIL ONLY ON COMPLETION
+                    if (order.user?.email) {
+                        await sendEmail(
+                            order.user.email,
+                            "✅ Your Refund Has Been Processed",
+                            `
+                <p>Hi ${order.user.name},</p>
+                <p>Your refund request has been successfully processed.</p>
+                <p><strong>Refund Amount:</strong> ₹${matchedReturn.refund.amount}</p>
+                <p>The amount will reflect in your account within 3–7 working days.</p>
+                <p>Regards,<br/>Team Joyory Beauty</p>
+                `
+                        );
+                    }
+                }
             }
 
             if (event === "refund.failed") {
-                order.refund.status = "failed";
-                order.paymentStatus = "refund_failed";
+                matchedReturn.refund.status = "failed";
                 await order.save();
-                refundQueue.add("refund", { orderId: order._id });
+
+                await refundQueue.add(
+                    "refund",
+                    { orderId: order._id, returnId: matchedReturn._id },
+                    { jobId: `return-refund-${matchedReturn._id}` }
+                );
+
             }
         }
 
@@ -523,9 +546,6 @@ export const razorpayWebhook = async (req, res) => {
 //         return res.status(200).json({ status: "error_logged" });
 //     }
 // };
-
-
-
 
 
 export const shiprocketWebhook = async (req, res) => {

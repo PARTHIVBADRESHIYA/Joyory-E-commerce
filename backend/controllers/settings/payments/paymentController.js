@@ -21,7 +21,7 @@
 // import cloudinary from '../../../middlewares/utils/cloudinary.js';
 // import { determineOccasions, craftMessage } from "../../../middlewares/services/ecardService.js";
 // import { buildEcardPdf } from "../../../middlewares/services/ecardPdf.js";
-// import { generateInvoice } from "../../../middlewares/services/invoiceService.js";
+// import { generateAndSaveInvoice } from "../../../middlewares/services/invoiceService.js";
 // import { splitOrderForPersistence } from '../../../middlewares/services/orderSplit.js'; // or correct path
 // import { shiprocketQueue } from "../../../middlewares/services/shiprocketQueue.js";
 
@@ -1746,7 +1746,7 @@ import axios from 'axios';
 import cloudinary from '../../../middlewares/utils/cloudinary.js';
 import { determineOccasions, craftMessage } from "../../../middlewares/services/ecardService.js";
 import { buildEcardPdf } from "../../../middlewares/services/ecardPdf.js";
-import { generateInvoice } from "../../../middlewares/services/invoiceService.js";
+import { generateAndSaveInvoice } from "../../../middlewares/services/invoiceService.js";
 import { splitOrderForPersistence } from '../../../middlewares/services/orderSplit.js'; // or correct path
 
 
@@ -2784,6 +2784,18 @@ export const createWalletPayment = async (req, res) => {
         const updated = await Order.findById(orderId)
             .populate("user")
             .populate("products.productId");
+
+        let invoice;
+        try {
+            invoice = await generateAndSaveInvoice(updated);
+
+            // OPTIONAL: store invoiceId in order schema for linkage
+            updated.invoice  = invoice._id;
+            await updated.save();
+        } catch (e) {
+            console.warn("Invoice generation failed:", e.message);
+        }
+
 
         await sendEmail(
             updated.user.email,

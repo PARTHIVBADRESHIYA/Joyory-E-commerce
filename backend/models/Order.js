@@ -435,8 +435,6 @@ const ShipmentReturnSchema = new mongoose.Schema({
             "delivered_to_warehouse",
             "qc_passed",
             "qc_failed",
-            "refund_initiated",
-            "refunded",
             "cancelled"
         ],
         default: "requested"
@@ -583,32 +581,6 @@ const ShipmentSchema = new mongoose.Schema({
 
 });
 
-const RefundSchema = new mongoose.Schema({
-    amount: Number,
-    method: { type: String, enum: ["razorpay", "wallet", "manual_upi"] },
-    status: {
-        type: String,
-        enum: ["requested", "approved", "rejected", "initiated", "processing", "completed", "failed"],
-        default: "requested"
-    },
-    reason: String,
-    requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Admin" },
-    gatewayRefundId: String,
-    refundAudit: [
-        {
-            status: String,
-            changedBy: { type: mongoose.Schema.Types.ObjectId, refPath: "refundAudit.changedByModel" },
-            changedByModel: { type: String, enum: ["User", "Admin"] },
-            timestamp: { type: Date, default: Date.now },
-            note: String
-        }
-    ]
-    ,
-    attempts: { type: Number, default: 0 },
-    refundedAt: Date
-}, { timestamps: true });
-
 const CancellationSchema = new mongoose.Schema({
     cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     reason: String,
@@ -700,11 +672,7 @@ const orderSchema = new mongoose.Schema({
             "pending",
             "success",
             "failed",
-            "cancelled",
-            "refund_requested",
-            "refund_initiated",
-            "refunded",
-            "refund_failed"
+            "cancelled"
         ],
         default: 'pending'
     },
@@ -712,7 +680,6 @@ const orderSchema = new mongoose.Schema({
     paymentMethod: String,
     transactionId: String,
 
-    refund: { type: RefundSchema, default: () => ({}) },
     cancellation: { type: CancellationSchema, default: () => ({}) },
 
     orderStatus: {
@@ -774,9 +741,9 @@ const orderSchema = new mongoose.Schema({
     },
 
     invoice: {
-        number: String,
-        pdfUrl: String,
-        generatedAt: Date
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Invoice",
+        default: null
     },
 
     amount: Number,
@@ -810,7 +777,9 @@ const orderSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
-orderSchema.index({ "refund.status": 1 });
 orderSchema.index({ "cancellation.requestedAt": 1 });
+orderSchema.index({ "shipments.returns.awb_code": 1 });
+orderSchema.index({ "shipments.returns.refund.gatewayRefundId": 1 });
+orderSchema.index({ "shipments.returns.status": 1 });
 
 export default mongoose.model("Order", orderSchema);

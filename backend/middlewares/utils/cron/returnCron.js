@@ -437,7 +437,7 @@ import cron from "node-cron";
 import axios from "axios";
 import * as cheerio from "cheerio";
 import Order from "../../../models/Order.js";
-import { getShiprocketToken, extractAWBFromShiprocket} from "../../services/shiprocket.js";
+import { getShiprocketToken, extractAWBFromShiprocket } from "../../services/shiprocket.js";
 import { safeShiprocketGet } from "./shiprocketTrackingJob.js";
 import { addRefundJob } from "../../services/refundQueue.js";
 import pLimit from "p-limit";
@@ -562,7 +562,7 @@ export async function trackReturnTimeline() {
             "shipments.returns": {
                 $elemMatch: {
                     awb_code: { $ne: null },
-                    status: { $nin: ["delivered_to_warehouse", "refunded", "cancelled"] }
+                    status: { $nin: ["delivered_to_warehouse", "cancelled"] }
                 }
             }
         });
@@ -742,7 +742,11 @@ async function processReturnTimeline(orderId, shipmentId, ret, token) {
 
         if (
             finalStatus === "Delivered" ||
-            finalStatus === "Delivered to Warehouse"
+            finalStatus === "Delivered to Warehouse"||
+            finalStatus === "RTO Delivered" ||
+            finalStatus === "RTO Initiated" ||
+            finalStatus === "Shipment Delivered"
+
         ) {
             newStatus = "delivered_to_warehouse";
         }
@@ -773,20 +777,14 @@ async function processReturnTimeline(orderId, shipmentId, ret, token) {
            💸 REFUND (ONLY ONCE)
         -------------------------------------------------- */
 
-        if (newStatus === "delivered_to_warehouse" && !ret.refundInitiated) {
+        if (
+            newStatus === "delivered_to_warehouse" &&
+            (!ret.refund || ret.refund.status === "pending")
+        ) {
             srLog(`💸 REFUND QUEUED | AWB=${ret.awb_code}`);
 
-            await addRefundJob(orderId, shipmentId, ret._id);
-
-            await Order.updateOne(
-                { _id: orderId },
-                {
-                    $set: {
-                        "shipments.$[s].returns.$[r].refundInitiated": true
-                    }
-                },
-                { arrayFilters: [{ "s._id": shipmentId }, { "r._id": ret._id }] }
-            );
+            await addRefundJob(orderId, ret._id);
+            
         }
 
     } catch (err) {

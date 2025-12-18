@@ -30,12 +30,19 @@ if (connection && process.env.DISABLE_BULL !== "true") {
     console.warn("🚫 Refund Queue disabled (Redis unavailable)");
 }
 
-export const addRefundJob = async (orderId) => {
+export const addRefundJob = async (orderId, returnId) => {
     if (!connection || process.env.DISABLE_BULL === "true" || !refundQueue) {
-        console.warn(`⚠️ Skipping refund job for ${orderId} due to Redis unavailable`);
+        console.warn(`⚠️ Skipping refund job for ${orderId}`);
         return;
     }
-    await refundQueue.add("refund", { orderId });
+
+    await refundQueue.add("refund", {
+        orderId,
+        returnId,
+        refundType: "return"
+    }, {
+        jobId: `return-refund-${returnId}` // 🔥 prevents duplicates
+    });
 };
 
 export { refundQueue };
