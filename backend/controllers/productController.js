@@ -9,6 +9,46 @@ import moment from 'moment-timezone';
 // at top of admin controller file
 import { uploadToCloudinary } from '../middlewares/upload.js';
 import { clearProductCacheForId, clearAllProductCaches } from '../middlewares/utils/cacheUtils.js';
+import { generateUniqueSlug } from "../middlewares/utils/slug.js";
+
+// utils/normalizeVariant.js
+export function normalizeVariant(variant) {
+    if (!variant) return "";
+
+    return variant
+        .toString()
+        .toLowerCase()
+
+        // normalize number + unit (ml, g, kg, l)
+        .replace(/(\d+)\s*(ml|m l|ML|Ml|mL)\b/g, "$1 ml")
+        .replace(/(\d+)\s*(g|gm|grams?)\b/g, "$1 g")
+        .replace(/(\d+)\s*(kg|kilograms?)\b/g, "$1 kg")
+        .replace(/(\d+)\s*(l|litre|liter|liters?)\b/g, "$1 l")
+
+        // collapse multiple spaces
+        .replace(/\s+/g, " ")
+
+        .trim();
+}
+// utils/normalizeText.js
+export function normalizeText(value) {
+    if (!value) return "";
+
+    return value
+        .toString()
+        .toLowerCase()
+
+        // normalize number + units
+        .replace(/(\d+)\s*(ml|m\s*l)\b/gi, "$1 ml")
+        .replace(/(\d+)\s*(g|gm|grams?)\b/gi, "$1 g")
+        .replace(/(\d+)\s*(kg|kilograms?)\b/gi, "$1 kg")
+        .replace(/(\d+)\s*(l|litre|liter|liters?)\b/gi, "$1 l")
+
+        // collapse multiple spaces
+        .replace(/\s+/g, " ")
+
+        .trim();
+}
 
 // -----------------------------
 // Helper: computeWarehouseStock
@@ -401,10 +441,6 @@ const addProductController = async (req, res) => {
         if (!name)
             return res.status(400).json({ message: "Product name is required" });
 
-        const existingProduct = await Product.findOne({ name: name.trim() });
-        if (existingProduct)
-            return res.status(400).json({ message: `Product with name "${name}" already exists` });
-
         if (!category && (!categories || categories.length === 0)) {
             return res.status(400).json({ message: "Category is required" });
         }
@@ -566,6 +602,8 @@ const addProductController = async (req, res) => {
 
                         return computeWarehouseStock({
                             ...v,
+                            shadeName: normalizeVariant(v.shadeName),
+
                             stockByWarehouse: Array.isArray(v.stockByWarehouse)
                                 ? v.stockByWarehouse
                                 : [],
@@ -605,10 +643,98 @@ const addProductController = async (req, res) => {
                     ? "Low stock"
                     : "In-stock";
 
+        // ✅ Variants parsing finished here
+
+        // ---------------- DERIVE PRODUCT-LEVEL VARIANT ----------------
+        let derivedVariant = normalizeVariant(variant);
+
+        if (!derivedVariant && variants.length === 1 && variants[0]?.shadeName) {
+            derivedVariant = normalizeVariant(variants[0].shadeName);
+        }
+
+        if (!derivedVariant && variants.length > 1) {
+            derivedVariant = "multiple-shades";
+        }
+
+        // ---------------- Resolve Slugs ----------------
+        let brandSlug = null;
+        let categorySlug = null;
+        let skinTypeSlugs = [];
+        let formulationSlug = null;
+
+        if (brand) {
+            const brandDoc = await Brand.findById(brand).select("slug");
+            brandSlug = brandDoc?.slug || null;
+        }
+
+        if (resolvedCategories[0]) {
+            const catDoc = await Category.findById(resolvedCategories[0]).select("slug");
+            categorySlug = catDoc?.slug || null;
+        }
+
+        if (skinTypesArray.length > 0) {
+            const skinDocs = await SkinType.find({
+                _id: { $in: skinTypesArray }
+            }).select("slug");
+
+            skinTypeSlugs = skinDocs.map(s => s.slug).filter(Boolean);
+        }
+
+        if (finalFormulation) {
+            const formDoc = await Formulation.findById(finalFormulation).select("slug");
+            formulationSlug = formDoc?.slug || null;
+        }
+
+        // BEFORE creating product instance
+        const finalSlugs = [];
+
+        for (let i = 0; i < (variants.length > 0 ? variants.length : 1); i++) {
+
+            const v = variants.length > 0 ? variants[i] : { shadeName: derivedVariant };
+
+            const shade = v.shadeName ? v.shadeName.trim() : "";
+
+            const slugBase = [
+                name.trim(),
+                shade,
+                brandSlug,
+                categorySlug
+            ]
+                .filter(Boolean)
+                .join(" ")
+                .toLowerCase();
+
+            const slug = await generateUniqueSlug(
+                Product,
+                slugBase,
+                null
+            );
+
+            finalSlugs.push(slug);
+
+            // NEW: assign slug to variant
+            if (variants.length > 0) {
+                variants[i].slug = slug;           // <----- ADD THIS
+            }
+        }
+
+
+        // check duplicates before saving
+        const duplicateProduct = await Product.findOne({
+            slugs: { $in: finalSlugs }
+        }).select("name brand category");
+
+        if (duplicateProduct) {
+            return res.status(409).json({
+                message: "Variant already exists for another product with same brand/category and shade"
+            });
+        }
+
         // ---------------- Create Product ----------------
         const product = new Product({
             name,
-            variant,
+            slugs: finalSlugs,
+            variant: derivedVariant,      // ✅ CORRECT
             summary,
             description,
             ingredients,
@@ -617,7 +743,9 @@ const addProductController = async (req, res) => {
             price: parsedPrice,
             buyingPrice: parsedBuyingPrice,
             brand,
+            brandSlug,
             category: resolvedCategories[0],
+            categorySlug,
             categories: resolvedCategories,
             categoryHierarchy,
             status,
@@ -628,9 +756,12 @@ const addProductController = async (req, res) => {
             isPublished,
             scheduledAt: scheduleDate,
             seller: seller || null,
-            formulation: finalFormulation,    // ✅ properly stored
-            skinTypes: skinTypesArray,        // ✅ properly stored
-            expiryDate: finalExpiryDate       // ✅ properly stored
+            formulation: finalFormulation,
+            formulationSlug,    // ✅ properly stored
+            skinTypes: skinTypesArray,
+            skinTypeSlugs,        // ✅ properly stored
+            expiryDate: finalExpiryDate
+            // ✅ properly stored
         });
 
         await product.save();
@@ -665,7 +796,76 @@ const updateProductById = async (req, res) => {
         if (!existingProduct)
             return res.status(404).json({ message: "❌ Product not found" });
 
+        // ---------------- DERIVE PRODUCT-LEVEL VARIANT (FOR SHADE PRODUCTS) ----------------
+        let derivedVariant = normalizeVariant(req.body.variant ?? existingProduct.variant);
+
+        // If variant not provided, derive from shadeName
+        if (!derivedVariant) {
+            const incomingVariants =
+                req.body.variants
+                    ? (typeof req.body.variants === "string"
+                        ? JSON.parse(req.body.variants)
+                        : req.body.variants)
+                    : existingProduct.variants;
+
+            if (Array.isArray(incomingVariants) && incomingVariants.length === 1) {
+                derivedVariant = normalizeVariant(incomingVariants[0]?.shadeName);
+            }
+
+            if (!derivedVariant && Array.isArray(incomingVariants) && incomingVariants.length > 1) {
+                derivedVariant = "multiple-shades";
+            }
+        }
+
+        // ---------------- Duplicate Protection on Update ----------------
+        if (req.body.name || req.body.variant || req.body.brand || req.body.category) {
+            const checkName = (req.body.name ?? existingProduct.name).trim();
+            const checkVariant = derivedVariant;
+
+            const checkBrand = (req.body.brand ?? existingProduct.brand).trim();
+            const checkCategory = (req.body.category ?? existingProduct.category).trim();
+
+            const conflict = await Product.findOne({
+                _id: { $ne: existingProduct._id },
+                name: checkName.trim(),
+                brand: checkBrand || null,
+                category: checkCategory,
+                variant: checkVariant?.trim() || null
+            });
+
+            if (conflict) {
+                return res.status(409).json({
+                    message: "❌ Another product already exists with same name + variant"
+                });
+            }
+        }
+
         const updateData = { ...req.body };
+
+        // ---------------- Sync Slugs on Update ----------------
+        if (updateData.brand) {
+            const brandDoc = await Brand.findById(updateData.brand).select("slug");
+            updateData.brandSlug = brandDoc?.slug || null;
+        }
+
+        if (updateData.category) {
+            const catDoc = await Category.findById(updateData.category).select("slug");
+            updateData.categorySlug = catDoc?.slug || null;
+        }
+
+        if (updateData.skinTypes) {
+            const skinDocs = await SkinType.find({
+                _id: { $in: updateData.skinTypes }
+            }).select("slug");
+
+            updateData.skinTypeSlugs = skinDocs.map(s => s.slug).filter(Boolean);
+        }
+
+        if (updateData.formulation) {
+            const formDoc = await Formulation.findById(updateData.formulation).select("slug");
+            updateData.formulationSlug = formDoc?.slug || null;
+        }
+
 
         if (req.body.price) updateData.price = Number(req.body.price);
         if (req.body.buyingPrice) updateData.buyingPrice = Number(req.body.buyingPrice);
@@ -932,6 +1132,8 @@ const updateProductById = async (req, res) => {
                 const mergedVariant = {
                     ...(oldVariant || {}),
                     ...v,
+                    shadeName: normalizeVariant(v.shadeName ?? oldVariant?.shadeName),
+
                     images: uniqueImages, // This is the crucial line - make sure images array is properly set
                     stockByWarehouse: finalWarehouseStock,
                     sales: Number(v.sales ?? oldVariant?.sales ?? 0),
@@ -1033,8 +1235,17 @@ const updateProductById = async (req, res) => {
             images: updateData.images
         });
 
+        // Ensure product-level variant stays in sync with shadeName
+        if (derivedVariant) {
+            updateData.variant = derivedVariant;
+        }
+
         // ---------------- SAVE ----------------
-        const updatedProduct = await Product.findByIdAndUpdate(id, updateData, { new: true });
+        const updatedProduct = await Product.findByIdAndUpdate(
+            id,
+            updateData,
+            { new: true, runValidators: true }
+        );
 
         await clearProductCacheForId(updatedProduct._id);
         await clearProductCacheForId(updatedProduct.slug);

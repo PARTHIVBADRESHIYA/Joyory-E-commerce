@@ -2274,11 +2274,11 @@ export const getSingleProduct = async (req, res) => {
         // Decide query by id vs slug
         const query = mongoose.Types.ObjectId.isValid(idOrSlug)
             ? { _id: idOrSlug }
-            : { slug: idOrSlug };
+            : { slugs: { $in: [idOrSlug] } };   // slug inside slugs array
 
         // --- SAFE SELECT: includes fields used by response & likely used by enrichProductsUnified
         const selectFields = [
-            "_id", "name", "slug", "mrp", "price", "discountPercent", "discountAmount",
+            "_id", "name", "slugs", "mrp", "price", "discountPercent", "discountAmount",
             "images", "variants", "shadeOptions", "brand", "category", "categorySlug",
             "avgRating", "totalRatings", "inStock", "selectedVariant", "views",
             "commentsCount", "productTags", "formulation", "skinTypes", "createdAt",
@@ -2410,7 +2410,7 @@ export const getSingleProduct = async (req, res) => {
         await redis.set(redisKey, JSON.stringify({
             _id: enrichedProduct._id,
             name: enrichedProduct.name,
-            slug: enrichedProduct.slug,
+            slugs: enrichedProduct.slug,
             brand: brandData
                 ? { _id: brandData._id, name: brandData.name }
                 : null,
@@ -2430,7 +2430,7 @@ export const getSingleProduct = async (req, res) => {
         return res.status(200).json({
             _id: enrichedProduct._id,
             name: enrichedProduct.name,
-            slug: enrichedProduct.slug,
+            slugs: enrichedProduct.slug,
             brand: brandData
                 ? { _id: brandData._id, name: brandData.name }
                 : null,
