@@ -8,14 +8,49 @@ import { uploadToCloudinary, uploadMultipleToCloudinary } from '../middlewares/u
 /* ---------------------- Helpers ---------------------- */
 
 // ✅ Generate unique slug
-const generateUniqueSlug = async (base) => {
-    let slug = slugify(base, { lower: true });
-    let i = 1;
-    while (await Category.findOne({ slug })) {
-        slug = `${slugify(base, { lower: true })}-${i++}`;
+const generateHierarchicalSlug = async (name, parent) => {
+    let currentSlug = slugify(name, { lower: true });
+
+    // If parent exists → prepend parent.slug
+    if (parent) {
+        currentSlug = `${parent.slug}-${currentSlug}`;
     }
-    return slug;
+
+    let finalSlug = currentSlug;
+    let i = 1;
+
+    // Ensure uniqueness
+    while (await Category.findOne({ slug: finalSlug })) {
+        finalSlug = `${currentSlug}-${i++}`;
+    }
+
+    return finalSlug;
 };
+
+
+const normalizeCategoryName = (name) => {
+    if (!name) return name;
+
+    // Trim outside spaces
+    name = name.trim();
+
+    // Remove multiple hyphens
+    name = name.replace(/-+/g, "-");
+
+    // Normalize spaces around hyphens → always " - "
+    name = name.replace(/\s*-\s*/g, " - ");
+
+    // Collapse multiple spaces into one (except around hyphens)
+    name = name.replace(/\s+/g, " ");
+
+    // Capitalize words properly
+    name = name
+        .toLowerCase()
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+
+    return name;
+};
+
 
 // ✅ Resolve parent category (by ID | slug | name)
 const resolveParentId = async (parentId) => {
@@ -70,7 +105,8 @@ const resolveBrandIds = async (brandInputs) => {
 // Create category
 export const addCategory = async (req, res) => {
     try {
-        const { name, description } = req.body;
+        let { name, description } = req.body;
+        name = normalizeCategoryName(name);
         let { parentId } = req.body;
 
         if (!name)
@@ -107,7 +143,7 @@ export const addCategory = async (req, res) => {
         if (brandInputs && brandIds.length === 0)
             return res.status(400).json({ message: "No valid brands found" });
 
-        const slug = await generateUniqueSlug(name);
+        const slug = await generateHierarchicalSlug(name, parent);
 
         // -----------------------------
         // ✔ CLOUDINARY IMAGE UPLOADS
@@ -189,85 +225,6 @@ export const getCategoryById = async (req, res) => {
     }
 };
 
-// Update category
-// export const updateCategory = async (req, res) => {
-//     try {
-//         const { id } = req.params;
-//         const { name, description, parentId } = req.body;
-
-//         const category = await Category.findById(id);
-//         if (!category) return res.status(404).json({ message: 'Category not found' });
-
-//         // Check duplicate name
-//         if (name && name.toLowerCase() !== category.name.toLowerCase()) {
-//             const duplicate = await Category.findOne({
-//                 name: { $regex: `^${name}$`, $options: 'i' },
-//                 _id: { $ne: id }
-//             });
-//             if (duplicate) return res.status(400).json({ message: 'Category name already exists' });
-//         }
-
-//         // Handle parent change (same as before)
-//         if (parentId && parentId !== String(category.parent)) {
-//             const resolvedId = await resolveParentId(parentId);
-//             if (!resolvedId) return res.status(400).json({ message: 'New parent not found' });
-
-//             const descendants = await Category.find({ ancestors: category._id }, '_id').lean();
-//             if (descendants.some(d => String(d._id) === String(resolvedId))) {
-//                 return res.status(400).json({ message: 'Invalid parent: would create cycle' });
-//             }
-
-//             const newParent = await Category.findById(resolvedId);
-//             category.parent = newParent._id;
-//             category.ancestors = [...(newParent.ancestors || []), newParent._id];
-
-//             const updateDescendants = async (catId, parentAncestors) => {
-//                 const children = await Category.find({ parent: catId });
-//                 for (const child of children) {
-//                     child.ancestors = [...parentAncestors, catId];
-//                     await child.save();
-//                     await updateDescendants(child._id, child.ancestors);
-//                 }
-//             };
-//             await updateDescendants(category._id, category.ancestors);
-//         }
-
-//         // Update brands
-//         let brandInputs = req.body.brands || req.body.brand || req.body['brands[]'];
-//         if (brandInputs && !Array.isArray(brandInputs)) brandInputs = [brandInputs];
-//         if (brandInputs) {
-//             const brandIds = await resolveBrandIds(brandInputs);
-//             if (brandIds.length === 0) return res.status(400).json({ message: `No valid brands found` });
-//             category.brands = brandIds;
-//         }
-
-//         // Update name + slug
-//         if (name && name !== category.name) {
-//             category.name = name;
-//             category.slug = await generateUniqueSlug(name);
-//         }
-
-//         // Update description
-//         if (description !== undefined) category.description = description;
-
-//         // Update images
-//         if (req.files?.bannerImage) category.bannerImage = req.files.bannerImage.slice(0, 5).map(f => f.path);
-//         if (req.files?.thumbnailImage) category.thumbnailImage = req.files.thumbnailImage.slice(0, 5).map(f => f.path);
-//         if (req.files?.image) category.image = req.files.image.slice(0, 5).map(f => f.path); // new field
-
-//         await category.save();
-
-//         const fullCategory = await Category.findById(category._id)
-//             .populate("brands", "name slug")
-//             .populate("parent", "name slug");
-
-//         res.json({ message: 'Category updated', category: fullCategory });
-
-//     } catch (err) {
-//         console.error(err);
-//         res.status(500).json({ message: err.message });
-//     }
-// };
 export const updateCategory = async (req, res) => {
     try {
         const { id } = req.params;
@@ -324,11 +281,23 @@ export const updateCategory = async (req, res) => {
             category.brands = brandIds;
         }
 
-        // ------- Name + Slug -------
-        if (name && name !== category.name) {
-            category.name = name;
-            category.slug = await generateUniqueSlug(name);
+        if (name) {
+            const normalizedName = normalizeCategoryName(name);
+
+            if (normalizedName.toLowerCase() !== category.name.toLowerCase()) {
+                const duplicate = await Category.findOne({
+                    name: { $regex: `^${normalizedName}$`, $options: 'i' },
+                    _id: { $ne: id }
+                });
+                if (duplicate) return res.status(400).json({ message: 'Category name already exists' });
+
+                category.name = normalizedName;
+
+                const parent = category.parent ? await Category.findById(category.parent) : null;
+                category.slug = await generateHierarchicalSlug(normalizedName, parent);
+            }
         }
+
 
         // ------- Description -------
         if (description !== undefined) category.description = description;

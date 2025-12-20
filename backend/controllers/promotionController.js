@@ -155,8 +155,11 @@ const normalizeByType = async (body) => {
       };
       if (cfg.buyQty < 1 || cfg.getQty < 1)
         throw new Error("bogo requires buyQty>=1 and getQty>=1");
-      if (!cfg.sameProduct && !isObjectId(cfg.freeProductId || ""))
+
+      // sameProduct=false is allowed, freeProductId optional if scope != sameProduct
+      if (!cfg.sameProduct && cfg.freeProductId && !isObjectId(cfg.freeProductId))
         throw new Error("bogo with sameProduct=false requires valid freeProductId");
+
       return { promotionConfig: cfg };
 
     default:

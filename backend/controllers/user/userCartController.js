@@ -1526,7 +1526,17 @@ export const getCartSummary = async (req, res) => {
       loadProductsPromise,
     ]);
 
-    const { items: promoItems, summary, appliedPromotions } = promoResult || { items: [], summary: {}, appliedPromotions: [] };
+    const {
+      items: promoItems,
+      summary,
+      appliedPromotions,
+      freebies = []
+    } = promoResult || {
+      items: [],
+      summary: {},
+      appliedPromotions: [],
+      freebies: []
+    };
 
     // -------------------- Coupons Evaluation (unchanged logic) --------------------
     let applicableCoupons = [],
@@ -1694,6 +1704,8 @@ export const getCartSummary = async (req, res) => {
           discountPercent: enrichedVariant.discountPercent,
           discountAmount: enrichedVariant.discountAmount,
         },
+        freebies: item.freebies || [],   // 🔥 ADD THIS
+
       };
     });
 
@@ -1701,12 +1713,15 @@ export const getCartSummary = async (req, res) => {
     const activeItems = finalCart.filter(i => i.stockStatus !== "deleted");
 
     const bagMrp = round2(
-      activeItems.reduce((sum, i) => sum + (i.variant.originalPrice || 0) * i.quantity, 0)
+      activeItems.reduce((sum, i) => sum + i.variant.originalPrice * i.quantity, 0)
     );
 
-    const bagPayable = round2(
-      activeItems.reduce((sum, i) => sum + (i.variant.displayPrice || 0) * i.quantity, 0)
+    const bogoDiscount = round2(
+      promoItems.reduce((s, i) => s + (i._bogoFreeAmount || 0), 0)
     );
+
+    const bagPayable = round2(bagMrp - bogoDiscount);
+
 
     const totalSavings = round2(
       bagMrp - bagPayable + discountFromCoupon
@@ -1753,6 +1768,15 @@ export const getCartSummary = async (req, res) => {
     // -------------------- Final Response --------------------
     const responseData = {
       cart: finalCart,
+      // 👇👇 ADD THIS
+      freebies: freebies.map(f => ({
+        productId: f.productId,
+        name: f.name || "",
+        qty: f.qty || f.quantity || 1,
+        variant: f.variant || null,
+        price: 0,
+        message: f.message || "Free item"
+      })),
       priceDetails: {
         bagMrp,
         totalSavings,
@@ -1772,6 +1796,9 @@ export const getCartSummary = async (req, res) => {
       },
       appliedCoupon,
       appliedPromotions,
+
+      // 👇 include raw freebies here too for debugging
+      rawFreebies: freebies,
       applicableCoupons,
       inapplicableCoupons,
       grandTotal: payableWithGST,

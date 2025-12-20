@@ -694,7 +694,7 @@ const orderSchema = new mongoose.Schema({
             "Shipped",
             "Out for Delivery",
             "Delivered",
-            "Cancelled",
+            "Cancelled", 
             "Returned",
             // NEW FOR YOUR FLOW
             "Partially Delivered",
