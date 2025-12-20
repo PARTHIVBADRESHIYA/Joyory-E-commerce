@@ -1713,14 +1713,27 @@ export const getCartSummary = async (req, res) => {
     const activeItems = finalCart.filter(i => i.stockStatus !== "deleted");
 
     const bagMrp = round2(
-      activeItems.reduce((sum, i) => sum + i.variant.originalPrice * i.quantity, 0)
+      activeItems.reduce(
+        (sum, i) => sum + i.variant.originalPrice * i.quantity,
+        0
+      )
     );
+
+    const sellingTotal = round2(
+      activeItems.reduce(
+        (sum, i) => sum + i.variant.displayPrice * i.quantity,
+        0
+      )
+    );
+
+    const productDiscount = round2(bagMrp - sellingTotal);
 
     const bogoDiscount = round2(
       promoItems.reduce((s, i) => s + (i._bogoFreeAmount || 0), 0)
     );
 
-    const bagPayable = round2(bagMrp - bogoDiscount);
+    const bagPayable = round2(sellingTotal - bogoDiscount);
+
 
 
     const totalSavings = round2(
@@ -1752,14 +1765,12 @@ export const getCartSummary = async (req, res) => {
     // -------------------- GST Calculation --------------------
     const GST_RATE = 0.12; // 12%
 
-    // Taxable amount = final amount before GST
-    const taxableAmount = round2(grandTotal);
+    const taxableAmount = round2(bagPayable - discountFromCoupon);
 
-    // GST amount
     const gstAmount = round2(taxableAmount * GST_RATE);
 
-    // Final payable including GST
     const payableWithGST = round2(taxableAmount + gstAmount);
+
 
     // Friendly message (frontend ready)
     const gstMessage = `🧾 Includes 12% GST (₹${gstAmount})`;

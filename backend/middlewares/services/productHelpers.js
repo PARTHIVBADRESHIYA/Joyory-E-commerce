@@ -312,6 +312,47 @@ import { getRedis } from "../utils/redis.js";
 const PRODUCT_PROMO_TTL = 5; // 5 seconds for promo freshness
 const ENRICHED_PRODUCT_TTL = 5; // 5 seconds to auto-refresh after expiry
 
+function getEligiblePromos(product, promotions) {
+    const now = new Date();
+    const map = new Map();
+
+    for (const promo of promotions) {
+        if (promo.status !== "active") continue;
+        if (promo.startDate > now || promo.endDate < now) continue;
+        if (!productMatchesPromo(product, promo)) continue;
+
+        // 🔥 DEDUPE by promo _id
+        map.set(promo._id.toString(), promo);
+    }
+
+    return Array.from(map.values());
+}
+
+
+function buildPromoMessages(promos) {
+    return promos.map(promo => {
+        switch (promo.promotionType) {
+            case "discount":
+                return `Save ${promo.discountValue}${promo.discountUnit === "percent" ? "%" : "₹"} with this offer`;
+
+            case "bogo":
+                return "Buy 1 Get 1 Free";
+
+            case "tieredDiscount":
+                return "Buy more, save more";
+
+            case "brand":
+                return "Special brand offer available";
+
+            case "collection":
+                return "Exclusive collection offer";
+
+            default:
+                return "Special offer available";
+        }
+    });
+}
+
 export const enrichProductWithStockAndOptions = (product, promotions = []) => {
     const { shadeOptions, colorOptions } = buildOptions(product);
     const baseMrp = Number(product.mrp ?? product.price ?? 0);
@@ -469,6 +510,10 @@ export const enrichProductsUnified = async (products, promotions = [], options =
         for (const p of missingProducts) {
             const enriched = enrichProductWithStockAndOptions(p, promotions);
 
+            const eligiblePromos = getEligiblePromos(enriched, promotions);
+            const promoMessages = buildPromoMessages(eligiblePromos);
+
+
             let normalizedVariants = [];
             if (Array.isArray(enriched.variants) && enriched.variants.length > 0) {
                 normalizedVariants = calculateVariantPrices(enriched.variants, enriched, promotions);
@@ -477,8 +522,20 @@ export const enrichProductsUnified = async (products, promotions = [], options =
             }
 
             normalizedVariants = normalizedVariants.map(v => {
-                const variantMrp = Number(v.originalPrice ?? enriched.mrp ?? 0);
-                const staticPrice = Number(v.discountedPrice ?? v.price ?? variantMrp);
+                const variantMrp = Number(
+                    v.mrp ??
+                    enriched.mrp ??
+                    v.price ??
+                    enriched.price ??
+                    0
+                );
+
+                const staticPrice = Number(
+                    v.discountedPrice ??
+                    v.price ??
+                    variantMrp
+                );
+
 
                 let promoPrice = variantMrp;
                 let promoApplied = false;
@@ -498,8 +555,9 @@ export const enrichProductsUnified = async (products, promotions = [], options =
                     displayPrice: finalDisplay,
                     discountPercent,
                     discountAmount: variantMrp - finalDisplay,
-                    promoApplied: promoApplied && finalDisplay < staticPrice,
-                    promoMessage: promoApplied && finalDisplay < staticPrice ? `Save ${discountPercent}% under current promotion` : null,
+                    promoApplied: eligiblePromos.length > 0,
+                    promoMessage: promoMessages.length ? promoMessages : null,
+
                 };
             });
 
@@ -552,8 +610,6 @@ export const enrichProductsUnified = async (products, promotions = [], options =
                 // ✅ FIXED BRAND FIELD
                 brand: normalizeBrand(enriched.brand),
                 price,
-                discountPercent,
-                discountAmount: mrp - price,
                 // 🔹 ADD THESE FIELDS
                 description: enriched.description || "",
                 howToUse: enriched.howToUse || "",

@@ -490,6 +490,9 @@ export const applyPromotions = async (itemsInput, ctx = {}) => {
 
         const appliedPromotions = [];
 
+        const appliedPromoIds = new Set();
+
+
         /* ---------------------------------------------------------
          🔥 STEP 1: Product-level Promotions
         ---------------------------------------------------------- */
@@ -581,6 +584,9 @@ export const applyPromotions = async (itemsInput, ctx = {}) => {
                         const freeCount = eligibleSets * getQty;
 
                         if (freeCount > 0) {
+
+                            line._eligibleBogoPromoId = String(promo._id); // 🔥 IMPORTANT
+
                             if (same) {
                                 // Free same product variant
                                 line.freebies.push({
@@ -596,11 +602,15 @@ export const applyPromotions = async (itemsInput, ctx = {}) => {
                                 });
                             }
 
-                            appliedPromotions.push({
-                                _id: promo._id,
-                                name: promo.campaignName,
-                                type: "bogo",
-                            });
+                            if (!appliedPromoIds.has(String(promo._id))) {
+                                appliedPromotions.push({
+                                    _id: promo._id,
+                                    name: promo.campaignName,
+                                    type: "bogo",
+                                });
+                                appliedPromoIds.add(String(promo._id));
+                            }
+
                         }
                     }
 
@@ -627,11 +637,15 @@ export const applyPromotions = async (itemsInput, ctx = {}) => {
                 if (!appliedPromotions.find((p) => p._id.toString() === d.promoId.toString())) {
                     const promo = promos.find((p) => p._id.toString() === d.promoId.toString());
                     if (promo) {
-                        appliedPromotions.push({
-                            _id: promo._id,
-                            name: promo.campaignName,
-                            type: promo.promotionType,
-                        });
+                        if (!appliedPromoIds.has(String(promo._id))) {
+                            appliedPromotions.push({
+                                _id: promo._id,
+                                name: promo.campaignName,
+                                type: promo.promotionType,
+                            });
+                            appliedPromoIds.add(String(promo._id));
+                        }
+
                     }
                 }
             }
@@ -644,48 +658,41 @@ export const applyPromotions = async (itemsInput, ctx = {}) => {
         (function applyNykaaStyleBOGO() {
             const unitPool = [];
 
-            // ✅ Step 1: Collect ALL BOGO-ELIGIBLE UNITS using MRP
             for (const line of cart) {
+                if (!line._eligibleBogoPromoId) continue; // ✅ ONLY BOGO ITEMS
+
                 const qty = Number(line.qty || 0);
                 const mrp = Number(line.mrp || 0);
 
-                // Eligibility = has at least one BOGO promo applied
-                const hasBogo =
-                    Array.isArray(appliedPromotions) &&
-                    appliedPromotions.some(p => p.type === "bogo");
-
-                if (!hasBogo || qty <= 0 || mrp <= 0) continue;
+                if (qty <= 0 || mrp <= 0) continue;
 
                 for (let i = 0; i < qty; i++) {
                     unitPool.push({
                         line,
-                        price: mrp, // 🔥 MUST be MRP, not basePrice
+                        price: mrp,
                     });
                 }
             }
 
             if (unitPool.length < 2) return;
 
-            // ✅ Step 2: Sort by MRP DESC (Nykaa core rule)
+            // 🔥 Nykaa rule: highest price paid
             unitPool.sort((a, b) => b.price - a.price);
 
-            // ✅ Step 3: Every 2nd unit is FREE
             const freeUnits = [];
             for (let i = 1; i < unitPool.length; i += 2) {
                 freeUnits.push(unitPool[i]);
             }
 
-            // ✅ Step 4: Aggregate FREE value per line
             const lineFreeMap = new Map();
 
             for (const u of freeUnits) {
-                if (!lineFreeMap.has(u.line)) {
-                    lineFreeMap.set(u.line, 0);
-                }
-                lineFreeMap.set(u.line, lineFreeMap.get(u.line) + u.price);
+                lineFreeMap.set(
+                    u.line,
+                    (lineFreeMap.get(u.line) || 0) + u.price
+                );
             }
 
-            // ✅ Step 5: Attach BOGO discount (MRP-based)
             for (const [line, freeAmount] of lineFreeMap.entries()) {
                 line._bogoFreeAmount = freeAmount;
             }
@@ -740,11 +747,15 @@ export const applyPromotions = async (itemsInput, ctx = {}) => {
                     summary.savings += applied;
                     summary.payable = Math.max(0, summary.payable - applied);
 
-                    appliedPromotions.push({
-                        _id: promo._id,
-                        name: promo.campaignName,
-                        type,
-                    });
+                    if (!appliedPromoIds.has(String(promo._id))) {
+                        appliedPromotions.push({
+                            _id: promo._id,
+                            name: promo.campaignName,
+                            type,
+                        });
+                        appliedPromoIds.add(String(promo._id));
+                    }
+
                 }
             }
 
@@ -763,11 +774,15 @@ export const applyPromotions = async (itemsInput, ctx = {}) => {
                         summary.savings += applied;
                         summary.payable = Math.max(0, summary.payable - applied);
 
-                        appliedPromotions.push({
-                            _id: promo._id,
-                            name: promo.campaignName,
-                            type,
-                        });
+                        if (!appliedPromoIds.has(String(promo._id))) {
+                            appliedPromotions.push({
+                                _id: promo._id,
+                                name: promo.campaignName,
+                                type,
+                            });
+                            appliedPromoIds.add(String(promo._id));
+                        }
+
                     }
                 }
             }
