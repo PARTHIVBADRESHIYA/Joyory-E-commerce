@@ -148,16 +148,17 @@ export const getAllVTOEnabledProducts = async (req, res) => {
         }
 
         // Pagination + Sorting
-        let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
+        let { page = 1, limit = 12, sort = "recent", vtoType,              // 🔥 extract explicitly
+            ...queryFilters } = req.query;
         page = Number(page) || 1;
         limit = Math.min(Number(limit) || 12, 50);
 
-        // Base VTO Filter
         const baseFilter = {
             supportsVTO: true,
-            vtoType: { $ne: null },
             isPublished: true,
+            ...(vtoType ? { vtoType } : {})   // 🔥 lips / face / etc
         };
+
 
         // Normalize dynamic filters
         const dynamic = normalizeFilters(queryFilters);

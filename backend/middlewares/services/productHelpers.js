@@ -607,9 +607,13 @@ export const enrichProductsUnified = async (products, promotions = [], options =
             const finalEnriched = {
                 _id: enriched._id,
                 name: enriched.name,
+                slugs: Array.isArray(enriched.slugs) ? enriched.slugs : [],
                 // ✅ FIXED BRAND FIELD
                 brand: normalizeBrand(enriched.brand),
                 price,
+                // 🔥 VTO FIELDS (THIS IS WHAT YOU WANT)
+                supportsVTO: Boolean(enriched.supportsVTO),
+                vtoType: enriched.vtoType || null,
                 // 🔹 ADD THESE FIELDS
                 description: enriched.description || "",
                 howToUse: enriched.howToUse || "",
