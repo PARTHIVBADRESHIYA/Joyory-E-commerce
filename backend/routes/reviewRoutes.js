@@ -13,8 +13,8 @@ import {
     // ✅ New controller for filtered reviews
 } from '../controllers/reviewController.js';
 
-import { protect,isAdmin } from './../middlewares/authMiddleware.js';
-// import { uploadReview } from '../middlewares/uploadReview.js';
+import { protect, isAdmin } from './../middlewares/authMiddleware.js';
+import { uploadReview } from '../middlewares/upload.js';
 
 const router = express.Router();
 
@@ -22,6 +22,8 @@ const router = express.Router();
 router.post(
     '/add',
     protect,
+    uploadReview.array("images", 5), // 🔥 THIS LINE FIXES req.body
+
     submitReview
 );
 
@@ -34,8 +36,8 @@ router.get('/product/:productId', getProductReviews);
 // 🛠 Admin Panel APIs
 router.get('/', getAllReviews);
 router.get('/summary', getGlobalReviewSummary);
-router.patch('/:id', isAdmin,updateReviewStatus);
-router.delete('/:id',isAdmin, deleteReview);
+router.patch('/:id', isAdmin, updateReviewStatus);
+router.delete('/:id', isAdmin, deleteReview);
 
 router.post('/:id/react', protect, reactToReview);
 router.post('/:id/report', protect, reportReview);

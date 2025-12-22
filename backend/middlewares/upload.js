@@ -830,3 +830,4 @@ export const uploadGiftCard = makeImageUploader(1);
 export const uploadSeller = makeImageUploader(100);
 export const uploadAdminProfile = makeImageUploader(2);
 export const uploadRefund = makeImageUploader(5);
+export const uploadReview = makeImageUploader(5);

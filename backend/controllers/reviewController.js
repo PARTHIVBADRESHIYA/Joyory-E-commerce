@@ -2,6 +2,7 @@
 import Product from "../models/Product.js";
 import Review from "../models/Review.js";
 import Order from "../models/Order.js";
+import { uploadToCloudinary } from '../middlewares/upload.js';
 
 /**
  * Submit or update a review
@@ -11,7 +12,22 @@ const submitReview = async (req, res) => {
         const userId = req.user._id;
         const { productId, rating, title, comment } = req.body;
 
-        const images = req.files?.map(file => file.path) || req.body.images || [];
+        let images = [];
+
+        if (req.files && req.files.length > 0) {
+            for (const file of req.files) {
+                const result = await uploadToCloudinary(
+                    file.buffer,
+                    "reviews",      // folder name in cloudinary
+                    "image"
+                );
+                images.push(result.secure_url); // only URL string
+            }
+        } else if (req.body.images) {
+            images = Array.isArray(req.body.images)
+                ? req.body.images
+                : [req.body.images];
+        }
 
         if (!productId || !rating || !comment) {
             return res

@@ -751,43 +751,172 @@
 
 
 
+// import mongoose from "mongoose";
+// import Invoice from "./models/Invoice.js";
+// import Order from "./models/Order.js";
+
+// async function run() {
+//     try {
+//         await mongoose.connect("mongodb+srv://parthivbadreshiya:parthiv12345@cluster0.silkevx.mongodb.net/joyory?retryWrites=true&w=majority&appName=Cluster0");
+//         console.log("DB Connected");
+
+//         const invoices = await Invoice.find({});
+//         console.log(`Found ${invoices.length} invoices`);
+
+//         for (const invoice of invoices) {
+//             const orderId = invoice.order;
+
+//             const order = await Order.findById(orderId).lean();
+//             if (!order) {
+//                 console.log(`Order not found for invoice ${invoice._id}`);
+//                 continue;
+//             }
+
+//             const customerName = order.customerName || order.shippingAddress?.name || "Unknown";
+
+//             await Invoice.updateOne(
+//                 { _id: invoice._id },
+//                 { $set: { customerName } }
+//             );
+
+//             console.log(`Updated Invoice ${invoice.invoiceNumber} -> customerName: ${customerName}`);
+//         }
+
+//         console.log("Migration Completed Successfully.");
+//         process.exit(0);
+//     } catch (err) {
+//         console.error("Migration Error:", err);
+//         process.exit(1);
+//     }
+// }
+
+// run();
+
+
+
+
+
+/**
+ * ONE-TIME MIGRATION SCRIPT
+ * ------------------------
+ * - Generates variant-level slugs
+ * - Stores all slugs in product.slugs[]
+ *
+ * Run with:
+ *   node scripts/migrateProductVariantSlugs.js
+ */
+
 import mongoose from "mongoose";
-import Invoice from "./models/Invoice.js";
-import Order from "./models/Order.js";
+import Product from "./models/Product.js";
+import Brand from "./models/Brand.js";
+import Category from "./models/Category.js";
+import { generateUniqueSlug } from "./middlewares/utils/slug.js";
 
-async function run() {
-    try {
-        await mongoose.connect("mongodb+srv://parthivbadreshiya:parthiv12345@cluster0.silkevx.mongodb.net/joyory?retryWrites=true&w=majority&appName=Cluster0");
-        console.log("DB Connected");
+const MONGO_URI = "mongodb+srv://parthivbadreshiya:parthiv12345@cluster0.silkevx.mongodb.net/joyory?retryWrites=true&w=majority&appName=Cluster0";
 
-        const invoices = await Invoice.find({});
-        console.log(`Found ${invoices.length} invoices`);
+async function migrateVariantSlugs() {
+    await mongoose.connect(MONGO_URI);
+    console.log("✅ MongoDB connected");
 
-        for (const invoice of invoices) {
-            const orderId = invoice.order;
+    const products = await Product.find({
+        $or: [
+            { slugs: { $exists: false } },
+            { slugs: { $size: 0 } },
+            { "variants.slug": { $exists: false } }
+        ]
+    });
 
-            const order = await Order.findById(orderId).lean();
-            if (!order) {
-                console.log(`Order not found for invoice ${invoice._id}`);
-                continue;
-            }
+    console.log(`🔍 Products to migrate: ${products.length}`);
 
-            const customerName = order.customerName || order.shippingAddress?.name || "Unknown";
+    for (const product of products) {
+        console.log(`\n🧩 Migrating: ${product.name} (${product._id})`);
 
-            await Invoice.updateOne(
-                { _id: invoice._id },
-                { $set: { customerName } }
-            );
-
-            console.log(`Updated Invoice ${invoice.invoiceNumber} -> customerName: ${customerName}`);
+        // --- Resolve brandSlug ---
+        let brandSlug = product.brandSlug;
+        if (!brandSlug && product.brand) {
+            const brand = await Brand.findById(product.brand).select("slug");
+            brandSlug = brand?.slug || "";
+            product.brandSlug = brandSlug;
         }
 
-        console.log("Migration Completed Successfully.");
-        process.exit(0);
-    } catch (err) {
-        console.error("Migration Error:", err);
-        process.exit(1);
+        // --- Resolve categorySlug ---
+        let categorySlug = product.categorySlug;
+        if (!categorySlug && product.category) {
+            const cat = await Category.findById(product.category).select("slug");
+            categorySlug = cat?.slug || "";
+            product.categorySlug = categorySlug;
+        }
+
+        const finalSlugs = [];
+
+        // ---------------- VARIANT PRODUCTS ----------------
+        if (Array.isArray(product.variants) && product.variants.length > 0) {
+            for (let i = 0; i < product.variants.length; i++) {
+                const v = product.variants[i];
+
+                if (v.slug) {
+                    finalSlugs.push(v.slug);
+                    continue;
+                }
+
+                const shade = v.shadeName?.trim() || "";
+
+                const slugBase = [
+                    product.name,
+                    shade,
+                    brandSlug,
+                    categorySlug
+                ]
+                    .filter(Boolean)
+                    .join(" ")
+                    .toLowerCase();
+
+                const slug = await generateUniqueSlug(
+                    Product,
+                    slugBase,
+                    product._id
+                );
+
+                v.slug = slug;
+                finalSlugs.push(slug);
+
+                console.log(`   🔹 Variant [${v.sku}] → ${slug}`);
+            }
+        }
+        // ---------------- NON-VARIANT PRODUCT ----------------
+        else {
+            const slugBase = [
+                product.name,
+                product.variant,
+                brandSlug,
+                categorySlug
+            ]
+                .filter(Boolean)
+                .join(" ")
+                .toLowerCase();
+
+            const slug = await generateUniqueSlug(
+                Product,
+                slugBase,
+                product._id
+            );
+
+            finalSlugs.push(slug);
+            console.log(`   🔹 Single → ${slug}`);
+        }
+
+        // Deduplicate slugs just in case
+        product.slugs = [...new Set(finalSlugs)];
+
+        await product.save({ validateBeforeSave: false });
+        console.log("   ✅ Saved");
     }
+
+    console.log("\n🎉 MIGRATION COMPLETED SUCCESSFULLY");
+    await mongoose.disconnect();
 }
 
-run();
+migrateVariantSlugs().catch(err => {
+    console.error("❌ Migration failed:", err);
+    process.exit(1);
+});
