@@ -4,6 +4,8 @@ import mongoose from "mongoose";
 const PromotionSchema = new mongoose.Schema(
     {
         campaignName: { type: String, required: true },
+        slug: { type: String, unique: true, index: true },   // <-- add
+
         description: String,
         status: {
             type: String,

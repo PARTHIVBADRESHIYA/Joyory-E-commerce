@@ -484,7 +484,7 @@ export const getActivePromotionsForUsers = async (req, res) => {
 
         const promos = await Promotion.find(baseFilter)
             .select(
-                "campaignName description images promotionType promotionConfig discountUnit discountValue scope startDate endDate targetAudience categories brands products tags displaySection"
+                " slug campaignName description images promotionType promotionConfig discountUnit discountValue scope startDate endDate targetAudience categories brands products tags displaySection"
             )
             .populate("categories.category", "name slug")
             .populate("brands.brand", "name slug")
@@ -538,6 +538,7 @@ export const getActivePromotionsForUsers = async (req, res) => {
 
             return {
                 _id: p._id,
+                slug: p.slug || "",
                 title: p.campaignName,
                 description: p.description || "",
                 images: p.images || [],
@@ -587,24 +588,29 @@ export const getActivePromotionsForUsers = async (req, res) => {
 export const getPromotionProducts = async (req, res) => {
     try {
         const redis = getRedis();  // 🔥 REQUIRED
-        const { id } = req.params;
-        if (!isObjectId(id)) {
-            return res.status(400).json({ message: "Invalid promotion id" });
+        const { idOrSlug } = req.params;
+
+        let promoQuery;
+        if (isObjectId(idOrSlug)) {
+            promoQuery = { _id: idOrSlug };
+        } else {
+            promoQuery = { slug: idOrSlug };
         }
+
 
         let { page = 1, limit = 12, sort = "recent", search = "", ...queryFilters } = req.query;
         page = Number(page) || 1;
         limit = Math.min(Number(limit) || 12, 50);
         search = search.trim();
 
-        const redisKey = `promo:products:${id}:${JSON.stringify(req.query)}`;
+        const redisKey = `promo:products:${idOrSlug}:${JSON.stringify(req.query)}`;
         try {
             const cached = await redis.get(redisKey);
             if (cached) return res.status(200).json(JSON.parse(cached));
         } catch { }
 
         // 🔹 Fetch promotion
-        const promo = await Promotion.findById(id)
+        const promo = await Promotion.findOne(promoQuery)
             .populate("categories.category", "_id name slug")
             .populate("products", "_id name category")
             .populate("brands.brand", "_id name slug")
@@ -787,7 +793,10 @@ export const getPromotionProducts = async (req, res) => {
         ]);
 
         const payload = {
-            promoMeta: promo,
+            promoMeta: {
+                ...promo,
+                slug: promo.slug || null
+            },
             products: productsWithRelations,
             categories,
             brands,

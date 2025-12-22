@@ -7,6 +7,32 @@ import Brand from "../models/Brand.js";
 import mongoose from "mongoose";
 import moment from "moment-timezone";
 import { uploadToCloudinary } from "../middlewares/upload.js";
+import { generateUniqueSlug } from "../middlewares/utils/slug.js";
+
+
+
+export const buildPromotionSlug = async (PromotionModel, body) => {
+  let base = "";
+
+  if (body.campaignName) {
+    base += body.campaignName + " ";
+  }
+
+  if (body.promotionType) {
+    base += body.promotionType + " ";
+  }
+
+  if (body.discountValue) {
+    base += `${body.discountValue}`;
+  }
+
+  base = base.trim();
+
+  const uniqueSlug = await generateUniqueSlug(PromotionModel, base);
+  return uniqueSlug;
+};
+
+
 
 /* ---------- helpers ---------- */
 const isObjectId = (s) => typeof s === "string" && /^[0-9a-fA-F]{24}$/.test(s);
@@ -241,6 +267,9 @@ const createPromotion = async (req, res) => {
 
     const status = calculateStatus(startDateUTC, endDateUTC);
     const isScheduled = status === "upcoming";
+
+    const slug = await buildPromotionSlug(Promotion, req.body);
+
 
     const promotion = await Promotion.create({
       ...req.body,

@@ -8,6 +8,6 @@ import {
 const router = express.Router();
 
 router.get("/active", getActivePromotionsForUsers);
-router.get("/:id/products", getPromotionProducts);
+router.get("/:idOrSlug/products", getPromotionProducts);
 
 export default router;
