@@ -38,7 +38,7 @@ export const getTones = async (req, res) => {
     try {
         const tones = await Tone.find({ active: true })
             .sort({ order: 1, name: 1 })
-            .select("_id key name swatchHex heroImage");
+            .select("_id key name swatchHex heroImages");
 
         res.json({ success: true, tones });
     } catch (err) {

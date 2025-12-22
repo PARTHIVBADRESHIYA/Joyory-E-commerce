@@ -1668,37 +1668,253 @@ export const getProductsByCategory = async (req, res) => {
     }
 };
 
+// export const getSingleProduct = async (req, res) => {
+//     try {
+//         const { idOrSlug } = req.params; // works for both slug or id
+//         // 🔥 Redis Key
+//         const variant = req.query.variant ?? "*"; // explicitly handle undefined
+
+//         const redis = getRedis();  // 🔥 REQUIRED
+//         const redisKey = `prod:${PRODUCT_CACHE_VERSION}:${idOrSlug}:${variant}`;
+//         // 🔥 Return cached version
+//         const cached = await redis.get(redisKey);
+//         if (cached) {
+//             return res.status(200).json(JSON.parse(cached));
+//         }
+
+//         const selectedSku = req.query.variant; // optional
+
+//         // Decide query by id vs slug
+//         const query = mongoose.Types.ObjectId.isValid(idOrSlug)
+//             ? { _id: idOrSlug }
+//             : { slugs: { $in: [idOrSlug] } };   // slug inside slugs array
+
+//         // --- SAFE SELECT: includes fields used by response & likely used by enrichProductsUnified
+//         const selectFields = [
+//             "_id", "name", "slugs", "mrp", "price", "discountPercent", "discountAmount",
+//             "images", "variants", "shadeOptions", "brand", "category", "categorySlug",
+//             "avgRating", "totalRatings", "inStock", "selectedVariant", "views",
+//             "commentsCount", "productTags", "formulation", "skinTypes", "createdAt",
+//             "discountedPrice", "description", "howToUse", "ingredients", "features"
+//         ].join(" ");
+
+//         // 1) Find product + increment views — using .select() + lean() for performance
+//         const product = await Product.findOneAndUpdate(
+//             { ...query, isPublished: true },
+//             { $inc: { views: 1 } },
+//             { new: true }
+//         )
+//             .select(selectFields)
+//             .lean();
+
+//         if (!product) {
+//             return res.status(404).json({
+//                 message: "❌ Product not found or may have been removed.",
+//             });
+//         }
+
+//         // -----------------------------------------------------------
+//         // 🔥 TRACK RECENTLY VIEWED PRODUCT (ONLY IF USER LOGGED IN)
+//         // -----------------------------------------------------------
+//         try {
+//             if (req.user?._id) {
+//                 await User.findByIdAndUpdate(
+//                     req.user._id,
+//                     [
+//                         {
+//                             $set: {
+//                                 recentlyViewed: {
+//                                     $slice: [
+//                                         {
+//                                             $concatArrays: [
+//                                                 [
+//                                                     {
+//                                                         product: product._id,
+//                                                         viewedAt: new Date()
+//                                                     }
+//                                                 ],
+//                                                 {
+//                                                     $filter: {
+//                                                         input: "$recentlyViewed",
+//                                                         as: "item",
+//                                                         cond: { $ne: ["$$item.product", product._id] }
+//                                                     }
+//                                                 }
+//                                             ]
+//                                         },
+//                                         20
+//                                     ]
+//                                 }
+//                             }
+//                         }
+//                     ]
+//                 );
+
+//             }
+//         } catch (trackErr) {
+//             console.error("Failed to track recently viewed:", trackErr);
+//         }
+
+//         // -----------------------------------------------------------
+
+//         // 4.1 Fetch brand name (mini optimization)
+//         let brandData = null;
+
+//         if (product.brand) {
+//             brandData = await Brand.findById(product.brand)
+//                 .select("_id name")
+//                 .lean();
+//         }
+
+
+//         // 2) Fetch active promotions with tiny in-memory cache to reduce DB calls
+//         const now = Date.now();
+//         if (_promoCache.data && (now - _promoCache.ts) < _promoCache.ttl) {
+//             // use cached
+//         } else {
+//             const dbNow = new Date();
+//             const promos = await Promotion.find({
+//                 status: "active",
+//                 startDate: { $lte: dbNow },
+//                 endDate: { $gte: dbNow },
+//             }).lean();
+//             _promoCache = { ts: Date.now(), data: promos, ttl: 5000 };
+//         }
+//         const promotions = _promoCache.data || [];
+
+//         // 3) Enrich product (unchanged behavior) — keep existing helper
+//         const enrichedProduct = await enrichProductsUnified(product, promotions, {
+//             selectedSku,
+//         });
+
+//         // 4) Per-variant stock messages (same logic, optimized loop)
+//         if (Array.isArray(enrichedProduct.variants) && enrichedProduct.variants.length) {
+//             for (const v of enrichedProduct.variants) {
+//                 const vStock = v.stock ?? 0;
+//                 if (vStock <= 0) v.stockMessage = "⛔ Currently out of stock — check back soon!";
+//                 else if (vStock === 1) v.stockMessage = "🔥 Almost gone! Only 1 left in stock.";
+//                 else if (vStock <= 3) v.stockMessage = `⚡ Hurry! Just ${vStock} piece${vStock > 1 ? "s" : ""} remaining.`;
+//                 else if (vStock < 10) v.stockMessage = `💨 Only a few left — ${vStock} available!`;
+//                 else v.stockMessage = null;
+//             }
+//         }
+
+//         // 5) Generate recommendations in parallel (same logic, faster)
+//         const modes = ["alsoViewed"];
+//         const recPromises = modes.map(mode =>
+//             getRecommendations({
+//                 mode,
+//                 productId: enrichedProduct._id,
+//                 categorySlug: enrichedProduct.categorySlug,
+//                 userId: req.user?._id,
+//                 limit: 6,
+//             }).then(rec => ({ mode, rec }))
+//         );
+
+//         const recResults = await Promise.all(recPromises);
+//         const recommendations = {};
+//         for (const { mode, rec } of recResults) {
+//             recommendations[mode] = {
+//                 name: rec?.message || mode,
+//                 products: rec?.success ? rec.products : [],
+//             };
+//         }
+
+//         await redis.set(redisKey, JSON.stringify({
+//             _id: enrichedProduct._id,
+//             name: enrichedProduct.name,
+//             slugs: enrichedProduct.slug,
+//             brand: brandData
+//                 ? { _id: brandData._id, name: brandData.name }
+//                 : null,
+//             mrp: enrichedProduct.mrp,
+//             variants: enrichedProduct.variants,
+//             shadeOptions: enrichedProduct.shadeOptions || [],
+//             avgRating: enrichedProduct.avgRating,
+//             totalRatings: enrichedProduct.totalRatings,
+//             selectedVariant: enrichedProduct.selectedVariant,
+//             description: enrichedProduct.description,
+//             howToUse: enrichedProduct.howToUse,
+//             ingredients: enrichedProduct.ingredients,
+//             features: enrichedProduct.features,
+//             recommendations
+//         }), "EX", 30);
+
+//         return res.status(200).json({
+//             _id: enrichedProduct._id,
+//             name: enrichedProduct.name,
+//             slugs: enrichedProduct.slug,
+//             brand: brandData
+//                 ? { _id: brandData._id, name: brandData.name }
+//                 : null,
+//             mrp: enrichedProduct.mrp,
+//             variants: enrichedProduct.variants,
+//             shadeOptions: enrichedProduct.shadeOptions || [],
+//             avgRating: enrichedProduct.avgRating,
+//             totalRatings: enrichedProduct.totalRatings,
+//             selectedVariant: enrichedProduct.selectedVariant,
+//             description: enrichedProduct.description,
+//             howToUse: enrichedProduct.howToUse,
+//             ingredients: enrichedProduct.ingredients,
+//             features: enrichedProduct.features,
+//             recommendations,
+//         });
+
+//     } catch (err) {
+//         console.error("❌ getSingleProduct error:", err);
+//         return res.status(500).json({
+//             message:
+//                 "🚫 Oops! Something went wrong while fetching product details. Please try again shortly.",
+//             error: err.message,
+//         });
+//     }
+// };
 export const getSingleProduct = async (req, res) => {
     try {
-        const { idOrSlug } = req.params; // works for both slug or id
-        // 🔥 Redis Key
-        const variant = req.query.variant ?? "*"; // explicitly handle undefined
+        const { idOrSlug } = req.params;
+        const variant = req.query.variant ?? "*";
 
-        const redis = getRedis();  // 🔥 REQUIRED
+        let query;
+        let selectedVariantSlug = null;
+        let selectedSku = req.query.variant;
+
+        // 🔥 Redis
+        const redis = getRedis();
         const redisKey = `prod:${PRODUCT_CACHE_VERSION}:${idOrSlug}:${variant}`;
-        // 🔥 Return cached version
+
         const cached = await redis.get(redisKey);
         if (cached) {
             return res.status(200).json(JSON.parse(cached));
         }
 
-        const selectedSku = req.query.variant; // optional
+        // --------------------------------------------------
+        // 🔥 Decide query (ID / Product slug / Variant slug)
+        // --------------------------------------------------
+        if (mongoose.Types.ObjectId.isValid(idOrSlug)) {
+            query = { _id: idOrSlug };
+        } else {
+            query = {
+                $or: [
+                    { "variants.slug": idOrSlug }, // 🔥 variant slug
+                    { slugs: { $in: [idOrSlug] } } // product slug fallback
+                ]
+            };
+            selectedVariantSlug = idOrSlug;
+        }
 
-        // Decide query by id vs slug
-        const query = mongoose.Types.ObjectId.isValid(idOrSlug)
-            ? { _id: idOrSlug }
-            : { slugs: { $in: [idOrSlug] } };   // slug inside slugs array
-
-        // --- SAFE SELECT: includes fields used by response & likely used by enrichProductsUnified
         const selectFields = [
-            "_id", "name", "slugs", "mrp", "price", "discountPercent", "discountAmount",
-            "images", "variants", "shadeOptions", "brand", "category", "categorySlug",
-            "avgRating", "totalRatings", "inStock", "selectedVariant", "views",
-            "commentsCount", "productTags", "formulation", "skinTypes", "createdAt",
-            "discountedPrice", "description", "howToUse", "ingredients", "features"
+            "_id", "name", "slugs", "mrp", "price", "discountPercent",
+            "discountAmount", "images", "variants", "shadeOptions",
+            "brand", "category", "categorySlug", "avgRating",
+            "totalRatings", "inStock", "selectedVariant", "views",
+            "commentsCount", "productTags", "formulation", "skinTypes",
+            "createdAt", "discountedPrice", "description",
+            "howToUse", "ingredients", "features"
         ].join(" ");
 
-        // 1) Find product + increment views — using .select() + lean() for performance
+        // --------------------------------------------------
+        // 🔥 Fetch product
+        // --------------------------------------------------
         const product = await Product.findOneAndUpdate(
             { ...query, isPublished: true },
             { $inc: { views: 1 } },
@@ -1709,163 +1925,144 @@ export const getSingleProduct = async (req, res) => {
 
         if (!product) {
             return res.status(404).json({
-                message: "❌ Product not found or may have been removed.",
+                message: "❌ Product not found or may have been removed."
             });
         }
 
-        // -----------------------------------------------------------
-        // 🔥 TRACK RECENTLY VIEWED PRODUCT (ONLY IF USER LOGGED IN)
-        // -----------------------------------------------------------
-        try {
-            if (req.user?._id) {
-                await User.findByIdAndUpdate(
-                    req.user._id,
-                    [
-                        {
-                            $set: {
-                                recentlyViewed: {
-                                    $slice: [
-                                        {
-                                            $concatArrays: [
-                                                [
-                                                    {
-                                                        product: product._id,
-                                                        viewedAt: new Date()
-                                                    }
-                                                ],
-                                                {
-                                                    $filter: {
-                                                        input: "$recentlyViewed",
-                                                        as: "item",
-                                                        cond: { $ne: ["$$item.product", product._id] }
-                                                    }
-                                                }
-                                            ]
-                                        },
-                                        20
-                                    ]
-                                }
-                            }
-                        }
-                    ]
-                );
-
+        // --------------------------------------------------
+        // 🔥 AUTO-DETECT SKU FROM VARIANT SLUG (CORRECT PLACE)
+        // --------------------------------------------------
+        if (!selectedSku && selectedVariantSlug && product.variants?.length) {
+            const matchedVariant = product.variants.find(
+                v => v.slug === selectedVariantSlug
+            );
+            if (matchedVariant) {
+                selectedSku = matchedVariant.sku;
             }
-        } catch (trackErr) {
-            console.error("Failed to track recently viewed:", trackErr);
         }
 
-        // -----------------------------------------------------------
+        // --------------------------------------------------
+        // 🔥 Track recently viewed
+        // --------------------------------------------------
+        try {
+            if (req.user?._id) {
+                await User.findByIdAndUpdate(req.user._id, [
+                    {
+                        $set: {
+                            recentlyViewed: {
+                                $slice: [
+                                    {
+                                        $concatArrays: [
+                                            [{
+                                                product: product._id,
+                                                viewedAt: new Date()
+                                            }],
+                                            {
+                                                $filter: {
+                                                    input: "$recentlyViewed",
+                                                    as: "item",
+                                                    cond: { $ne: ["$$item.product", product._id] }
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    20
+                                ]
+                            }
+                        }
+                    }
+                ]);
+            }
+        } catch (err) {
+            console.error("Recently viewed tracking failed:", err);
+        }
 
-        // 4.1 Fetch brand name (mini optimization)
+        // --------------------------------------------------
+        // 🔥 Brand
+        // --------------------------------------------------
         let brandData = null;
-
         if (product.brand) {
             brandData = await Brand.findById(product.brand)
                 .select("_id name")
                 .lean();
         }
 
-
-        // 2) Fetch active promotions with tiny in-memory cache to reduce DB calls
+        // --------------------------------------------------
+        // 🔥 Promotions cache
+        // --------------------------------------------------
         const now = Date.now();
-        if (_promoCache.data && (now - _promoCache.ts) < _promoCache.ttl) {
-            // use cached
-        } else {
+        if (!_promoCache.data || now - _promoCache.ts >= _promoCache.ttl) {
             const dbNow = new Date();
             const promos = await Promotion.find({
                 status: "active",
                 startDate: { $lte: dbNow },
-                endDate: { $gte: dbNow },
+                endDate: { $gte: dbNow }
             }).lean();
-            _promoCache = { ts: Date.now(), data: promos, ttl: 5000 };
+
+            _promoCache = { ts: now, data: promos, ttl: 5000 };
         }
+
         const promotions = _promoCache.data || [];
 
-        // 3) Enrich product (unchanged behavior) — keep existing helper
+        // --------------------------------------------------
+        // 🔥 Enrich product
+        // --------------------------------------------------
         const enrichedProduct = await enrichProductsUnified(product, promotions, {
-            selectedSku,
+            selectedSku
         });
 
-        // 4) Per-variant stock messages (same logic, optimized loop)
-        if (Array.isArray(enrichedProduct.variants) && enrichedProduct.variants.length) {
-            for (const v of enrichedProduct.variants) {
-                const vStock = v.stock ?? 0;
-                if (vStock <= 0) v.stockMessage = "⛔ Currently out of stock — check back soon!";
-                else if (vStock === 1) v.stockMessage = "🔥 Almost gone! Only 1 left in stock.";
-                else if (vStock <= 3) v.stockMessage = `⚡ Hurry! Just ${vStock} piece${vStock > 1 ? "s" : ""} remaining.`;
-                else if (vStock < 10) v.stockMessage = `💨 Only a few left — ${vStock} available!`;
-                else v.stockMessage = null;
+        // --------------------------------------------------
+        // 🔥 Stock messages
+        // --------------------------------------------------
+        enrichedProduct.variants?.forEach(v => {
+            const stock = v.stock ?? 0;
+            if (stock <= 0) v.stockMessage = "⛔ Out of stock";
+            else if (stock === 1) v.stockMessage = "🔥 Only 1 left";
+            else if (stock <= 3) v.stockMessage = `⚡ Only ${stock} left`;
+        });
+
+        // --------------------------------------------------
+        // 🔥 Recommendations
+        // --------------------------------------------------
+        const rec = await getRecommendations({
+            mode: "alsoViewed",
+            productId: enrichedProduct._id,
+            categorySlug: enrichedProduct.categorySlug,
+            userId: req.user?._id,
+            limit: 6
+        });
+
+        const response = {
+            _id: enrichedProduct._id,
+            name: enrichedProduct.name,
+            slugs: enrichedProduct.slugs,
+            brand: brandData,
+            mrp: enrichedProduct.mrp,
+            variants: enrichedProduct.variants,
+            shadeOptions: enrichedProduct.shadeOptions || [],
+            avgRating: enrichedProduct.avgRating,
+            totalRatings: enrichedProduct.totalRatings,
+            selectedVariant: enrichedProduct.selectedVariant,
+            description: enrichedProduct.description,
+            howToUse: enrichedProduct.howToUse,
+            ingredients: enrichedProduct.ingredients,
+            features: enrichedProduct.features,
+            recommendations: {
+                alsoViewed: {
+                    name: rec?.message || "alsoViewed",
+                    products: rec?.success ? rec.products : []
+                }
             }
-        }
+        };
 
-        // 5) Generate recommendations in parallel (same logic, faster)
-        const modes = ["alsoViewed"];
-        const recPromises = modes.map(mode =>
-            getRecommendations({
-                mode,
-                productId: enrichedProduct._id,
-                categorySlug: enrichedProduct.categorySlug,
-                userId: req.user?._id,
-                limit: 6,
-            }).then(rec => ({ mode, rec }))
-        );
-
-        const recResults = await Promise.all(recPromises);
-        const recommendations = {};
-        for (const { mode, rec } of recResults) {
-            recommendations[mode] = {
-                name: rec?.message || mode,
-                products: rec?.success ? rec.products : [],
-            };
-        }
-
-        await redis.set(redisKey, JSON.stringify({
-            _id: enrichedProduct._id,
-            name: enrichedProduct.name,
-            slugs: enrichedProduct.slug,
-            brand: brandData
-                ? { _id: brandData._id, name: brandData.name }
-                : null,
-            mrp: enrichedProduct.mrp,
-            variants: enrichedProduct.variants,
-            shadeOptions: enrichedProduct.shadeOptions || [],
-            avgRating: enrichedProduct.avgRating,
-            totalRatings: enrichedProduct.totalRatings,
-            selectedVariant: enrichedProduct.selectedVariant,
-            description: enrichedProduct.description,
-            howToUse: enrichedProduct.howToUse,
-            ingredients: enrichedProduct.ingredients,
-            features: enrichedProduct.features,
-            recommendations
-        }), "EX", 30);
-
-        return res.status(200).json({
-            _id: enrichedProduct._id,
-            name: enrichedProduct.name,
-            slugs: enrichedProduct.slug,
-            brand: brandData
-                ? { _id: brandData._id, name: brandData.name }
-                : null,
-            mrp: enrichedProduct.mrp,
-            variants: enrichedProduct.variants,
-            shadeOptions: enrichedProduct.shadeOptions || [],
-            avgRating: enrichedProduct.avgRating,
-            totalRatings: enrichedProduct.totalRatings,
-            selectedVariant: enrichedProduct.selectedVariant,
-            description: enrichedProduct.description,
-            howToUse: enrichedProduct.howToUse,
-            ingredients: enrichedProduct.ingredients,
-            features: enrichedProduct.features,
-            recommendations,
-        });
+        await redis.set(redisKey, JSON.stringify(response), "EX", 30);
+        return res.status(200).json(response);
 
     } catch (err) {
         console.error("❌ getSingleProduct error:", err);
         return res.status(500).json({
-            message:
-                "🚫 Oops! Something went wrong while fetching product details. Please try again shortly.",
-            error: err.message,
+            message: "🚫 Failed to fetch product",
+            error: err.message
         });
     }
 };
