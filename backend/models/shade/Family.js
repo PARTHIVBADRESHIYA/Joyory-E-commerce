@@ -7,7 +7,10 @@ const familySchema = new mongoose.Schema({
     toneKeys: [{ type: String, required: true }],        // ["fair","light"]
     undertoneKeys: [{ type: String, required: true }],   // ["warm","neutral"]
     order: { type: Number, default: 0 },
-    sampleImages: [{ type: String }],                    // for UI cards
+    sampleImages: {
+        type: [String],
+        validate: [arr => arr.length <= 1, "Max 1 image allowed"]
+    },
     // Optional: lab values for improved matching
     lab: {
         L: Number,

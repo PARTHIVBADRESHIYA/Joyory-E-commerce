@@ -6,7 +6,10 @@ const toneSchema = new mongoose.Schema({
     name: { type: String, required: true },              // "Fair"
     order: { type: Number, default: 0 },
     swatchHex: { type: String, default: "" },            // optional UI chip
-    heroImage: { type: String, default: "" },            // image shown on step 1
+    heroImages: {
+        type: [String],
+        validate: [arr => arr.length <= 6, "Max 6 images allowed"]
+    },
     active: { type: Boolean, default: true }
 }, { timestamps: true });
 

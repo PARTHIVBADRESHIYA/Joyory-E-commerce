@@ -28,12 +28,50 @@ export function isActive(discount) {
     return true;
 }
 
-export function isUserEligible(discount, user) {
-    if (!discount || !discount.eligibility || discount.eligibility === 'All') return true;
-    if (discount.eligibility === 'New Users') return !!user?.isNewUser;
-    if (discount.eligibility === 'Existing Users') return !user?.isNewUser;
+export async function isUserNew(userId) {
+    const paidOrders = await Order.countDocuments({
+        user: userId,
+        paid: true,
+        paymentStatus: "success"
+    });
+
+    return paidOrders === 0;
+}
+
+export async function computeUserFlags(user) {
+    if (!user?._id) {
+        return {
+            isLoggedIn: false,
+            isNewUser: false
+        };
+    }
+
+    const paidOrders = await Order.countDocuments({
+        user: user._id,
+        paid: true,
+        paymentStatus: "success"
+    });
+
+    return {
+        isLoggedIn: true,
+        isNewUser: paidOrders === 0
+    };
+}
+
+export function isUserEligible(discount, userFlags) {
+    if (!discount?.eligibility || discount.eligibility === 'All') return true;
+
+    if (discount.eligibility === 'New Users') {
+        return userFlags.isLoggedIn && userFlags.isNewUser;
+    }
+
+    if (discount.eligibility === 'Existing Users') {
+        return userFlags.isLoggedIn && !userFlags.isNewUser;
+    }
+
     return true;
 }
+
 
 export function pickCartProducts(products, cart) {
     const byId = new Map(products.map(p => [String(p._id), p]));
@@ -108,9 +146,11 @@ export const computeEligibleDiscountsForCart = async (cart, user) => {
     const all = await Discount.find(activeDiscountQuery()).lean();
     const payload = [];
 
+    const userFlags = await computeUserFlags(user);
+
     for (const d of all) {
         try {
-            if (!isUserEligible(d, user)) continue;
+            if (!isUserEligible(d, userFlags)) continue;
             if (d.perCustomerLimit && user && user._id) {
                 const used = await Order.countDocuments({ user: user._id, discountCode: d.code });
                 if (used >= d.perCustomerLimit) continue;
@@ -204,6 +244,12 @@ export async function validateDiscountForCartInternal({ code, cart, userId }) {
 
     if (!isActive(discount)) throw new Error('This discount is not active');
 
+    const userFlags = await computeUserFlags({ _id: userId });
+
+    if (!isUserEligible(discount, userFlags)) {
+        throw new Error('This coupon is not applicable for your account');
+    }
+
     // per-customer usage check
     if (discount.perCustomerLimit && userId) {
         const usedByCustomer = await Order.countDocuments({ user: userId, discountCode: discount.code });
@@ -235,6 +281,8 @@ export const getEligibleDiscountsForCart = async (req, res) => {
 
         const subtotal = cartSubtotal(lines);
         const user = req.user || null;
+        const userFlags = await computeUserFlags(user);
+
         const cacheKey = `eligibleDiscounts:${String(user?._id || 'guest')}:sub${Math.round(subtotal)}:n${lines.length}`;
 
         const cached = getCache(cacheKey);
@@ -245,7 +293,7 @@ export const getEligibleDiscountsForCart = async (req, res) => {
 
         for (const d of all) {
             try {
-                if (!isUserEligible(d, user)) continue;
+                if (!isUserEligible(d, userFlags)) continue;
                 if (d.perCustomerLimit && user && user._id) {
                     const used = await Order.countDocuments({ user: user._id, discountCode: d.code });
                     if (used >= d.perCustomerLimit) continue;
@@ -304,6 +352,12 @@ export async function reserveDiscountUsage({ code, userId, cart }) {
     const discount = await Discount.findOne({ code: code.trim() }).lean();
     if (!discount) throw new Error('Invalid discount code');
     if (!isActive(discount)) throw new Error('This discount is not active');
+
+    const userFlags = await computeUserFlags({ _id: userId });
+
+    if (!isUserEligible(discount, userFlags)) {
+        throw new Error('Coupon eligibility failed');
+    }
 
     if (discount.perCustomerLimit && userId) {
         const usedByCustomer = await Order.countDocuments({ user: userId, discountCode: discount.code });

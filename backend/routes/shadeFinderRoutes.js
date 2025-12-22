@@ -15,14 +15,14 @@ const router = express.Router();
 router.post(
     "/tones",
     isAdmin,
-    uploadTones.fields([{ name: "heroImage", maxCount: 1 }]),
+    uploadTones.fields([{ name: "heroImages", maxCount: 6 }]),
     createTone
 );
 router.get("/tones", isAdmin, getTonesAdmin);
 router.put(
     "/tones/:id",
     isAdmin,
-    uploadTones.fields([{ name: "heroImage", maxCount: 1 }]),
+    uploadTones.fields([{ name: "heroImages", maxCount: 6 }]),
     updateTone
 );
 router.delete("/tones/:id", isAdmin, deleteTone);
@@ -47,14 +47,14 @@ router.delete("/undertones/:id", isAdmin, deleteUndertone);
 router.post(
     "/families",
     isAdmin,
-    uploadFamilies.fields([{ name: "sampleImages", maxCount: 10 }]),
+    uploadFamilies.fields([{ name: "sampleImages", maxCount: 1 }]),
     createFamily
 );
 router.get("/families", isAdmin, getFamiliesAdmin);
 router.put(
     "/families/:id",
     isAdmin,
-    uploadFamilies.fields([{ name: "sampleImages", maxCount: 10 }]),
+    uploadFamilies.fields([{ name: "sampleImages", maxCount: 1 }]),
     updateFamily
 );
 router.delete("/families/:id", isAdmin, deleteFamily);

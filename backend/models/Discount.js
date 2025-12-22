@@ -14,7 +14,7 @@ const discountSchema = new mongoose.Schema({
     appliesTo: {
         type: {
             type: String,
-            enum: ['Entire Order', 'Product', 'Category', 'Brand'],
+            enum: ['Entire Order', 'Product', 'Category', 'Brand'], 
             required: true,
         },
         productIds: [mongoose.Schema.Types.ObjectId],
