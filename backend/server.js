@@ -466,8 +466,6 @@ import webhookRoutes from "./routes/webhookRoutes.js";
 import teamRoutes from "./routes/settings/admin/teamRoutes.js";
 import adminRoleRoutes from "./routes/settings/admin/adminRoleRoutes.js";
 import adminRoleAdminController from "./routes/settings/admin/adminRoleAdmin.js";
-import notificationRoutes from "./routes/settings/admin/notificationRoutes.js";
-import securityRoutes from "./routes/settings/admin/securityRoutes.js";
 import attributeRoutes from "./routes/attributeRoutes.js";
 import videoRoutes from "./routes/videoRoutes.js";
 import mediaRoutes from "./routes/mediaRoutes.js";
@@ -493,6 +491,8 @@ import permissionsRoutes from "./routes/permissionsRoutes.js";
 import adminProfileRoutes from "./routes/adminProfileRoutes.js";
 import affiliateRoutes from "./routes/affiliateRoutes.js";
 import returnRoutes from "./routes/returnRoutes.js";
+import notificationRoutes from "./routes/notificationRoutes.js";
+import securityRoutes from "./routes/settings/admin/securityRoutes.js";
 // User side
 import userProductRoutes from "./routes/user/userProductRoutes.js";
 import userCartAndOrderRoutes from "./routes/user/userCartAndOrderRoutes.js";
@@ -580,7 +580,7 @@ app.use(
         name: "sessionId",
         secret: process.env.SESSION_SECRET || "supersecretkey",
         resave: false,
-        saveUninitialized: true,   // 👈 change to false
+        saveUninitialized: false,   // ✅ IMPORTANT
         store: MongoStore.create({
             mongoUrl: process.env.MONGO_URI,
             collectionName: "sessions",
@@ -588,7 +588,7 @@ app.use(
         cookie: {
             maxAge: 7 * 24 * 60 * 60 * 1000,
             httpOnly: true,
-            secure: false,  // must be false for localhost
+            secure: process.env.NODE_ENV === "production", // 🔥 REQUIRED
             sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
         },
     })
@@ -639,8 +639,6 @@ app.use("/api/payment-methods", paymentMethodRoutes);
 app.use("/api/admin-role-admin", adminRoleAdminController);
 app.use("/api/admin/roles", adminRoleRoutes);
 app.use("/api/admin/teams", teamRoutes);
-app.use("/api/notifications", notificationRoutes);
-app.use("/api/security", securityRoutes);
 app.use("/api/comments", commentRoutes);
 app.use("/api/shadefinder", shadeFinderRoutes);
 app.use("/api/giftcards", giftCardRoutes);
@@ -663,7 +661,8 @@ app.use("/api/permissions", permissionsRoutes);
 app.use("/api/admin/profile", adminProfileRoutes);
 app.use("/api/affiliate", affiliateRoutes);
 app.use("/api/returns", returnRoutes);
-
+app.use("/api/notifications", notificationRoutes);
+app.use('/api/security', securityRoutes);
 
 if ((process.env.SHIPPING_PROVIDER || "mock").toLowerCase() === "mock") {
     app.use("/api/shipping", mockShippingRoutes);

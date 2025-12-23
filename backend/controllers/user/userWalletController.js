@@ -3,7 +3,7 @@ import WalletConfig from "../../models/WalletConfig.js";
 import { getOrCreateWallet } from "../../middlewares/utils/walletHelpers.js";
 import Razorpay from "razorpay";
 import crypto from "crypto";
-
+import User from "../../models/User.js";
 // 🔑 initialize razorpay instance
 const razorpay = new Razorpay({
     key_id: process.env.RAZORPAY_KEY_ID,

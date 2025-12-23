@@ -1742,7 +1742,7 @@ import Referral from '../../../models/Referral.js'; // ✅ You need to import th
 import Razorpay from "razorpay";
 import crypto from "crypto";
 import axios from 'axios';
-
+import {sendNotification} from '../../../controllers/sendNotification.js';
 import cloudinary from '../../../middlewares/utils/cloudinary.js';
 import { determineOccasions, craftMessage } from "../../../middlewares/services/ecardService.js";
 import { buildEcardPdf } from "../../../middlewares/services/ecardPdf.js";
@@ -2542,7 +2542,7 @@ export const confirmCodOrder = async (req, res) => {
         await sendNotification({
             type: "order_cod",
             message: `New COD order #${order.orderNumber || order._id} placed`,
-            priority: "normal",
+            priority: "high",
             meta: {
                 orderId: order._id,
                 userId: order.user._id

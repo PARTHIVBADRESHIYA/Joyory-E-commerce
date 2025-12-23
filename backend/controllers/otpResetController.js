@@ -2,7 +2,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { generateOTP } from '../middlewares/utils/generateOTP.js';
-import { sendEmail } from '../middlewares/utils/emailService.js';
+import { sendEmail, sendWelcomeEmail } from '../middlewares/utils/emailService.js';
 import { sendSms } from '../middlewares/utils/sendSms.js';
 
 import Admin from '../models/Admin.js';
@@ -171,146 +171,29 @@ export const resetPasswordWithOtp = async (req, res) => {
     return res.status(200).json({ message: 'Password reset successful' });
 };
 
-// Verify OTP
-// export const verifyEmailOtp = async (req, res) => {
-//     const { error } = verifyEmailOtpSchema.validate(req.body, { allowUnknown: true });
-//     if (error) return res.status(400).json({ message: error.details[0].message });
-
-//     const { email, otp } = req.body;
-//     const user = await User.findOne({ email: email.trim().toLowerCase() });
-//     if (!user) return res.status(404).json({ message: 'User not found' });
-//     if (user.isVerified) return res.status(400).json({ message: 'User already verified' });
-
-//     // Check OTP existence & expiry
-//     if (!user.otp?.code || new Date() > new Date(user.otp.expiresAt)) {
-//         user.otp = undefined;
-//         await user.save();
-//         return res.status(400).json({ message: 'OTP expired or not requested' });
-//     }
-
-//     // Check attempts
-//     if (user.otp.attemptsLeft <= 0) {
-//         user.otp = undefined;
-//         await user.save();
-//         return res.status(429).json({ message: 'Too many invalid attempts. Request a new OTP.' });
-//     }
-
-//     // Validate OTP
-//     const isValid = await bcrypt.compare(otp, user.otp.code);
-//     if (!isValid) {
-//         user.otp.attemptsLeft -= 1;
-//         await user.save();
-//         return res.status(401).json({ message: `Invalid OTP. ${user.otp.attemptsLeft} attempts left.` });
-//     }
-
-//     // Success: verify user & clear OTP data
-//     user.isVerified = true;
-//     user.otp = undefined;
-//     user.otpRequests = [];
-//     await user.save();
-
-//     return res.status(200).json({ message: 'Email verified successfully. You can now login.' });
-// };
-
-
-
-
-
-
-// export const verifyEmailOtp = async (req, res) => {
-//     const { error } = verifyEmailOtpSchema.validate(req.body, { allowUnknown: true });
-//     if (error) return res.status(400).json({ message: error.details[0].message });
-
-//     const { email, otp } = req.body;
-//     const user = await User.findOne({ email: email.trim().toLowerCase() });
-//     if (!user) return res.status(404).json({ message: "User not found" });
-//     if (user.isVerified) return res.status(400).json({ message: "User already verified" });
-
-//     // Check OTP existence & expiry
-//     if (!user.otp?.code || new Date() > new Date(user.otp.expiresAt)) {
-//         user.otp = undefined;
-//         await user.save();
-//         return res.status(400).json({ message: "OTP expired or not requested" });
-//     }
-
-//     // Check attempts
-//     if (user.otp.attemptsLeft <= 0) {
-//         user.otp = undefined;
-//         await user.save();
-//         return res.status(429).json({ message: "Too many invalid attempts. Request a new OTP." });
-//     }
-
-//     // Validate OTP
-//     const isValid = await bcrypt.compare(otp, user.otp.code);
-//     if (!isValid) {
-//         user.otp.attemptsLeft -= 1;
-//         await user.save();
-//         return res.status(401).json({ message: `Invalid OTP. ${user.otp.attemptsLeft} attempts left.` });
-//     }
-
-//     // ✅ Success: verify user & clear OTP
-//     user.isVerified = true;
-//     user.otp = undefined;
-//     user.otpRequests = [];
-
-//     // ✅ Handle referral rewards instantly
-//     if (user.referredBy) {
-//         const config = await ReferralConfig.findOne();
-//         if (config) {
-//             const referrer = await User.findById(user.referredBy);
-
-//             if (referrer) {
-//                 // reward referrer
-//                 referrer.walletBalance += config.rewardForReferrer;
-//                 await referrer.save();
-
-//                 // reward referee
-//                 user.walletBalance += config.rewardForReferee;
-//             }
-//         }
-//     }
-
-//     await user.save();
-
-//     return res.status(200).json({
-//         message:
-//             "Email verified successfully. Referral rewards applied instantly (if any). You can now login.",
-//         walletBalance: user.walletBalance,
-//     });
-// };
-
-// ====================== ADMIN OTP FLOWS ===================== //
-
-// Send OTP to Admin
-
-
-
 export const verifyEmailOtp = async (req, res) => {
     try {
-        // 1️⃣ Validate request
         const { error } = verifyEmailOtpSchema.validate(req.body, { allowUnknown: true });
         if (error) return res.status(400).json({ message: error.details[0].message });
 
         const { email, otp } = req.body;
+
         const user = await User.findOne({ email: email.trim().toLowerCase() });
         if (!user) return res.status(404).json({ message: "User not found" });
         if (user.isVerified) return res.status(400).json({ message: "User already verified" });
 
-        // 2️⃣ Check OTP existence & expiry
         if (!user.otp?.code || new Date() > new Date(user.otp.expiresAt)) {
             user.otp = undefined;
             await user.save();
             return res.status(400).json({ message: "OTP expired or not requested" });
         }
 
-        // 3️⃣ Check attempts
         if (user.otp.attemptsLeft <= 0) {
             user.otp = undefined;
             await user.save();
-            return res.status(429).json({ message: "Too many invalid attempts. Request a new OTP." });
+            return res.status(429).json({ message: "Too many invalid attempts. Request new OTP." });
         }
 
-        // 4️⃣ Validate OTP
         const isValid = await bcrypt.compare(otp, user.otp.code);
         if (!isValid) {
             user.otp.attemptsLeft -= 1;
@@ -318,45 +201,67 @@ export const verifyEmailOtp = async (req, res) => {
             return res.status(401).json({ message: `Invalid OTP. ${user.otp.attemptsLeft} attempts left.` });
         }
 
-        // 5️⃣ ✅ Success: verify user & clear OTP
+        // OTP valid → verify user
         user.isVerified = true;
         user.otp = undefined;
         user.otpRequests = [];
         await user.save();
 
-        // 6️⃣ Handle referral rewards
+        // -------------------------
+        // REFERRAL REWARD HANDLING
+        // -------------------------
+
+        let referrerReward = 0;
+        let refereeReward = 0;
+        let referrerName = null;
+
         if (user.referredBy) {
             const config = await ReferralConfig.findOne();
             if (config) {
                 const referrer = await User.findById(user.referredBy);
                 if (referrer) {
-                    // Reward referrer in Wallet
+
+                    referrerName = referrer.name;
+                    referrerReward = config.rewardForReferrer;
+                    refereeReward = config.rewardForReferee;
+
                     await addRewardPoints({
                         userId: referrer._id,
-                        points: config.rewardForReferrer,
+                        points: referrerReward,
                         description: `Referral reward for inviting ${user.name}`,
                     });
 
-                    // Reward referee in Wallet
                     await addRewardPoints({
                         userId: user._id,
-                        points: config.rewardForReferee,
+                        points: refereeReward,
                         description: "Referral signup reward",
                     });
                 }
             }
         }
 
-        // 7️⃣ Fetch wallet of current user to return points
+        // Fetch wallet
         const wallet = await getOrCreateWallet(user._id);
 
+        // Send welcome email
+        try {
+            await sendWelcomeEmail(user, wallet, {
+                referrerReward,
+                refereeReward,
+                referrerName
+            });
+        } catch (emailError) {
+            console.error("Welcome email failed:", emailError);
+        }
+
         return res.status(200).json({
-            message: "Email verified successfully. Referral rewards applied instantly (if any). You can now login.",
+            message: "Email verified successfully!",
             walletBalance: wallet.joyoryCash + wallet.rewardPoints,
             joyoryCash: wallet.joyoryCash,
             rewardPoints: wallet.rewardPoints,
             transactions: wallet.transactions.slice().reverse().slice(0, 50),
         });
+
     } catch (err) {
         console.error("Error verifying email OTP:", err);
         return res.status(500).json({ message: "Server error", error: err.message });
@@ -429,6 +334,9 @@ export const sendOtpUnified = async (req, res) => {
     }
 };
 
+
+
+
 // Login Admin with OTP
 export const adminLoginWithOtp = async (req, res) => {
     const { email, otp } = req.body;
@@ -469,64 +377,6 @@ export const adminLoginWithOtp = async (req, res) => {
     });
 };
 
-
-// // Verify Admin Email OTP (after registration)
-// export const verifyAdminEmailOtp = async (req, res) => {
-//     try {
-//         const { email, otp } = req.body;
-
-//         // Check pending admin
-//         const pending = await PendingAdmin.findOne({ email });
-//         if (!pending) {
-//             return res.status(404).json({ message: "No pending admin found or OTP expired" });
-//         }
-
-//         // Check OTP expiry
-//         if (!pending.otp?.code || new Date() > new Date(pending.otp.expiresAt)) {
-//             await PendingAdmin.deleteOne({ email }); // cleanup
-//             return res.status(400).json({ message: "OTP expired or not requested" });
-//         }
-
-//         // Check attempts
-//         if (pending.otp.attemptsLeft <= 0) {
-//             await PendingAdmin.deleteOne({ email });
-//             return res.status(429).json({ message: "Too many invalid attempts. Please register again." });
-//         }
-
-//         // Compare OTP
-//         const isValid = await bcrypt.compare(otp, pending.otp.code);
-//         if (!isValid) {
-//             pending.otp.attemptsLeft -= 1;
-//             await pending.save();
-//             return res.status(401).json({
-//                 message: `Invalid OTP. ${pending.otp.attemptsLeft} attempts left.`,
-//             });
-//         }
-
-//         // ✅ OTP is valid → Create real Admin
-//         const admin = await Admin.create({
-//             name: pending.name,
-//             email: pending.email,
-//             password: pending.password, // already hashed
-//             isSuperAdmin: pending.isSuperAdmin,  // <<<< ADD THIS
-//             isVerified: true,
-//         });
-
-//         // Cleanup
-//         await PendingAdmin.deleteOne({ email });
-
-//         return res.status(201).json({
-//             message: "Email verified successfully. Admin created. You can now login.",
-//             adminId: admin._id,
-//         });
-//     } catch (err) {
-//         console.error("Verify Admin OTP Error:", err);
-//         return res.status(500).json({
-//             message: "OTP verification failed",
-//             error: err.message,
-//         });
-//     }
-// };
 export const verifyUnifiedOtp = async (req, res) => {
     try {
         const { email, otp } = req.body;

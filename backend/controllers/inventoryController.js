@@ -1,318 +1,10 @@
-// import Product from '../models/Product.js';
-// import Category from "../models/Category.js"; // adjust path
-// import Order from "../models/Order.js";
-
-// // ✅ Add Inventory/Product Item
-
-// export const getInventoryItems = async (req, res) => {
-//     try {
-//         const {
-//             name,
-//             variantName,
-//             sku,
-//             category,
-//             minPrice,
-//             maxPrice,
-//             minQuantity,
-//             maxQuantity,
-//             availability,
-//             expiryFrom,
-//             expiryTo
-//         } = req.query;
-
-//         const filter = {};
-
-//         // ✅ Product name filter
-//         if (name) {
-//             filter.name = { $regex: name, $options: "i" };
-//         }
-
-//         // ✅ Category filter
-//         if (category) {
-//             filter.category = category;
-//         }
-
-//         // ✅ Buying price filter
-//         if (minPrice || maxPrice) {
-//             filter.buyingPrice = {};
-//             if (minPrice) filter.buyingPrice.$gte = Number(minPrice);
-//             if (maxPrice) filter.buyingPrice.$lte = Number(maxPrice);
-//         }
-
-//         // ✅ Fetch products
-//         const products = await Product.find(filter)
-//             .populate("category", "name")
-//             .lean();
-
-//         const variantList = [];
-
-//         for (const p of products) {
-
-//             // ✅ Product has variants
-//             if (Array.isArray(p.variants) && p.variants.length > 0) {
-//                 for (const v of p.variants) {
-
-//                     const stock = v.stock ?? 0;
-//                     const threshold = v.thresholdValue ?? 0;
-
-//                     // ✅ Variant name filter
-//                     if (variantName) {
-//                         const match = v.shadeName?.toLowerCase().includes(variantName.toLowerCase());
-//                         if (!match) continue;
-//                     }
-
-//                     // ✅ SKU filter
-//                     if (sku && v.sku !== sku) continue;
-
-//                     // ✅ Quantity filters
-//                     if (minQuantity && stock < Number(minQuantity)) continue;
-//                     if (maxQuantity && stock > Number(maxQuantity)) continue;
-
-//                     // ✅ Availability filter
-//                     if (availability === "Out of stock" && stock !== 0) continue;
-//                     if (availability === "Low stock" && !(stock > 0 && stock <= threshold)) continue;
-//                     if (availability === "In-stock" && !(stock > threshold)) continue;
-
-//                     // ✅ Expiry filter
-//                     if (expiryFrom || expiryTo) {
-//                         const exp = v.expiryDate ? new Date(v.expiryDate) : null;
-//                         if (!exp) continue;
-//                         if (expiryFrom && exp < new Date(expiryFrom)) continue;
-//                         if (expiryTo && exp > new Date(expiryTo)) continue;
-//                     }
-
-//                     const productExpiry = p.expiryDate
-//                         ? p.expiryDate.toISOString().split("T")[0]
-//                         : "N/A";
-
-
-//                     variantList.push({
-//                         productId: p._id,
-//                         category: p.category?.name || "N/A",
-//                         productName: p.name,
-//                         buyingPrice: p.buyingPrice,
-//                         variantName: v.shadeName || "Default",
-//                         sku: v.sku || "N/A",
-//                         stock,
-//                         thresholdValue: threshold,
-//                         expiryDate: productExpiry,
-//                         availability:
-//                             stock === 0
-//                                 ? "Out of stock"
-//                                 : stock <= threshold
-//                                     ? "Low stock"
-//                                     : "In-stock"
-//                     });
-//                 }
-//             }
-
-//             // ✅ Product without variants
-//             else {
-//                 const stock = p.quantity ?? 0;
-//                 const threshold = p.thresholdValue ?? 0;
-
-//                 // ✅ Quantity filters
-//                 if (minQuantity && stock < Number(minQuantity)) continue;
-//                 if (maxQuantity && stock > Number(maxQuantity)) continue;
-
-//                 // ✅ Availability filter
-//                 if (availability === "Out of stock" && stock !== 0) continue;
-//                 if (availability === "Low stock" && !(stock > 0 && stock <= threshold)) continue;
-//                 if (availability === "In-stock" && !(stock > threshold)) continue;
-
-//                 // ✅ Expiry filter
-//                 if (expiryFrom || expiryTo) {
-//                     const exp = p.expiryDate ? new Date(p.expiryDate) : null;
-//                     if (!exp) continue;
-//                     if (expiryFrom && exp < new Date(expiryFrom)) continue;
-//                     if (expiryTo && exp > new Date(expiryTo)) continue;
-//                 }
-
-//                 variantList.push({
-//                     productId: p._id,
-//                     category: p.category?.name || "N/A",
-//                     productName: p.name,
-//                     buyingPrice: p.buyingPrice,
-//                     variantName: "Default",
-//                     sku: p.sku || "N/A",
-//                     stock,
-//                     thresholdValue: threshold,
-//                     expiryDate: p.expiryDate ? p.expiryDate.toISOString().split("T")[0] : "N/A",
-//                     availability:
-//                         stock === 0
-//                             ? "Out of stock"
-//                             : stock <= threshold
-//                                 ? "Low stock"
-//                                 : "In-stock"
-//                 });
-//             }
-//         }
-
-//         res.status(200).json(variantList);
-
-//     } catch (error) {
-//         console.error("❌ Inventory List Error:", error);
-//         res.status(500).json({ message: "Failed to fetch inventory list", error });
-//     }
-// };
-
-// export const getInventorySummary = async (req, res) => {
-//     try {
-//         const { category, minPrice, maxPrice } = req.query;
-
-//         // ---------------- FILTER ----------------
-//         const filter = {};
-//         if (category) filter.category = category;
-//         if (minPrice || maxPrice) {
-//             filter.buyingPrice = {};
-//             if (minPrice) filter.buyingPrice.$gte = Number(minPrice);
-//             if (maxPrice) filter.buyingPrice.$lte = Number(maxPrice);
-//         }
-
-//         // Normalization helper
-//         const normalize = (str) => (str || "default").toLowerCase().trim();
-
-//         // ---------------- Fetch Products ----------------
-//         const products = await Product.find(filter)
-//             .populate("category", "name")
-//             .lean();
-
-//         const totalCategories = await Category.countDocuments();
-
-//         let totalProducts = 0;
-//         let totalVariants = 0;
-//         let totalRevenue = 0;
-//         let totalCost = 0;
-//         let lowStocks = 0;
-//         let outOfStock = 0;
-
-//         const variantSalesData = [];
-
-//         // ---------------- Fetch Order Data Once ----------------
-//         const allOrders = await Order.find(
-//             {},
-//             "products.productId products.variant products.price products.quantity"
-//         ).lean();
-
-//         // ---------------- Revenue Map ----------------
-//         const revenueMap = new Map();
-//         const fallbackPriceMap = new Map();
-
-//         for (const order of allOrders) {
-//             for (const item of order.products || []) {
-//                 const pid = item.productId?.toString();
-//                 if (!pid) continue;
-
-//                 const variantName = normalize(item.variant?.shadeName);
-//                 const key = `${pid}_${variantName}`;
-
-//                 const unitPrice =
-//                     item.variant?.displayPrice ||
-//                     item.variant?.discountedPrice ||
-//                     item.price ||
-//                     0;
-
-//                 const qty = item.quantity || 0;
-//                 const revenue = qty * unitPrice;
-
-//                 revenueMap.set(key, (revenueMap.get(key) || 0) + revenue);
-
-//                 if (!fallbackPriceMap.has(key)) fallbackPriceMap.set(key, unitPrice);
-//             }
-//         }
-
-//         // ---------------- Calculate Inventory Summary ----------------
-//         for (const product of products) {
-//             totalProducts++;
-//             const costPrice = product.buyingPrice || 0;
-
-//             const variants = product.variants?.length ? product.variants : [{ // simple product fallback
-//                 shadeName: "default",
-//                 stock: product.quantity,
-//                 thresholdValue: product.thresholdValue,
-//                 sales: product.sales,
-//             }];
-
-//             for (const v of variants) {
-//                 totalVariants++;
-
-//                 // Stock calculations
-//                 if (v.stock === 0) outOfStock++;
-//                 else if (v.stock > 0 && v.stock <= (v.thresholdValue || 0)) lowStocks++;
-
-//                 const variantName = normalize(v.shadeName);
-//                 const key = `${product._id}_${variantName}`;
-
-//                 const soldQty = v.sales || 0;
-
-//                 // ✅ Revenue from real orders
-//                 const orderRevenue = revenueMap.get(key) || 0;
-
-//                 // ✅ Fallback to product’s displayPrice * sales
-//                 const displayPrice =
-//                     fallbackPriceMap.get(key) ||
-//                     v.displayPrice ||
-//                     v.discountedPrice ||
-//                     0;
-
-//                 const fallbackRevenue = soldQty * displayPrice;
-
-//                 const revenue = orderRevenue > 0 ? orderRevenue : fallbackRevenue;
-//                 const cost = soldQty * costPrice;
-
-//                 totalRevenue += revenue;
-//                 totalCost += cost;
-
-//                 variantSalesData.push({
-//                     productId: product._id,
-//                     productName: product.name,
-//                     variantName: v.shadeName || "Default",
-//                     sold: soldQty,
-//                     displayPrice,
-//                     cost,
-//                     revenue,
-//                     debug: orderRevenue > 0
-//                         ? "✅ Used order-based revenue"
-//                         : "🧮 Used fallback (displayPrice * sales)"
-//                 });
-//             }
-//         }
-
-//         // ---------------- Final Output ----------------
-//         const profit = totalRevenue - totalCost;
-//         const topSelling = [...variantSalesData]
-//             .sort((a, b) => b.sold - a.sold)
-//             .slice(0, 5);
-
-//         res.status(200).json({
-//             totalCategories,
-//             totalProducts,
-//             totalVariants,
-//             totalRevenue: Number(totalRevenue.toFixed(2)),
-//             totalCost: Number(totalCost.toFixed(2)),
-//             profit: Number(profit.toFixed(2)),
-//             lowStocks,
-//             outOfStock,
-//             topSelling
-//         });
-
-//     } catch (error) {
-//         console.error("❌ Inventory Summary Error:", error);
-//         res.status(500).json({ message: "Error generating summary", error });
-//     }
-// };
-
-
-
-
-
 
 // controllers/inventoryController.js
 import Product from "../models/Product.js";
 import Category from "../models/Category.js";
 import Brand from "../models/Brand.js";
 import Order from "../models/Order.js";
-
+import { sendNotification } from "./sendNotification.js";
 /**
  * Helper: safely parse numbers
  */
@@ -327,22 +19,7 @@ const toNumber = (val, fallback = null) => {
  */
 const normalize = (s) => (s || "default").toString().toLowerCase().trim();
 
-/**
- * GET /inventory/items
- * Query params supported:
- *  - name, variantName, sku, category, brand, warehouse (warehouseCode)
- *  - minPrice, maxPrice, minQuantity, maxQuantity
- *  - availability = "Out of stock" | "Low stock" | "In-stock"
- *  - expiryFrom, expiryTo (ISO date strings)
- *  - page (default 1), limit (default 50), sortBy (e.g., "stock"), sortDir (asc|desc)
- *
- * Response: array of variant objects:
- * {
- *   productId, productName, brand: { _id, name }, category: { _id, name },
- *   variantName, sku, totalStock, stockByWarehouse: [{warehouseCode,stock}],
- *   thresholdValue, buyingPrice, displayPrice, expiryDate, availability
- * }
- */
+
 export const getInventoryItems = async (req, res) => {
     try {
         const {
@@ -508,251 +185,6 @@ export const getInventoryItems = async (req, res) => {
     }
 };
 
-
-/**
- * GET /inventory/summary
- * Returns overall inventory KPIs + top selling variants.
- * Supports filters: category, brand, minPrice, maxPrice
- *
- * Response:
- * {
- *  totalBrands, totalCategories, totalProducts, totalVariants,
- *  totalStock, lowStocks, outOfStock,
- *  totalRevenue, totalCost, profit,
- *  warehouseSummary: [{ warehouseCode, totalStock, lowStockCount, outOfStockCount }],
- *  brandSummary: [{ brandId, brandName, totalProducts, totalStock }],
- *  topSelling: [{ productId, productName, variantName, sold, revenue }]
- * }
- */
-// export const getInventorySummary = async (req, res) => {
-//     try {
-//         const { category, brand, minPrice, maxPrice } = req.query;
-
-//         const filter = {};
-//         if (category) filter.category = category;
-//         if (brand) filter.brand = brand;
-//         if (minPrice || maxPrice) {
-//             filter.buyingPrice = {};
-//             if (minPrice) filter.buyingPrice.$gte = Number(minPrice);
-//             if (maxPrice) filter.buyingPrice.$lte = Number(maxPrice);
-//         }
-
-//         const products = await Product.find(filter)
-//             .populate("category", "name")
-//             .populate("brand", "name")
-//             .lean();
-
-//         const totalCategories = await Category.countDocuments();
-//         const totalBrands = await Brand.countDocuments();
-
-//         let totalProducts = 0;
-//         let totalVariants = 0;
-//         let totalStock = 0;
-//         let lowStocks = 0;
-//         let outOfStock = 0;
-//         let totalRevenue = 0;
-//         let totalCost = 0;
-
-//         const warehouseMap = new Map();
-//         const brandMap = new Map();
-//         const variantSalesData = [];
-
-//         // NEW SECTIONS
-//         const lowStockItems = [];
-//         const outOfStockItems = [];
-
-//         const allOrders = await Order.find({}, "products.productId products.variant products.price products.quantity").lean();
-//         const revenueMap = new Map();
-//         const fallbackPriceMap = new Map();
-
-//         for (const ord of allOrders) {
-//             for (const it of ord.products || []) {
-//                 const pid = it.productId?.toString();
-//                 if (!pid) continue;
-//                 const key = `${pid}_${(it.variant?.shadeName || "").toLowerCase()}`;
-//                 const unitPrice = Number(it.variant?.displayPrice ?? it.variant?.discountedPrice ?? it.price ?? 0);
-//                 const qty = Number(it.quantity || 0);
-//                 const rev = unitPrice * qty;
-
-//                 revenueMap.set(key, (revenueMap.get(key) || 0) + rev);
-//                 if (!fallbackPriceMap.has(key)) fallbackPriceMap.set(key, unitPrice);
-//             }
-//         }
-
-//         for (const p of products) {
-//             totalProducts++;
-
-//             const variants = Array.isArray(p.variants) && p.variants.length > 0
-//                 ? p.variants
-//                 : [{
-//                     shadeName: "Default",
-//                     stockByWarehouse: [{ warehouseCode: p.brand?.primaryWarehouse || "default", stock: Number(p.quantity || 0) }],
-//                     stock: Number(p.quantity || 0),
-//                     thresholdValue: p.thresholdValue ?? 0,
-//                     displayPrice: p.displayPrice ?? p.discountedPrice ?? p.price ?? 0,
-//                     sales: p.sales ?? 0
-//                 }];
-
-//             const brandId = p.brand?._id?.toString() || "unknown";
-//             if (!brandMap.has(brandId))
-//                 brandMap.set(brandId, { brandName: p.brand?.name || "Unknown", totalProducts: 0, totalStock: 0 });
-
-//             brandMap.get(brandId).totalProducts++;
-
-//             for (const v of variants) {
-//                 totalVariants++;
-
-//                 const stockByWarehouse = Array.isArray(v.stockByWarehouse) && v.stockByWarehouse.length > 0
-//                     ? v.stockByWarehouse.map(s => ({
-//                         warehouseCode: s.warehouseCode || "default",
-//                         stock: Number(s.stock || 0)
-//                     }))
-//                     : [{ warehouseCode: "default", stock: Number(v.stock || 0) }];
-
-//                 const variantTotalStock = stockByWarehouse.reduce((s, w) => s + w.stock, 0);
-
-//                 totalStock += variantTotalStock;
-
-//                 // 👇 NEW: PUSH DETAILS INTO SECTIONS
-//                 const variantInfo = {
-//                     productId: p._id,
-//                     productName: p.name,
-//                     variantName: v.shadeName || "Default",
-//                     sku: v.sku || "N/A",
-//                     image: (Array.isArray(v.images) && v.images.length > 0)
-//                         ? v.images[0]
-//                         : (Array.isArray(p.images) && p.images.length > 0)
-//                             ? p.images[0]
-//                             : "N/A",
-//                     totalVariantStock: variantTotalStock,
-//                     perWarehouseStock: stockByWarehouse
-//                 };
-
-//                 // --- FIXED LOW-STOCK / OUT-STOCK LOGIC ---
-
-//                 const threshold = Number(v.thresholdValue || 0);
-
-//                 if (variantTotalStock === 0) {
-//                     // Out of stock
-//                     outOfStock++;
-//                     outOfStockItems.push(variantInfo);
-
-//                 } else {
-//                     let isLowStock = false;
-
-//                     if (threshold > 0) {
-//                         // CASE 1: Variant HAS threshold → use threshold
-//                         isLowStock = variantTotalStock <= threshold;
-//                     } else {
-//                         // CASE 2: No threshold → fallback to ≤10 rule
-//                         isLowStock = variantTotalStock <= 10;
-//                     }
-
-//                     if (isLowStock) {
-//                         lowStocks++;
-//                         lowStockItems.push(variantInfo);
-//                     }
-//                 }
-
-
-//                 // warehouse summary logic continues...
-//                 for (const w of stockByWarehouse) {
-//                     const code = w.warehouseCode || "default";
-//                     if (!warehouseMap.has(code))
-//                         warehouseMap.set(code, { warehouseCode: code, totalStock: 0, lowCount: 0, outCount: 0 });
-
-//                     const entry = warehouseMap.get(code);
-
-//                     entry.totalStock += w.stock;
-//                     if (w.stock === 0) {
-//                         entry.outCount++;
-//                     } else {
-//                         let isLowStockWarehouse = false;
-
-//                         if (threshold > 0) {
-//                             isLowStockWarehouse = w.stock <= threshold;
-//                         } else {
-//                             isLowStockWarehouse = w.stock <= 10;
-//                         }
-
-//                         if (isLowStockWarehouse) entry.lowCount++;
-//                     }
-
-//                 }
-
-//                 brandMap.get(brandId).totalStock += variantTotalStock;
-
-//                 const key = `${p._id}_${(v.shadeName || "").toLowerCase()}`;
-//                 const soldQty = Number(v.sales || 0);
-
-//                 const orderRevenue = revenueMap.get(key) || 0;
-//                 const displayPrice =
-//                     fallbackPriceMap.get(key)
-//                     ?? Number(v.displayPrice || v.discountedPrice || p.displayPrice || p.price || 0);
-
-//                 const revenue = orderRevenue > 0 ? orderRevenue : soldQty * displayPrice;
-//                 const cost = soldQty * Number(p.buyingPrice || 0);
-
-//                 totalRevenue += revenue;
-//                 totalCost += cost;
-
-//                 variantSalesData.push({
-//                     productId: p._id,
-//                     productName: p.name,
-//                     image: (Array.isArray(v.images) && v.images.length > 0)
-//                         ? v.images[0]
-//                         : (Array.isArray(p.images) && p.images.length > 0)
-//                             ? p.images[0]
-//                             : "N/A",
-//                     sku: v.sku || "N/A",
-//                     variantName: v.shadeName || "Default",
-//                     sold: soldQty,
-//                     displayPrice,
-//                     revenue,
-//                     cost,
-//                     usedOrderRevenue: orderRevenue > 0
-//                 });
-//             }
-//         }
-
-//         const warehouseSummary = Array.from(warehouseMap.values()).sort((a, b) => b.totalStock - a.totalStock);
-//         const brandSummary = Array.from(brandMap.entries()).map(([id, v]) => ({
-//             brandId: id,
-//             brandName: v.brandName,
-//             totalProducts: v.totalProducts,
-//             totalStock: v.totalStock
-//         })).sort((a, b) => b.totalStock - a.totalStock);
-
-//         const topSelling = variantSalesData.sort((a, b) => b.sold - a.sold).slice(0, 10);
-
-//         const profit = totalRevenue - totalCost;
-
-//         res.status(200).json({
-//             totalCategories,
-//             totalBrands,
-//             totalProducts,
-//             totalVariants,
-//             totalStock,
-//             lowStocks,
-//             outOfStock,
-//             totalRevenue: Number(totalRevenue.toFixed(2)),
-//             totalCost: Number(totalCost.toFixed(2)),
-//             profit: Number(profit.toFixed(2)),
-//             warehouseSummary,
-//             brandSummary,
-//             topSelling,
-
-//             // NEW SECTIONS HERE
-//             lowStockItems,
-//             outOfStockItems
-//         });
-
-//     } catch (err) {
-//         console.error("❌ getInventorySummary error:", err);
-//         res.status(500).json({ message: "Failed to generate inventory summary", error: err.message });
-//     }
-// };
-
 export const getInventorySummary = async (req, res) => {
     try {
         const { category, brand, minPrice, maxPrice } = req.query;
@@ -809,9 +241,9 @@ export const getInventorySummary = async (req, res) => {
                 const qty = Number(it.quantity || 0);
                 const sellPrice =
                     Number(it.variant?.displayPrice ??
-                    it.variant?.discountedPrice ??
-                    it.price ??
-                    0);
+                        it.variant?.discountedPrice ??
+                        it.price ??
+                        0);
 
                 const revenue = sellPrice * qty;
 
@@ -992,12 +424,8 @@ export const getInventorySummary = async (req, res) => {
         res.status(500).json({ message: "Failed to generate inventory summary", error: err.message });
     }
 };
-    
 
-/**
- * Optional: GET /inventory/brand/:brandId
- * Returns warehouse-wise inventory breakdown for a brand
- */
+
 export const getInventoryByBrand = async (req, res) => {
     try {
         const { brandId } = req.params;
@@ -1080,12 +508,26 @@ export const deleteVariant = async (req, res) => {
         // If no variants left → delete whole product
         if (product.variants.length === 0) {
             await product.deleteOne();
+            // 🔔 Notify admins
+            await sendNotification({
+                type: "inventory",
+                message: `Product deleted because last variant removed: ${product.name}`,
+                priority: "high",
+                meta: { productId: product._id }
+            });
             return res.json({
                 message: "Variant deleted. No variants left, so product removed as well."
             });
         }
 
         await product.save();
+        // 🔔 Notify admins
+        await sendNotification({
+            type: "inventory",
+            message: `Variant deleted (SKU: ${sku}) from product: ${product.name}`,
+            priority: "normal",
+            meta: { productId: product._id, sku }
+        });
         res.json({ message: "Variant deleted successfully" });
 
     } catch (err) {
@@ -1104,6 +546,14 @@ export const deleteProduct = async (req, res) => {
 
         const deleted = await Product.findByIdAndDelete(productId);
         if (!deleted) return res.status(404).json({ message: "Product not found" });
+
+        // 🔔 Notify admins
+        await sendNotification({
+            type: "inventory",
+            message: `Product deleted: ${deleted.name}`,
+            priority: "high",
+            meta: { productId: deleted._id }
+        });
 
         res.json({ message: "Product deleted successfully" });
 
@@ -1155,6 +605,19 @@ export const updateVariantStock = async (req, res) => {
         );
 
         await product.save();
+
+        // 🔔 STOCK UPDATE NOTIFICATION
+        await sendNotification({
+            type: "inventory",
+            message: `Stock updated for SKU ${sku} → ${variant.stock} total`,
+            priority: variant.stock === 0 ? "high" : "normal",
+            meta: {
+                productId: product._id,
+                sku,
+                warehouseCode,
+                totalStock: variant.stock
+            }
+        });
 
         res.json({
             message: "Variant stock updated successfully",

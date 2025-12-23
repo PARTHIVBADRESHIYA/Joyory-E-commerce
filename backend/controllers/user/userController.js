@@ -6,7 +6,7 @@ import ReferralCampaign from '../../models/ReferralCampaign.js';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { generateOTP } from '../../middlewares/utils/generateOTP.js';
-import { sendEmail } from '../../middlewares/utils/emailService.js';
+import { sendEmail, sendVerificationEmail } from '../../middlewares/utils/emailService.js';
 import { sendSms } from '../../middlewares/utils/sendSms.js';
 import { mergeGuestCart } from '../../controllers/user/userCartController.js';
 // import { notifyMainAdmins } from '../middlewares/utils/notifyMainAdmins.js'; // ✅ Make sure this path is correct
@@ -242,11 +242,11 @@ const userSignup = async (req, res) => {
             if (actualMethod === "sms") {
                 await sendSms(phone, `Your verification OTP is: ${plainOtp}`);
             } else {
-                await sendEmail(
-                    email,
-                    "Verify your account",
-                    `<p>Your verification OTP is: <b>${plainOtp}</b></p>`
+                await sendVerificationEmail(
+                    { name, email },   // pass user object
+                    plainOtp           // pass OTP only
                 );
+
             }
         } catch (err) {
             console.error("❌ OTP sending failed:", err);
@@ -336,12 +336,17 @@ const userLogin = async (req, res) => {
         }
 
         const token = generateToken(user);
+
+
+        const isProd = process.env.NODE_ENV === "production";
+
         res.cookie("token", token, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
-            maxAge: 7 * 24 * 60 * 60 * 1000
+            secure: isProd,          // REQUIRED for iOS
+            sameSite: isProd ? "None" : "Lax",
+            maxAge: 7 * 24 * 60 * 60 * 1000,
         });
+
 
         return res.status(200).json({
             message: `Welcome back, ${user.name}!`,
