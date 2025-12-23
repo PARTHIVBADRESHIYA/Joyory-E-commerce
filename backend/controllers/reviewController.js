@@ -10,7 +10,7 @@ import { uploadToCloudinary } from '../middlewares/upload.js';
 const submitReview = async (req, res) => {
     try {
         const userId = req.user._id;
-        const { productId, rating, title, comment } = req.body;
+        const { productId, variantSku, shadeName, rating, title, comment } = req.body;
 
         let images = [];
 
@@ -29,10 +29,10 @@ const submitReview = async (req, res) => {
                 : [req.body.images];
         }
 
-        if (!productId || !rating || !comment) {
+        if (!productId || !variantSku || !rating || !comment) {
             return res
                 .status(400)
-                .json({ message: "❌ Missing required fields: productId, rating, or comment" });
+                .json({ message: "❌ Missing required fields: productId, variantSku, rating, or comment" });
         }
 
         if (rating < 1 || rating > 5) {
@@ -44,10 +44,15 @@ const submitReview = async (req, res) => {
             user: userId,
             status: { $in: ["Paid", "Completed"] },
             "products.productId": productId,
+            "products.variant.sku": variantSku
+
         });
         const verifiedPurchase = !!hasPurchased;
 
-        let review = await Review.findOne({ productId, customer: userId });
+        let review = await Review.findOne({
+            productId, variantSku,
+            customer: userId
+        });
         const isNew = !review;
 
         if (review) {
@@ -55,24 +60,26 @@ const submitReview = async (req, res) => {
                 rating,
                 title,
                 comment,
-                images: images.length > 0 ? images : review.images,
+                images: images.length ? images : review.images,
                 verifiedPurchase,
-                status: "Active",
+                shadeName,
+                status: "Active"
             });
             await review.save();
         } else {
             review = await Review.create({
                 productId,
+                variantSku,
+                shadeName,
                 customer: userId,
                 rating,
                 title,
                 comment,
                 images,
-                verifiedPurchase,
-                helpfulVotes: 0,
-                status: "Active",
+                verifiedPurchase
             });
         }
+
 
         // update product stats
         const activeReviews = await Review.find({ productId, status: "Active" });
@@ -147,7 +154,7 @@ const voteReviewHelpful = async (req, res) => {
 const getProductReviews = async (req, res) => {
     try {
         const { productId } = req.params;
-        const { stars, photosOnly, sort = "recent" } = req.query;
+        const { stars, photosOnly, sort = "recent", variantSku, shadeName } = req.query;
 
         const filter = { productId, status: "Active" };
         if (stars) filter.rating = Number(stars);
@@ -217,6 +224,10 @@ const getAllReviews = async (req, res) => {
 
         const match = { status: "Active" };
 
+        const { variantSku, shadeName } = req.query;
+
+        if (variantSku) match.variantSku = variantSku;
+        if (shadeName) match.shadeName = new RegExp(shadeName, "i");
         // ---- Standard Filters ----
         if (rating) match.rating = Number(rating);
 
@@ -334,6 +345,8 @@ const getAllReviews = async (req, res) => {
                 comment: 1,
                 createdAt: 1,
 
+                variantSku: 1,
+                shadeName: 1,
                 productName: "$product.name",
                 productImage: "$product.image",
 

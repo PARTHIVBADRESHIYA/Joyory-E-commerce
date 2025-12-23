@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import cloudinary from "../../middlewares/utils/cloudinary.js";
 import Invoice from "../../models/Invoice.js";
 import fs from "fs";
-
+import Order from "../../models/Order.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -20,10 +20,14 @@ const cleanNumber = (value) => {
 
 export const generateAndSaveInvoice = async (order) => {
     try {
+
+        await order.populate("user");
+
         const invoiceNumber = `INV-${order.orderNumber || Date.now()}-${order._id
             .toString()
             .slice(-5)}`;
         const invoiceDate = new Date();
+
         const user = order.user;
         const customerName = order.customerName || order.shippingAddress?.name || "Unknown";
 
@@ -94,7 +98,7 @@ export const generateAndSaveInvoice = async (order) => {
             grandTotal,
             paymentMethod: order.paymentMethod,
             paid: order.paid,
-            paymentId: order.paymentId,
+            transactionId: order.transactionId,
             orderDate: order.createdAt,
         });
 
@@ -228,8 +232,16 @@ const generateProfessionalInvoice = async (data) => {
             doc.fillColor(gray)
                 .font("Regular")
                 .fontSize(10)
-                .text(ship.addressLine1, 300, y + 18)
-                .text(ship.addressLine2 || "", 300, y + 33)
+                .text(
+                    ship.addressLine1 || ship.address || "N/A",
+                    300,
+                    y + 18
+                )
+                .text(
+                    ship.addressLine2 || "",
+                    300,
+                    y + 33
+                )
                 .text(
                     `${ship.city}, ${ship.state} - ${ship.pincode}`,
                     300,
@@ -238,23 +250,6 @@ const generateProfessionalInvoice = async (data) => {
                 .text(ship.country || "India", 300, y + 63);
 
             y += 110;
-
-            const items = order.products.map((p) => {
-                const qty = Number(p.quantity);
-                const price = cleanNumber(p.price);
-                const total = qty * price;
-                subtotal += total;
-
-                return {
-                    productId: p.productId._id,
-                    name: `${p.productId.name}${p.variant?.shadeName ? " - " + p.variant.shadeName : ""}`, // <-- updated
-                    sku: p.variant?.sku || p.productId.sku,
-                    quantity: qty,
-                    price,
-                    total,
-                    hsn: p.productId.hsn || "N/A", // <-- keep HSN
-                };
-            });
 
             // ---- PRODUCT TABLE HEADER ----
             doc.rect(40, y, doc.page.width - 80, 30).fill(primary);
@@ -331,18 +326,19 @@ const generateProfessionalInvoice = async (data) => {
             // GRAND TOTAL
             doc.fillColor(primary)
                 .font("Bold")
-                .fontSize(12)
+                .fontSize(10) // ⬅ smaller
                 .text("Grand Total:", sumX + 14, sy + 10);
 
             doc.fillColor(primary)
                 .font("Bold")
-                .fontSize(12)
+                .fontSize(10) // ⬅ smaller
                 .text(
                     `₹${data.grandTotal.toFixed(2)}`,
-                    sumX + 200,
+                    sumX + 180,          // ⬅ shift left slightly
                     sy + 10,
-                    { width: 40, align: "right" }
+                    { width: 60, align: "right" } // ⬅ more breathing space
                 );
+
 
             // ---- FOOTER ----
             doc.fillColor(gray)
