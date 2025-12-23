@@ -2149,6 +2149,17 @@ export const verifyRazorpayPayment = async (req, res) => {
         }
 
         await order.save();
+        // 🔔 Notify Admin: New Prepaid Order
+        await sendNotification({
+            type: "order_paid",
+            message: `New prepaid order #${order.orderNumber || order._id} placed`,
+            priority: "high",
+            meta: {
+                orderId: order._id,
+                userId: order.user._id,
+                paymentId: razorpay_payment_id
+            }
+        });
 
         await clearUserCart(order.user._id);
 
@@ -2248,6 +2259,18 @@ export const createCodOrder = async (req, res) => {
         // Check if fraud flagged
         const fraudCheck = await isFraudulentCodOrder(order, order.user, req.body.shippingAddress);
         if (fraudCheck.isFraud) {
+            // 🔥 Notify Admin: COD Fraud Attempt
+            await sendNotification({
+                type: "cod_fraud",
+                message: `⚠️ COD Fraud Attempt by user for order #${order.orderNumber || order._id}`,
+                priority: "critical",
+                meta: {
+                    orderId: order._id,
+                    userId: order.user._id,
+                    reason: fraudCheck.reason
+                }
+            });
+
             // Send warning email to the user
             await sendEmail(
                 order.user.email,
@@ -2356,6 +2379,17 @@ export const confirmCodOrder = async (req, res) => {
         // fraud check
         const fraudCheck = await isFraudulentCodOrder(order, order.user, shippingAddress);
         if (fraudCheck.isFraud) {
+            // 🔥 Notify Admin: COD Fraud Attempt
+            await sendNotification({
+                type: "cod_fraud",
+                message: `⚠️ COD Fraud Attempt by user for order #${order.orderNumber || order._id}`,
+                priority: "critical",
+                meta: {
+                    orderId: order._id,
+                    userId: order.user._id,
+                    reason: fraudCheck.reason
+                }
+            });
             await sendEmail(
                 order.user.email,
                 `Important: Your COD Order #${order.orderNumber || order._id} Requires Attention`,
@@ -2504,7 +2538,16 @@ export const confirmCodOrder = async (req, res) => {
         });
 
         await order.save();
-
+        // 🔔 Notify Admin: New COD Order
+        await sendNotification({
+            type: "order_cod",
+            message: `New COD order #${order.orderNumber || order._id} placed`,
+            priority: "normal",
+            meta: {
+                orderId: order._id,
+                userId: order.user._id
+            }
+        });
         await clearUserCart(order.user._id);
 
         await sendEmail(
@@ -2777,6 +2820,20 @@ export const createWalletPayment = async (req, res) => {
 
             await order.save({ session });
 
+            // 🔔 Notify Admin: New Wallet Payment Order
+            await sendNotification({
+                type: "order_wallet",
+                message: `New Wallet-paid order #${order.orderNumber || order._id} placed`,
+                priority: "high",
+                meta: {
+                    orderId: order._id,
+                    userId: order.user._id,
+                    amount: order.amount,
+                    transactionId: order.transactionId
+                }
+            });
+
+
             await clearUserCart(order.user._id, session);
 
         });
@@ -2790,7 +2847,7 @@ export const createWalletPayment = async (req, res) => {
             invoice = await generateAndSaveInvoice(updated);
 
             // OPTIONAL: store invoiceId in order schema for linkage
-            updated.invoice  = invoice._id;
+            updated.invoice = invoice._id;
             await updated.save();
         } catch (e) {
             console.warn("Invoice generation failed:", e.message);
@@ -3019,6 +3076,20 @@ export const createGiftCardPayment = async (req, res) => {
             if (paymentDoc) order.paymentId = paymentDoc._id;
 
             await order.save({ session });
+
+            // 🔔 Notify Admin: New Gift Card Order
+            await sendNotification({
+                type: "order_giftcard",
+                message: `New Gift Card-paid order #${order.orderNumber || order._id} placed`,
+                priority: "high",
+                meta: {
+                    orderId: order._id,
+                    userId: order.user._id,
+                    amount: order.amount,
+                    transactionId: order.transactionId,
+                    giftCard: order.giftCardApplied?.code
+                }
+            });
 
             await clearUserCart(order.user._id, session);
 

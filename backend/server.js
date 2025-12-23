@@ -527,7 +527,7 @@ app.post(
 // ================= CORS =================
 const allowedOrigins = [
     "http://localhost:5173",
-    "http://192.168.1.1:5173", 
+    "http://192.168.1.1:5173",
     "http://192.168.1.2:5173",
     "http://192.168.1.3:5173",
     "http://192.168.1.4:5173",
@@ -596,19 +596,23 @@ app.use(
 
 // ================= SOCKET.IO =================
 const server = http.createServer(app);
-const io = new Server(server, {
+
+export const io = new Server(server, {
     cors: {
         origin: allowedOrigins,
         methods: ["GET", "POST"],
         credentials: true
     },
 });
+
+// Listening for admin connections
 io.on("connection", (socket) => {
-    console.log("🔌 Client connected:", socket.id);
-    socket.on("registerUser", (userId) => socket.join(userId));
-    socket.on("disconnect", () => console.log("❌ Client disconnected:", socket.id));
+    console.log("Admin Connected:", socket.id);
+
+    socket.on("disconnect", () => {
+        console.log("Admin Disconnected:", socket.id);
+    });
 });
-export { io };
 
 // ================= ROUTES =================
 // Admin & User routes

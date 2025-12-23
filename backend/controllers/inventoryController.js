@@ -752,6 +752,7 @@ export const getInventoryItems = async (req, res) => {
 //         res.status(500).json({ message: "Failed to generate inventory summary", error: err.message });
 //     }
 // };
+
 export const getInventorySummary = async (req, res) => {
     try {
         const { category, brand, minPrice, maxPrice } = req.query;

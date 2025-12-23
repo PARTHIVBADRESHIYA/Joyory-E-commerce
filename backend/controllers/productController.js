@@ -1,6 +1,7 @@
 import util from 'util';
 import Product from '../models/Product.js';
 import Brand from '../models/Brand.js';
+import SkinType from '../models/SkinType.js';
 import cloudinary from '../middlewares/utils/cloudinary.js';
 import Category from '../models/Category.js';
 import Formulation from '../models/shade/Formulation.js';
