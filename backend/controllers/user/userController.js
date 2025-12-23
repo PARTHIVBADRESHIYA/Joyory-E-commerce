@@ -280,6 +280,82 @@ const userSignup = async (req, res) => {
 };
 
 // =================== USER LOGIN ===================
+// const userLogin = async (req, res) => {
+//     try {
+//         const { email, password } = req.body;
+
+//         if (!email || !password) {
+//             return res.status(400).json({
+//                 message: "Please enter both your email and password to log in."
+//             });
+//         }
+
+//         const user = await User.findOne({ email });
+//         if (!user || user.role !== "user") {
+//             return res.status(401).json({ message: "No account found with this email. Please check your email or sign up." });
+//         }
+
+//         if (!user.isVerified) {
+//             return res.status(403).json({ message: "Your email is not verified yet. Please verify your email before logging in." });
+//         }
+
+//         if (user.lockUntil && user.lockUntil > new Date()) {
+//             const remaining = user.lockUntil - new Date();
+//             const m = Math.floor((remaining % 3600000) / 60000);
+//             const s = Math.floor((remaining % 60000) / 1000);
+//             return res.status(403).json({
+//                 message: `Your account is temporarily locked due to multiple failed login attempts. Try again in ${m}m ${s}s.`
+//             });
+//         }
+
+//         const isMatch = await user.matchPassword(password);
+//         if (!isMatch) {
+//             user.loginAttempts = (user.loginAttempts || 0) + 1;
+//             if (user.loginAttempts >= 5) {
+//                 user.lockUntil = new Date(Date.now() + 5 * 60 * 1000);
+//                 user.loginAttempts = 0;
+//                 await user.save();
+//                 return res.status(403).json({ message: "Too many failed attempts. Account locked for 5 minutes." });
+//             }
+//             await user.save();
+//             return res.status(401).json({
+//                 message: `Incorrect password. You have ${5 - user.loginAttempts} attempts left.`
+//             });
+//         }
+
+//         // Success
+//         user.loginAttempts = 0;
+//         user.lockUntil = undefined;
+//         await user.save();
+
+//         // 🔥 Merge guest cart from session
+//         const guestCart = req.session?.guestCart || [];
+//         if (guestCart.length) {
+//             await mergeGuestCart(user._id, guestCart);
+//             req.session.guestCart = []; // clear after merging
+//         }
+
+//         const token = generateToken(user);
+//         res.cookie("token", token, {
+//             httpOnly: true,
+//             secure: process.env.NODE_ENV === "production",
+//             sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+//             maxAge: 7 * 24 * 60 * 60 * 1000
+//         });
+
+//         return res.status(200).json({
+//             message: `Welcome back, ${user.name}!`,
+//             user: { id: user._id, name: user.name, role: user.role },
+//             mergedCart: guestCart.length > 0
+//         });
+
+//     } catch (err) {
+//         console.error("❌ Login error:", err);
+//         return res.status(500).json({
+//             message: "Something went wrong while logging in. Please try again later."
+//         });
+//     }
+// };
 const userLogin = async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -342,8 +418,9 @@ const userLogin = async (req, res) => {
 
         res.cookie("token", token, {
             httpOnly: true,
-            secure: isProd,          // REQUIRED for iOS
-            sameSite: isProd ? "None" : "Lax",
+            secure: process.env.NODE_ENV === "production",                     // ❗ https only in prod
+            sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",   // ❗ Safari-safe
+            domain: process.env.NODE_ENV === "production" ? ".joyory.com" : undefined, // 🔥 KEY LINE
             maxAge: 7 * 24 * 60 * 60 * 1000,
         });
 
@@ -361,7 +438,6 @@ const userLogin = async (req, res) => {
         });
     }
 };
-
 export default userLogin;
 
 // @desc    User Login (5 attempts → 5min lock)
