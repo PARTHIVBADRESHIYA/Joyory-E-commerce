@@ -1069,8 +1069,87 @@ export const getShipmentDetails = async (req, res) => {
   }
 };
 
+// export const cancelShipment = async (req, res) => {
+//   const session = await mongoose.startSession();
+
+//   try {
+//     const { orderId, shipment_id } = req.params;
+//     const { reason } = req.body || {};
+//     const userId = req.user._id;
+
+//     if (!reason || !reason.trim()) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Cancellation reason is required"
+//       });
+//     }
+//     await session.withTransaction(async () => {
+//       const order = await Order.findById(orderId).session(session);
+
+//       if (!order) throw new Error("Order not found");
+
+//       const shipment = order.shipments.id(shipment_id);
+//       if (!shipment) throw new Error("Shipment not found");
+
+//       // ❌ Cannot cancel shipped shipments
+//       const blockedStatuses = ["In Transit", "Out for Delivery", "Delivered"];
+//       if (blockedStatuses.includes(shipment.status))
+//         throw new Error(
+//           `Shipment cannot be cancelled because it is already ${shipment.status}`
+//         );
+
+//       // 🚚 Cancel in Shiprocket
+//       if (shipment.shiprocket_order_id) {
+//         await cancelShiprocketShipment(shipment.shiprocket_order_id);
+//       }
+
+//       // ✅ Update shipment
+//       shipment.status = "Cancelled";
+//       shipment.tracking_history.push({
+//         status: "Cancelled",
+//         timestamp: new Date(),
+//         description: "Shipment cancelled by user"
+//       });
+
+//       // 🧮 Recalculate order status
+//       const statuses = order.shipments.map(s => s.status);
+
+//       if (statuses.every(s => s === "Cancelled")) {
+//         order.orderStatus = "Cancelled";
+//       } else if (statuses.some(s => s === "Cancelled")) {
+//         order.orderStatus = "Partially Cancelled";
+//       }
+
+//       order.cancellation = {
+//         cancelledBy: userId,
+//         reason,
+//         requestedAt: new Date(),
+//         allowed: true
+//       };
+
+//       await order.save({ session });
+//     });
+
+//     res.json({
+//       success: true,
+//       message: "Shipment cancelled successfully"
+//     });
+
+//   } catch (err) {
+//     console.error(err);
+//     res.status(400).json({ success: false, message: err.message });
+//   } finally {
+//     session.endSession();
+//   }
+// };
+
+
 export const cancelShipment = async (req, res) => {
   const session = await mongoose.startSession();
+
+  let shiprocketOrderId = null;
+  let orderIdForRetry = null;
+  let shipmentIdForRetry = null;
 
   try {
     const { orderId, shipment_id } = req.params;
@@ -1083,27 +1162,43 @@ export const cancelShipment = async (req, res) => {
         message: "Cancellation reason is required"
       });
     }
+
     await session.withTransaction(async () => {
       const order = await Order.findById(orderId).session(session);
-
       if (!order) throw new Error("Order not found");
+
+      // ✅ OWNERSHIP CHECK (MANDATORY)
+      if (String(order.user) !== String(userId)) {
+        throw new Error("Unauthorized cancellation attempt");
+      }
 
       const shipment = order.shipments.id(shipment_id);
       if (!shipment) throw new Error("Shipment not found");
 
+      // ❌ Prevent double cancellation
+      if (shipment.status === "Cancelled") {
+        throw new Error("Shipment already cancelled");
+      }
+
       // ❌ Cannot cancel shipped shipments
-      const blockedStatuses = ["In Transit", "Out for Delivery", "Delivered"];
-      if (blockedStatuses.includes(shipment.status))
+      const blockedStatuses = [
+        "In Transit",
+        "Out for Delivery",
+        "Delivered"
+      ];
+
+      if (blockedStatuses.includes(shipment.status)) {
         throw new Error(
           `Shipment cannot be cancelled because it is already ${shipment.status}`
         );
-
-      // 🚚 Cancel in Shiprocket
-      if (shipment.shiprocket_order_id) {
-        await cancelShiprocketShipment(shipment.shiprocket_order_id);
       }
 
-      // ✅ Update shipment
+      // 🔒 Save Shiprocket ID for AFTER transaction
+      shiprocketOrderId = shipment.shiprocket_order_id;
+      orderIdForRetry = order._id;
+      shipmentIdForRetry = shipment._id;
+
+      // ✅ DB UPDATE ONLY (NO EXTERNAL API)
       shipment.status = "Cancelled";
       shipment.tracking_history.push({
         status: "Cancelled",
@@ -1120,6 +1215,7 @@ export const cancelShipment = async (req, res) => {
         order.orderStatus = "Partially Cancelled";
       }
 
+      // ✅ KEEP HISTORY SAFE (NO OVERWRITE)
       order.cancellation = {
         cancelledBy: userId,
         reason,
@@ -1130,6 +1226,31 @@ export const cancelShipment = async (req, res) => {
       await order.save({ session });
     });
 
+    // 🚚 Shiprocket cancellation AFTER DB COMMIT
+    if (shiprocketOrderId) {
+      try {
+        await cancelShiprocketShipment(shiprocketOrderId);
+      } catch (err) {
+        console.error("⚠️ Shiprocket cancel failed:", err.message);
+
+        // 🔁 OPTIONAL: Mark as sync_failed (recommended)
+        await Order.updateOne(
+          {
+            _id: orderIdForRetry,
+            "shipments._id": shipmentIdForRetry
+          },
+          {
+            $set: {
+              "shipments.$.status": "Cancelled",
+              "shipments.$.sync_failed": true,
+              "shipments.$.sync_failed_at": new Date()
+            }
+
+          }
+        );
+      }
+    }
+
     res.json({
       success: true,
       message: "Shipment cancelled successfully"
@@ -1137,7 +1258,10 @@ export const cancelShipment = async (req, res) => {
 
   } catch (err) {
     console.error(err);
-    res.status(400).json({ success: false, message: err.message });
+    res.status(400).json({
+      success: false,
+      message: err.message
+    });
   } finally {
     session.endSession();
   }
@@ -1190,11 +1314,13 @@ export const cancelOrder = async (req, res) => {
       order.paymentStatus = order.paid ? "refund_requested" : "cancelled";
 
       order.cancellation = {
+        ...(order.cancellation?.toObject?.() || {}),
         cancelledBy: userId,
         reason,
         requestedAt: new Date(),
-        allowed: true,
+        allowed: true
       };
+
 
       order.tracking_history = order.tracking_history || [];
       order.tracking_history.push({

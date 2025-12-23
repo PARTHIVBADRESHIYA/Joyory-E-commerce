@@ -808,7 +808,7 @@ export const getPromotionProducts = async (req, res) => {
                 hasMore: page < Math.ceil(total / limit)
             },
             message: productsWithRelations.length
-                ? `Showing products for promotion "${promo.name}"`
+                ? `Showing products for promotion - "${promo.campaignName}"`
                 : "No products found under this promotion"
         };
 

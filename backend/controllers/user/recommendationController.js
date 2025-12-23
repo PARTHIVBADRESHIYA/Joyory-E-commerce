@@ -22,7 +22,7 @@ export async function getEnrichedProductsByIds(productIds, cacheKey, ttl = 60) {
         isPublished: true
     })
         .select(
-            "name slug mrp price discountedPrice variants images brand category avgRating totalRatings"
+            "name slugs mrp price discountedPrice variants images brand category avgRating totalRatings"
         )
         .populate("brand", "name slug")
         .populate("category", "name slug")

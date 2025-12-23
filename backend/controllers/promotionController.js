@@ -265,7 +265,7 @@ const createPromotion = async (req, res) => {
 
     const { promotionConfig } = await normalizeByType(req.body);
 
-    const status = calculateStatus(startDateUTC, endDateUTC);
+    const status = calculateStatus(startDateUTC, endDateUTC); 
     const isScheduled = status === "upcoming";
 
     const slug = await buildPromotionSlug(Promotion, req.body);

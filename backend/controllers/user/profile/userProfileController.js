@@ -9,15 +9,49 @@ import { uploadToCloudinary } from "../../../middlewares/upload.js";
 import bcrypt from 'bcryptjs';
 
 // Get Basic User Profile
+// export const getUserProfile = async (req, res) => {
+//     try {
+//         const user = await User.findById(req.user._id).select(
+//             'name email phone gender dob profileImage isVerified addresses'
+//         );
+//         if (!user) return res.status(404).json({ message: 'User not found' });
+
+//         let formattedDob = null;
+//         if (user.dob instanceof Date && !isNaN(user.dob)) {
+//             const d = user.dob;
+//             formattedDob = `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+//         }
+
+//         res.status(200).json({
+//             profile: {
+//                 fullName: user.name,
+//                 gender: user.gender || null,
+//                 phone: user.phone || null,
+//                 email: user.email || null,
+//                 dob: formattedDob,
+//                 isEmailVerified: user.isVerified,
+//                 isPhoneVerified: user.phoneVerified,
+//                 profileImage: user.profileImage || null
+//             },
+//             addresses: user.addresses || []
+//         });
+//     } catch (err) {
+//         res.status(500).json({ message: 'Failed to get profile', error: err.message });
+//     }
+// };
+
 export const getUserProfile = async (req, res) => {
     try {
         const user = await User.findById(req.user._id).select(
-            'name email phone gender dob profileImage isVerified addresses'
+            'name email phone gender dob profileImage isVerified phoneVerified addresses'
         );
-        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
 
         let formattedDob = null;
-        if (user.dob instanceof Date && !isNaN(user.dob)) {
+        if (user.dob instanceof Date && !isNaN(user.dob.getTime())) {
             const d = user.dob;
             formattedDob = `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
         }
@@ -25,23 +59,25 @@ export const getUserProfile = async (req, res) => {
         res.status(200).json({
             profile: {
                 fullName: user.name,
-                gender: user.gender || null,
-                phone: user.phone || null,
-                email: user.email || null,
+                gender: user.gender ?? null,
+                phone: user.phone ?? null,
+                email: user.email ?? null,
                 dob: formattedDob,
                 isEmailVerified: user.isVerified,
-                isPhoneVerified: Boolean(user.phone),
-                profileImage: user.profileImage || null
+                isPhoneVerified: user.phoneVerified,
+                profileImage: user.profileImage ?? null
             },
-            addresses: user.addresses || []
+            addresses: user.addresses ?? []
         });
+
     } catch (err) {
-        res.status(500).json({ message: 'Failed to get profile', error: err.message });
+        res.status(500).json({
+            message: 'Failed to get profile',
+            error: err.message
+        });
     }
 };
 
-// Update Basic Info  (name, gender, dob, email, phone)
-// Update Basic Info (name, gender, dob, email, phone but with phone verification)
 export const updateUserProfile = async (req, res) => {
     try {
         const { fullName, gender, dob, email, phone } = req.body;
@@ -51,7 +87,24 @@ export const updateUserProfile = async (req, res) => {
 
         if (fullName) user.name = fullName;
         if (gender) user.gender = gender;
-        if (dob) user.dob = new Date(dob);
+        if (dob) {
+            // Expecting DD-MM-YYYY
+            const [day, month, year] = dob.split('-');
+
+            const parsedDob = new Date(
+                Number(year),
+                Number(month) - 1,
+                Number(day)
+            );
+
+            if (isNaN(parsedDob.getTime())) {
+                return res.status(400).json({
+                    message: 'Invalid DOB format. Expected DD-MM-YYYY'
+                });
+            }
+
+            user.dob = parsedDob;
+        }
 
         // email changed → reset verification
         if (email && email !== user.email) {

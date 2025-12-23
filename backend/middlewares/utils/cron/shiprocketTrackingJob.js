@@ -1130,6 +1130,29 @@ async function processForwardTimeline(orderId, shipment, token) {
             newEvents[newEvents.length - 1].status
         );
 
+        /* -------------------- COD PAYMENT CONFIRMATION -------------------- */
+        if (normalizedStatus === "Delivered") {
+            const orderDoc = await Order.findById(orderId);
+
+            if (
+                orderDoc &&
+                orderDoc.paymentMethod === "COD" &&
+                !orderDoc.paid
+            ) {
+                orderDoc.paid = true;
+                orderDoc.paymentStatus = "success";
+                orderDoc.transactionId = `COD-${shipment.awb_code}`;
+                orderDoc.paidAt = new Date();
+
+                await orderDoc.save();
+
+                srLog("💰 COD payment marked as PAID", {
+                    orderId,
+                    awb: shipment.awb_code
+                });
+            }
+        }
+
         await Order.updateOne(
             { _id: orderId, "shipments._id": shipment._id },
             {

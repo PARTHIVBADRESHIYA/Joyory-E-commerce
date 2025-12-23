@@ -552,6 +552,9 @@ const ShipmentSchema = new mongoose.Schema({
         ]
     },
 
+    sync_failed: { type: Boolean, default: false },
+    sync_failed_at: Date,
+
     // Timestamps
     assignedAt: Date,
     shippedAt: Date,
@@ -694,7 +697,7 @@ const orderSchema = new mongoose.Schema({
             "Shipped",
             "Out for Delivery",
             "Delivered",
-            "Cancelled", 
+            "Cancelled",
             "Returned",
             // NEW FOR YOUR FLOW
             "Partially Delivered",
