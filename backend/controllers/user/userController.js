@@ -420,7 +420,6 @@ const userLogin = async (req, res) => {
             httpOnly: true,
             secure: true,
             sameSite: "None",
-            // domain: ".joyory.com", // ⚠️ Comment out or delete this line for initial testing
             maxAge: 7 * 24 * 60 * 60 * 1000,
             partitioned: true // 🔥 Critical for Chrome's new policy [citation:1]
         });

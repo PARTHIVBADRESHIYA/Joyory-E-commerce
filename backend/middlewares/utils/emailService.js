@@ -178,47 +178,47 @@ import fetch from "node-fetch";
  * @param {Array} attachments - Optional [{ filename, content(base64), type }]
  */
 export const sendEmail = async (to, subject, html, attachments = []) => {
-    try {
-        const url = "https://api.zeptomail.in/v1.1/email";
+  try {
+    const url = "https://api.zeptomail.in/v1.1/email";
 
-        const payload = {
-            from: {
-                address: process.env.SMTP_FROM,
-                name: "Joyory Luxe Private Limited" // Add sender name for better UX
-            }, // no-reply@joyory.com
-            to: [{ email_address: { address: to } }],
-            subject,
-            htmlbody: html,
-        };
+    const payload = {
+      from: {
+        address: process.env.SMTP_FROM,
+        name: "Joyory Luxe Private Limited" // Add sender name for better UX
+      }, // no-reply@joyory.com
+      to: [{ email_address: { address: to } }],
+      subject,
+      htmlbody: html,
+    };
 
-        if (attachments.length > 0) {
-            payload.attachments = attachments.map(att => ({
-                name: att.filename || att.name,           // fallback
-                content: att.content,
-                mime_type: att.type || att.mime_type,     // fallback
-            }));
-        }
-
-        const res = await fetch(url, {
-            method: "POST",
-            headers: {
-                "Authorization": `Zoho-enczapikey ${process.env.SMTP_PASS}`, // ZeptoMail API Key
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify(payload),
-        });
-
-        const data = await res.json();
-
-        if (!res.ok) {
-            console.error("❌ Email API failed:", data);
-            throw new Error(data.message || "ZeptoMail API error");
-        }
-        return data;
-    } catch (error) {
-        console.error("❌ Email sending failed:", error);
-        throw error;
+    if (attachments.length > 0) {
+      payload.attachments = attachments.map(att => ({
+        name: att.filename || att.name,           // fallback
+        content: att.content,
+        mime_type: att.type || att.mime_type,     // fallback
+      }));
     }
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Zoho-enczapikey ${process.env.SMTP_PASS}`, // ZeptoMail API Key
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      console.error("❌ Email API failed:", data);
+      throw new Error(data.message || "ZeptoMail API error");
+    }
+    return data;
+  } catch (error) {
+    console.error("❌ Email sending failed:", error);
+    throw error;
+  }
 };
 
 
@@ -593,10 +593,10 @@ export const sendEmail = async (to, subject, html, attachments = []) => {
 //     `;
 // };
 const generateWelcomeEmailHTML = (user, wallet, referralInfo) => {
-    const appUrl = process.env.APP_URL || "https://joyory.com";
-    const referralLink = `${appUrl}/signup?ref=${user.referralCode}`;
+  const appUrl = process.env.APP_URL || "https://joyory.com";
+  const referralLink = `${appUrl}/signup?ref=${user.referralCode}`;
 
-    return `
+  return `
 <!DOCTYPE html>
 <html>
 <head>
@@ -634,7 +634,7 @@ const generateWelcomeEmailHTML = (user, wallet, referralInfo) => {
             </p>
 
             ${referralInfo.referrerName
-            ? `
+      ? `
             <!-- Referral Bonus -->
             <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9f9ff;border-radius:8px;margin-bottom:20px;">
               <tr>
@@ -650,20 +650,24 @@ const generateWelcomeEmailHTML = (user, wallet, referralInfo) => {
               </tr>
             </table>
             `
-            : ""
-        }
+      : ""
+    }
 
-            <!-- Wallet -->
-            <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8f8f8;border-radius:8px;margin-bottom:25px;">
-              <tr>
-                <td style="padding:20px;text-align:center;">
-                  <p style="margin:0;font-size:14px;color:#777;">Your Rewards Balance</p>
-                  <h2 style="margin:10px 0;color:#6b5cf6;">
-                    ${wallet.rewardPoints} Points • ₹${wallet.joyoryCash} Joyory Cash
-                  </h2>
-                </td>
-              </tr>
-            </table>
+           <!-- Wallet -->
+<table width="100%" cellpadding="0" cellspacing="0"
+       style="background:#f8f8f8;border-radius:8px;margin-bottom:25px;">
+  <tr>
+    <td style="padding:20px;text-align:center;">
+      <p style="margin:0;font-size:14px;color:#777;">
+        Your Rewards Balance
+      </p>
+      <h2 style="margin:10px 0;color:#6b5cf6;">
+        ${wallet.rewardPoints} Points
+      </h2>
+    </td>
+  </tr>
+</table>
+
 
             <!-- Referral Code -->
             <table width="100%" cellpadding="0" cellspacing="0" style="border:1px dashed #ddd;border-radius:8px;margin-bottom:25px;">
@@ -723,18 +727,18 @@ const generateWelcomeEmailHTML = (user, wallet, referralInfo) => {
  * Send welcome email after verification
  */
 export const sendWelcomeEmail = async (user, wallet, referralInfo = {}) => {
-    try {
-        const html = generateWelcomeEmailHTML(user, wallet, referralInfo);
-        const subject = `🎉 Welcome to Joyory, ${user.name}! Your Account is Verified`;
+  try {
+    const html = generateWelcomeEmailHTML(user, wallet, referralInfo);
+    const subject = `🎉 Welcome to Joyory, ${user.name}! Your Account is Verified`;
 
-        await sendEmail(user.email, subject, html);
+    await sendEmail(user.email, subject, html);
 
-        console.log(`✅ Welcome email sent to ${user.email}`);
-        return true;
-    } catch (error) {
-        console.error("❌ Failed to send welcome email:", error);
-        throw error;
-    }
+    console.log(`✅ Welcome email sent to ${user.email}`);
+    return true;
+  } catch (error) {
+    console.error("❌ Failed to send welcome email:", error);
+    throw error;
+  }
 };
 
 
@@ -742,7 +746,7 @@ export const sendWelcomeEmail = async (user, wallet, referralInfo = {}) => {
  * Send OTP email for verification
  */
 export const sendVerificationEmail = async (user, otp) => {
-    const html = `
+  const html = `
 <!DOCTYPE html>
 <html>
 <head>
@@ -811,5 +815,5 @@ export const sendVerificationEmail = async (user, otp) => {
 </html>
     `;
 
-    await sendEmail(user.email, "Your Joyory Verification Code", html);
+  await sendEmail(user.email, "Your Joyory Verification Code", html);
 };

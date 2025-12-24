@@ -1099,6 +1099,13 @@ import { getEnrichedProductsByIds } from "../../controllers/user/recommendationC
 
 let _promoCache = { ts: 0, data: null, ttl: 5000 }; // ttl in ms (5s)
 
+const sortConfig = {
+    recent: { field: "_id", order: -1 },
+    priceLowToHigh: { field: "minPrice", order: 1 },
+    priceHighToLow: { field: "maxPrice", order: -1 },
+    rating: { field: "avgRating", order: -1 },
+    discount: { field: "discountPercent", order: -1 }
+};
 
 
 // 🔧 Centralized helper for shades/colors
@@ -1382,36 +1389,217 @@ export const normalizeImages = (images = []) => {
     );
 };
 
+// export const getAllProducts = async (req, res) => {
+//     try {
+//         const redis = getRedis(); // 🔥 REQUIRED
+
+//         /* -------------------------------
+//            🔹 Pagination + Sorting + Filters
+//         -------------------------------- */
+//         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
+
+//         page = Number(page) || 1;
+//         limit = Math.min(Number(limit) || 12, 50);
+
+//         // Convert comma-fields → arrays
+//         ["skinTypes", "brandIds", "formulations", "finishes"].forEach(key => {
+//             const val = queryFilters[key];
+//             if (val && typeof val === "string") {
+//                 queryFilters[key] = [val];
+//             }
+//         });
+
+//         // 🔹 Normalize dynamic filters
+//         const filters = normalizeFilters(queryFilters);
+
+//         /* -------------------------------
+//            🔹 Resolve Brand filters
+//         -------------------------------- */
+//         if (filters.brandIds?.length) {
+//             const brandDocs = await Brand.find({
+//                 $or: [
+//                     { _id: { $in: filters.brandIds.filter(v => mongoose.Types.ObjectId.isValid(v)) } },
+//                     { slug: { $in: filters.brandIds.filter(v => !mongoose.Types.ObjectId.isValid(v)) } }
+//                 ],
+//                 isActive: true
+//             }).select("_id");
+
+//             filters.brandIds = brandDocs.map(b => b._id);
+//         }
+
+//         /* -------------------------------
+//            🔹 Resolve SkinTypes
+//         -------------------------------- */
+//         if (filters.skinTypes?.length) {
+//             const skinDocs = await SkinType.find({
+//                 name: { $in: filters.skinTypes.map(v => new RegExp(`^${v}$`, "i")) }
+//             }).select("_id");
+
+//             filters.skinTypes = skinDocs.map(s => s._id);
+//         }
+
+//         /* -------------------------------
+//            🔹 Final Mongo Filter
+//         -------------------------------- */
+//         const finalFilter = await applyDynamicFilters(filters);
+//         finalFilter.isPublished = true;
+
+//         /* -------------------------------
+//            🔹 Build Redis Cache Key (FIXED)
+//         -------------------------------- */
+//         const redisKey = `allProducts:${page}:${limit}:${sort}:${JSON.stringify(finalFilter)}`;
+
+//         const cached = await redis.get(redisKey);
+//         if (cached) {
+//             return res.status(200).json(JSON.parse(cached));
+//         }
+
+//         /* -------------------------------
+//            🔹 Sorting (FIXED for variants)
+//         -------------------------------- */
+//         const sortOptions = {
+//             recent: { createdAt: -1 },
+//             priceLowToHigh: { minPrice: 1 },
+//             priceHighToLow: { maxPrice: -1 },
+//             rating: { avgRating: -1 },
+//             discount: { discountPercent: -1 }
+//         };
+
+//         /* -------------------------------
+//            🔹 Count + Query
+//         -------------------------------- */
+//         const total = await Product.countDocuments(finalFilter);
+
+//         const products = await Product.find(finalFilter)
+//             .populate("brand", "name slug logo isActive")
+//             .populate("category", "name slug")
+//             .populate("skinTypes", "name slug")
+//             .populate("formulation", "name slug")
+//             .sort(sortOptions[sort] || sortOptions.recent)
+//             .skip((page - 1) * limit)
+//             .limit(limit)
+//             .lean();
+
+//         if (!products.length) {
+//             return res.status(200).json({
+//                 products: [],
+//                 categories: [],
+//                 brands: [],
+//                 pagination: {
+//                     page,
+//                     limit,
+//                     total: 0,
+//                     totalPages: 0,
+//                     hasMore: false,
+//                     nextPage: null
+//                 },
+//                 message: "No products found with selected filters."
+//             });
+//         }
+
+//         /* -------------------------------
+//            🔹 Active Promotions
+//         -------------------------------- */
+//         const now = new Date();
+//         const promotions = await Promotion.find({
+//             status: "active",
+//             startDate: { $lte: now },
+//             endDate: { $gte: now }
+//         }).lean();
+
+//         /* -------------------------------
+//            🔹 Enrich Products
+//         -------------------------------- */
+//         const enrichedProducts = await enrichProductsUnified(products, promotions);
+
+//         const productsWithRelations = enrichedProducts.map((p, i) => ({
+//             ...p,
+//             brand: products[i].brand,
+//             category: products[i].category,
+//             skinTypes: products[i].skinTypes,
+//             formulation: products[i].formulation
+//         }));
+
+//         /* -------------------------------
+//            🔹 Collect Filters Data
+//         -------------------------------- */
+//         const [uniqueCategoryIds, uniqueBrandIds] = await Promise.all([
+//             Product.distinct("category", finalFilter),
+//             Product.distinct("brand", finalFilter)
+//         ]);
+
+//         const [categories, brands] = await Promise.all([
+//             Category.find({ _id: { $in: uniqueCategoryIds }, isActive: true })
+//                 .select("name slug")
+//                 .lean(),
+//             Brand.find({ _id: { $in: uniqueBrandIds }, isActive: true })
+//                 .select("name slug logo")
+//                 .lean()
+//         ]);
+
+//         /* -------------------------------
+//            🔹 Pagination Meta (Infinite Scroll)
+//         -------------------------------- */
+//         const totalPages = Math.ceil(total / limit);
+//         const hasMore = page < totalPages;
+
+//         const response = {
+//             products: productsWithRelations,
+//             categories,
+//             brands,
+//             pagination: {
+//                 page,
+//                 limit,
+//                 total,
+//                 totalPages,
+//                 hasMore,
+//                 nextPage: hasMore ? page + 1 : null
+//             },
+//             message: null
+//         };
+
+//         /* -------------------------------
+//            🔹 Cache Result (60s)
+//         -------------------------------- */
+//         await redis.set(redisKey, JSON.stringify(response), "EX", 60);
+
+//         return res.status(200).json(response);
+
+//     } catch (err) {
+//         console.error("❌ getAllProducts error:", err);
+//         return res.status(500).json({
+//             message: "Failed to fetch products.",
+//             error: err.message
+//         });
+//     }
+// };
+
 export const getAllProducts = async (req, res) => {
     try {
-        const redis = getRedis(); // 🔥 REQUIRED
+        const redis = getRedis();
 
-        /* -------------------------------
-           🔹 Pagination + Sorting + Filters
-        -------------------------------- */
-        let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
+        let {
+            limit = 12,
+            sort = "recent",
+            cursor,
+            ...queryFilters
+        } = req.query;
 
-        page = Number(page) || 1;
         limit = Math.min(Number(limit) || 12, 50);
 
-        // Convert comma-fields → arrays
         ["skinTypes", "brandIds", "formulations", "finishes"].forEach(key => {
-            const val = queryFilters[key];
-            if (val && typeof val === "string") {
-                queryFilters[key] = [val];
+            if (typeof queryFilters[key] === "string") {
+                queryFilters[key] = [queryFilters[key]];
             }
         });
 
-        // 🔹 Normalize dynamic filters
         const filters = normalizeFilters(queryFilters);
 
-        /* -------------------------------
-           🔹 Resolve Brand filters
-        -------------------------------- */
+        // Resolve brand + skinType (same as before)
         if (filters.brandIds?.length) {
             const brandDocs = await Brand.find({
                 $or: [
-                    { _id: { $in: filters.brandIds.filter(v => mongoose.Types.ObjectId.isValid(v)) } },
+                    { _id: { $in: filters.brandIds.filter(mongoose.Types.ObjectId.isValid) } },
                     { slug: { $in: filters.brandIds.filter(v => !mongoose.Types.ObjectId.isValid(v)) } }
                 ],
                 isActive: true
@@ -1420,9 +1608,6 @@ export const getAllProducts = async (req, res) => {
             filters.brandIds = brandDocs.map(b => b._id);
         }
 
-        /* -------------------------------
-           🔹 Resolve SkinTypes
-        -------------------------------- */
         if (filters.skinTypes?.length) {
             const skinDocs = await SkinType.find({
                 name: { $in: filters.skinTypes.map(v => new RegExp(`^${v}$`, "i")) }
@@ -1431,68 +1616,37 @@ export const getAllProducts = async (req, res) => {
             filters.skinTypes = skinDocs.map(s => s._id);
         }
 
-        /* -------------------------------
-           🔹 Final Mongo Filter
-        -------------------------------- */
         const finalFilter = await applyDynamicFilters(filters);
         finalFilter.isPublished = true;
 
-        /* -------------------------------
-           🔹 Build Redis Cache Key (FIXED)
-        -------------------------------- */
-        const redisKey = `allProducts:${page}:${limit}:${sort}:${JSON.stringify(finalFilter)}`;
+        // 🔥 Cursor logic
+        const { field, order } = sortConfig[sort] || sortConfig.recent;
 
-        const cached = await redis.get(redisKey);
-        if (cached) {
-            return res.status(200).json(JSON.parse(cached));
+        if (cursor) {
+            finalFilter[field] = order === -1
+                ? { $lt: cursor }
+                : { $gt: cursor };
         }
 
-        /* -------------------------------
-           🔹 Sorting (FIXED for variants)
-        -------------------------------- */
-        const sortOptions = {
-            recent: { createdAt: -1 },
-            priceLowToHigh: { minPrice: 1 },
-            priceHighToLow: { maxPrice: -1 },
-            rating: { avgRating: -1 },
-            discount: { discountPercent: -1 }
-        };
+        // 🔥 Redis cache per cursor
+        const redisKey = `products:${sort}:${cursor || "first"}:${limit}:${JSON.stringify(finalFilter)}`;
+        const cached = await redis.get(redisKey);
+        if (cached) return res.json(JSON.parse(cached));
 
-        /* -------------------------------
-           🔹 Count + Query
-        -------------------------------- */
-        const total = await Product.countDocuments(finalFilter);
-
+        // 🔥 Fetch products (limit + 1 to detect hasMore)
         const products = await Product.find(finalFilter)
-            .populate("brand", "name slug logo isActive")
+            .populate("brand", "name slug logo")
             .populate("category", "name slug")
             .populate("skinTypes", "name slug")
             .populate("formulation", "name slug")
-            .sort(sortOptions[sort] || sortOptions.recent)
-            .skip((page - 1) * limit)
-            .limit(limit)
+            .sort({ [field]: order })
+            .limit(limit + 1)
             .lean();
 
-        if (!products.length) {
-            return res.status(200).json({
-                products: [],
-                categories: [],
-                brands: [],
-                pagination: {
-                    page,
-                    limit,
-                    total: 0,
-                    totalPages: 0,
-                    hasMore: false,
-                    nextPage: null
-                },
-                message: "No products found with selected filters."
-            });
-        }
+        const hasMore = products.length > limit;
+        if (hasMore) products.pop();
 
-        /* -------------------------------
-           🔹 Active Promotions
-        -------------------------------- */
+        // 🔥 Promotions
         const now = new Date();
         const promotions = await Promotion.find({
             status: "active",
@@ -1500,70 +1654,40 @@ export const getAllProducts = async (req, res) => {
             endDate: { $gte: now }
         }).lean();
 
-        /* -------------------------------
-           🔹 Enrich Products
-        -------------------------------- */
-        const enrichedProducts = await enrichProductsUnified(products, promotions);
+        const enriched = await enrichProductsUnified(products, promotions);
 
-        const productsWithRelations = enrichedProducts.map((p, i) => ({
-            ...p,
-            brand: products[i].brand,
-            category: products[i].category,
-            skinTypes: products[i].skinTypes,
-            formulation: products[i].formulation
-        }));
+        const nextCursor =
+            products.length > 0 ? products[products.length - 1][field] : null;
 
-        /* -------------------------------
-           🔹 Collect Filters Data
-        -------------------------------- */
-        const [uniqueCategoryIds, uniqueBrandIds] = await Promise.all([
-            Product.distinct("category", finalFilter),
-            Product.distinct("brand", finalFilter)
-        ]);
+        let message = null;
 
-        const [categories, brands] = await Promise.all([
-            Category.find({ _id: { $in: uniqueCategoryIds }, isActive: true })
-                .select("name slug")
-                .lean(),
-            Brand.find({ _id: { $in: uniqueBrandIds }, isActive: true })
-                .select("name slug logo")
-                .lean()
-        ]);
+        if (!enriched.length && cursor) {
+            // User scrolled till end
+            message = "🎉 You’ve reached the end! No more products to show.";
+        }
 
-        /* -------------------------------
-           🔹 Pagination Meta (Infinite Scroll)
-        -------------------------------- */
-        const totalPages = Math.ceil(total / limit);
-        const hasMore = page < totalPages;
+        if (!enriched.length && !cursor) {
+            // First load but no products
+            message = "No products found for the selected filters.";
+        }
 
         const response = {
-            products: productsWithRelations,
-            categories,
-            brands,
+            products: enriched,
             pagination: {
-                page,
-                limit,
-                total,
-                totalPages,
                 hasMore,
-                nextPage: hasMore ? page + 1 : null
+                nextCursor
             },
-            message: null
+            message
+
         };
 
-        /* -------------------------------
-           🔹 Cache Result (60s)
-        -------------------------------- */
-        await redis.set(redisKey, JSON.stringify(response), "EX", 60);
+        await redis.set(redisKey, JSON.stringify(response), "EX", 120);
 
-        return res.status(200).json(response);
+        res.json(response);
 
     } catch (err) {
-        console.error("❌ getAllProducts error:", err);
-        return res.status(500).json({
-            message: "Failed to fetch products.",
-            error: err.message
-        });
+        console.error("❌ Cursor pagination error:", err);
+        res.status(500).json({ message: "Failed to fetch products" });
     }
 };
 

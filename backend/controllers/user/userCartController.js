@@ -13,12 +13,6 @@ import { enrichProductWithStockAndOptions, enrichProductsUnified } from "../../m
 import { getRedis } from "../../middlewares/utils/redis.js";
 import crypto from "crypto";
 
-
-
-
-
-
-
 export const getCart = async (req, res) => {
   const user = await User.findById(req.user._id).populate("cart.product");
   res.status(200).json({ cart: user.cart });
