@@ -596,6 +596,7 @@ app.use(cookieParser()); // ✅ add this
 
 
 // ================= SESSION =================
+// ================= SESSION =================
 app.use(
     session({
         name: "sessionId",
@@ -608,14 +609,15 @@ app.use(
         }),
         cookie: {
             httpOnly: true,
-            secure: true,
+            secure: true, // Must be true for SameSite=None
             sameSite: "None",
-            domain: ".joyory.com",   // ✅ SAME DOMAIN
+            // REMOVE the 'domain' attribute for now
+            // domain: ".joyory.com", // ⚠️ Comment out or delete this line
             maxAge: 7 * 24 * 60 * 60 * 1000,
+            partitioned: true // 🔥 Critical for Chrome's new policy [citation:1]
         },
     })
 );
-
 
 
 // ================= SOCKET.IO =================
