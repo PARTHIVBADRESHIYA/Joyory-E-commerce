@@ -776,12 +776,12 @@ async function handleCart(cart, product, variants, qty) {
 //       isGuest,
 //     };
 
-//     // Cache the final response (longer TTL)
-//     try {
-//       await redis.set(redisKey, JSON.stringify(responseData), "EX", CART_CACHE_TTL);
-//     } catch (err) {
-//       console.error("Redis set failed:", err);
-//     }
+// // Cache the final response (longer TTL)
+// try {
+//   await redis.set(redisKey, JSON.stringify(responseData), "EX", CART_CACHE_TTL);
+// } catch (err) {
+//   console.error("Redis set failed:", err);
+// }
 
 //     return res.json(responseData);
 //   } catch (error) {
@@ -1410,6 +1410,14 @@ export const getCartSummary = async (req, res) => {
       grandTotal: payableWithGST,
       isGuest,
     };
+
+    // Cache the final response (longer TTL)
+    try {
+      await redis.set(redisKey, JSON.stringify(responseData), "EX", CART_CACHE_TTL);
+    } catch (err) {
+      console.error("Redis set failed:", err);
+    }
+
 
     return res.json(responseData);
   } catch (error) {
