@@ -418,9 +418,9 @@ const userLogin = async (req, res) => {
 
         res.cookie("token", token, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === "production",                     // ❗ https only in prod
-            sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",   // ❗ Safari-safe
-            domain: process.env.NODE_ENV === "production" ? ".joyory.com" : undefined, // 🔥 KEY LINE
+            secure: true,
+            sameSite: "None",
+            domain: ".joyory.com",   // ✅ NOW VALID
             maxAge: 7 * 24 * 60 * 60 * 1000,
         });
 

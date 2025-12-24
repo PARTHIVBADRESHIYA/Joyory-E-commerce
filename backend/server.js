@@ -572,6 +572,27 @@ app.use(
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser()); // ✅ add this
 
+//correct sesssion
+
+// // ================= SESSION =================
+// app.use(
+//     session({
+//         name: "sessionId",
+//         secret: process.env.SESSION_SECRET || "supersecretkey",
+//         resave: false,
+//         saveUninitialized: true,   // 👈 change to false
+//         store: MongoStore.create({
+//             mongoUrl: process.env.MONGO_URI,
+//             collectionName: "sessions",
+//         }),
+//         cookie: {
+//             maxAge: 7 * 24 * 60 * 60 * 1000,
+//             httpOnly: true,
+//             secure: false,  // must be false for localhost
+//             sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+//         },
+//     })
+// );
 
 
 // ================= SESSION =================
@@ -580,20 +601,22 @@ app.use(
         name: "sessionId",
         secret: process.env.SESSION_SECRET || "supersecretkey",
         resave: false,
-        saveUninitialized: false,   // ✅ IMPORTANT
+        saveUninitialized: false,
         store: MongoStore.create({
             mongoUrl: process.env.MONGO_URI,
             collectionName: "sessions",
         }),
         cookie: {
             httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
-            domain: process.env.NODE_ENV === "production" ? ".joyory.com" : undefined, // 🔥 SAME FIX
+            secure: true,
+            sameSite: "None",
+            domain: ".joyory.com",   // ✅ SAME DOMAIN
             maxAge: 7 * 24 * 60 * 60 * 1000,
         },
     })
 );
+
+
 
 // ================= SOCKET.IO =================
 const server = http.createServer(app);
