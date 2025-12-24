@@ -381,7 +381,6 @@ export const calculateCartSummary = async (user, query = {}) => {
     shippingCharge = SHIPPING_CHARGE;
     const amountToFree = round2(FREE_SHIPPING_THRESHOLD - grandTotal);
     shippingMessage = `📦 Add just ₹${amountToFree} more to your order to enjoy FREE shipping!`;
-    grandTotal += SHIPPING_CHARGE;
   }
 
 
@@ -389,10 +388,10 @@ export const calculateCartSummary = async (user, query = {}) => {
   const GST_RATE = 0.12; // 12%
 
   // taxable amount = amount after all discounts + shipping
-  const taxableAmount = round2(grandTotal);
+  const taxableAmount = round2(grandTotal + shippingCharge);
 
   // GST value
-  const gstAmount = round2(taxableAmount * GST_RATE);
+  const gstAmount = round2(grandTotal * GST_RATE);
 
   // Final payable including GST
   const payableWithGST = round2(taxableAmount + gstAmount);
