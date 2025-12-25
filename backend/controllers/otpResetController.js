@@ -58,7 +58,7 @@ export const sendOtpToUser = async (req, res) => {
 
     user.otp = {
         code: hashedOtp,
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000), // expires in 10 mins
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000), // expires in 5 mins
         attemptsLeft: 3
     };
     user.otpRequests.push(now);
@@ -291,7 +291,7 @@ export const sendOtpUnified = async (req, res) => {
                 email,
                 otp: {
                     code: hashedOtp,
-                    expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+                    expiresAt: new Date(Date.now() + 5 * 60 * 1000), // expires in 5 mins
                     attemptsLeft: 5
                 },
                 updatedAt: new Date()
@@ -488,7 +488,7 @@ export const sendForgotPasswordOtp = async (req, res) => {
         // Save OTP in the REAL USER model
         user.otp = {
             code: hashedOtp,
-            expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+            expiresAt: new Date(Date.now() + 5 * 60 * 1000), // expires in 5 mins
             attemptsLeft: 5
         };
 

@@ -14,6 +14,26 @@ import { getRedis } from "../../middlewares/utils/redis.js";
 import crypto from "crypto";
 
 
+async function invalidateCartCache(userId, sessionId) {
+  const redis = getRedis();
+
+  const patterns = [
+    `usercart:${userId}`,
+    `cart:${userId}:*`,
+    `cart:${sessionId}:*`,
+    `promo:*`,
+    `coupon:${userId}:*`
+  ];
+
+  for (const p of patterns) {
+    try {
+      const keys = await redis.keys(p);
+      if (keys.length) await redis.del(...keys);
+    } catch (e) {
+      console.error("Cache invalidation failed:", p, e);
+    }
+  }
+}
 
 
 
@@ -64,6 +84,8 @@ export const removeFromCart = async (req, res) => {
     // Save updated cart
     user.cart = updatedCart;
     await user.save();
+
+    await invalidateCartCache(req.user?._id, req.sessionID);
 
     const removedMessage = variantSku
       ? `Variant ${variantSku} removed from cart`
@@ -126,6 +148,8 @@ export const addToCart = async (req, res) => {
         message: validationErr.message,
       });
     }
+
+    await invalidateCartCache(req.user?._id, req.sessionID);
 
     res.status(200).json({
       success: true,

@@ -306,6 +306,7 @@ const getPromotionById = async (req, res) => {
       _id: promotion._id,
       campaignName: promotion.campaignName,
       description: promotion.description,
+      displaySection: promotion.displaySection,
       promotionType: promotion.promotionType,
       status: promotion.status,
       startDate: promotion.startDate,

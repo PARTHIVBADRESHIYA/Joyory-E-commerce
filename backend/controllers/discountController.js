@@ -240,8 +240,6 @@ export const getDiscountDashboardAnalytics = async (req, res) => {
     }
 };
 
-
-
 // Get discount by ID (full details)
 export const getDiscountById = async (req, res) => {
     try {

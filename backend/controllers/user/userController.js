@@ -182,7 +182,7 @@ const userSignup = async (req, res) => {
             isManual: true,
             isVerified: false,
             preferredOtpMethod: actualMethod,
-            otp: { code: hashedOtp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) },
+            otp: { code: hashedOtp, expiresAt: new Date(Date.now() + 5 * 60 * 1000) },
             referralCode: myReferralCode,
         });
 
