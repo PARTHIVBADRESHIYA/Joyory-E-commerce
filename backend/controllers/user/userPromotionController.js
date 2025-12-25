@@ -405,13 +405,29 @@ export const productMatchesPromo = (product, promo) => {
 
     // scope = category
     if (promo.scope === "category" && Array.isArray(promo.categories) && promo.categories.length) {
-        const catId = product.category?.toString?.();
+        const catId = product.category?._id?.toString?.() ||
+            product.category?.toString?.() ||
+            null;
         const matchesCat = promo.categories.some((c) => c?.category?.toString?.() === catId);
         const matchesHierarchy = Array.isArray(product.categoryHierarchy)
-            ? product.categoryHierarchy.some((cid) =>
-                promo.categories.some((c) => c?.category?.toString?.() === cid?.toString?.())
-            )
+            ? product.categoryHierarchy.some((cid) => {
+                const hierarchyId =
+                    cid?._id?.toString?.() || cid?.toString?.();
+                return promo.categories.some(
+                    (c) => c?.category?.toString?.() === hierarchyId
+                );
+            })
             : false;
+
+        if (!matchesCat && !matchesHierarchy) {
+            console.log("Category promo skipped:", {
+                product: product._id,
+                productCategory: product.category,
+                hierarchy: product.categoryHierarchy,
+                promoCategories: promo.categories,
+            });
+        }
+
         return matchesCat || matchesHierarchy;
     }
 

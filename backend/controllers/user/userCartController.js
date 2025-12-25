@@ -35,10 +35,6 @@ async function invalidateCartCache(userId, sessionId) {
   }
 }
 
-
-
-
-
 export const getCart = async (req, res) => {
   const user = await User.findById(req.user._id).populate("cart.product");
   res.status(200).json({ cart: user.cart });
@@ -965,7 +961,6 @@ export const getCartSummary = async (req, res) => {
       .createHash("md5")
       .update(cartKeySnapshot || "")
       .digest("hex");
-
 
     const redisKey = `cart:${req.user?._id || req.sessionID}:${snapshotHash}`;
 

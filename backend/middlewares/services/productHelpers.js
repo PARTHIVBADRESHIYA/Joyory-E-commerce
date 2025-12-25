@@ -608,6 +608,8 @@ export const enrichProductsUnified = async (products, promotions = [], options =
                 _id: enriched._id,
                 name: enriched.name,
                 slugs: Array.isArray(enriched.slugs) ? enriched.slugs : [],
+                category: enriched.category,                   // ✅ REQUIRED
+                categoryHierarchy: enriched.categoryHierarchy, // ✅ REQUIRED
                 // ✅ FIXED BRAND FIELD
                 brand: normalizeBrand(enriched.brand),
                 price,
@@ -629,6 +631,12 @@ export const enrichProductsUnified = async (products, promotions = [], options =
                 inStock: displayVariant.stock > 0 || enriched.quantity > 0,
                 selectedVariant: displayVariant,
             };
+
+            if (!finalEnriched.category) {
+                throw new Error(
+                    `Invariant violation: enriched product ${finalEnriched._id} missing category`
+                );
+            }
 
             // 🔹 Short TTL to reflect promo changes immediately
             await redis.set(`enrichedProduct:${p._id}`, JSON.stringify(finalEnriched), "EX", ENRICHED_PRODUCT_TTL);
