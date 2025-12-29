@@ -4,7 +4,7 @@ import { generateOTP } from '../../../middlewares/utils/generateOTP.js';
 import { sendEmail } from '../../../middlewares/utils/emailService.js';
 import { sendSms } from '../../../middlewares/utils/sendSms.js';
 import { addressSchema } from "../../../middlewares/validations/userProfileValidation.js";
-import { validatePincodeServiceability } from "../../../middlewares/services/shiprocket.js";
+// import { validatePincodeServiceability } from "../../../middlewares/services/shiprocket.js";
 import { uploadToCloudinary } from "../../../middlewares/upload.js";
 import bcrypt from 'bcryptjs';
 

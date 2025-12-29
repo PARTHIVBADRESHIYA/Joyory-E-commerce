@@ -434,14 +434,15 @@ import "./middlewares/utils/cron/promotionScheduler.js";
 import "./middlewares/utils/cron/cleanUpOrders.js";
 
 import "./middlewares/utils/cron/shiprocketRetry.js";
-import { startTrackingJob } from "./middlewares/utils/cron/shiprocketTrackingJob.js";
+// import { startDelhiveryCron } from "./middlewares/services/delhiveryTrackingService.js";
+
 
 import "./middlewares/utils/cron/autoPayout.js";
 import "./middlewares/utils/cron/returnCron.js";
 
-// ================= START CRON JOBS =================
-startTrackingJob();
-console.log("🚀 Shiprocket tracking job started...");
+// // ================= START CRON JOBS =================
+// startDelhiveryCron();
+// console.log("🚀 Delhivery tracking job started...");
 
 // 🔹 Routes
 import authRoutes from "./routes/authRoutes.js";
@@ -470,8 +471,6 @@ import attributeRoutes from "./routes/attributeRoutes.js";
 import videoRoutes from "./routes/videoRoutes.js";
 import mediaRoutes from "./routes/mediaRoutes.js";
 import brandRoutes from "./routes/brandRoutes.js";
-import testPickUpRoutes from "./routes/testPickUpRoutes.js";
-import mockShippingRoutes from "./routes/mockShippingRoutes.js";
 import shadeFinderRoutes from "./routes/shadeFinderRoutes.js";
 import skinTypeAdminRoutes from "./routes/skinTypeRoutes.js";
 import giftCardRoutes from "./routes/giftCardTemplateRoutes.js";
@@ -490,7 +489,7 @@ import virtualTryOnRoutes from "./routes/virtualTryOnRoutes.js";
 import permissionsRoutes from "./routes/permissionsRoutes.js";
 import adminProfileRoutes from "./routes/adminProfileRoutes.js";
 import affiliateRoutes from "./routes/affiliateRoutes.js";
-import returnRoutes from "./routes/returnRoutes.js";
+// import returnRoutes from "./routes/returnRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
 import securityRoutes from "./routes/settings/admin/securityRoutes.js";
 // User side
@@ -673,7 +672,6 @@ app.use("/api/skintypes", skinTypeAdminRoutes);
 app.use("/api/admin-referral-config", adminReferralConfigRoutes);
 app.use("/api/webhooks", webhookRoutes);
 app.use("/api/brands", brandRoutes);
-app.use("/api/test", testPickUpRoutes);
 app.use("/api/wallet", adminWalletRoutes);
 app.use("/api/sellers", sellerRoutes);
 app.use("/api/seller-applications", sellerApplicationRoutes);
@@ -687,13 +685,9 @@ app.use("/api/vto", virtualTryOnRoutes);
 app.use("/api/permissions", permissionsRoutes);
 app.use("/api/admin/profile", adminProfileRoutes);
 app.use("/api/affiliate", affiliateRoutes);
-app.use("/api/returns", returnRoutes);
+// app.use("/api/returns", returnRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use('/api/security', securityRoutes);
-
-if ((process.env.SHIPPING_PROVIDER || "mock").toLowerCase() === "mock") {
-    app.use("/api/shipping", mockShippingRoutes);
-}
 
 // User side
 app.use("/api/user/products", userProductRoutes);

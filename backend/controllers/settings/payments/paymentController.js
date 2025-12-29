@@ -1728,7 +1728,7 @@ import GiftCard from "../../../models/GiftCard.js";
 import WalletConfig from "../../../models/WalletConfig.js";
 import Order from '../../../models/Order.js';
 import { encrypt, decrypt } from '../../../middlewares/utils/encryption.js';
-import { createShiprocketOrder, cancelShiprocketShipment } from "../../../middlewares/services/shiprocket.js";
+// import { createShiprocketOrder, cancelShiprocketShipment } from "../../../middlewares/services/shiprocket.js";
 import { sendEmail } from "../../../middlewares/utils/emailService.js"; // ✅ assume you already have an email service
 import Product from '../../../models/Product.js';
 import AffiliateUser from "../../../models/AffiliateUser.js";
