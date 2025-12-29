@@ -8,7 +8,7 @@ import axios from "axios";
 import { getShiprocketToken, createShiprocketOrder } from "../../middlewares/services/shiprocket.js"; // helper to fetch token
 import { sendEmail } from "../../middlewares/utils/emailService.js";
 import { cancelShiprocketShipment } from "../../middlewares/services/shiprocket.js";
-
+import UserActivity from "../../models/UserActivity.js";
 
 export function mapShipmentToUIStatus(shipment) {
   if (!shipment) return "Confirmed";
@@ -277,6 +277,31 @@ export const initiateOrderFromCart = async (req, res) => {
     });
 
     await newOrder.save();
+
+    // 🔥 Log checkout activity for analytics
+    await UserActivity.create({
+      user: user._id,
+      type: "checkout",
+      product: null,   // checkout is not product-specific
+      category: null
+    });
+
+    // 🔥 Funnel tracking: Checkout initiated
+    await User.findByIdAndUpdate(
+      req.user._id,
+      [
+        {
+          $set: {
+            "conversionStats.checkoutCount": {
+              $add: [
+                { $ifNull: ["$conversionStats.checkoutCount", 0] },
+                1
+              ]
+            }
+          }
+        }
+      ]
+    );
 
     return res.status(200).json({
       message: "✅ Order initiated",

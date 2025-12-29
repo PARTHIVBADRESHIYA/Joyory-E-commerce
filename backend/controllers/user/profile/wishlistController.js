@@ -3,40 +3,94 @@ import Product from "../../../models/Product.js";
 import mongoose from "mongoose";
 
 // ➕ Add product to wishlist (by :productId param)
+// export const addToWishlist = async (req, res) => {
+//     try {
+//         const { productId } = req.params; // ✅ take ID from URL
+//         const userId = req.user._id;
+
+//         if (!mongoose.Types.ObjectId.isValid(productId)) {
+//             return res.status(400).json({ message: "Invalid product ID" });
+//         }
+
+//         const product = await Product.findById(productId);
+//         if (!product) return res.status(404).json({ message: "Product not found" });
+
+//         await User.findByIdAndUpdate(userId, {
+//             $addToSet: { wishlist: productId } // prevent duplicates
+//         });
+
+//         res.status(200).json({ success: true, message: "Added to wishlist" });
+//     } catch (err) {
+//         res.status(500).json({ success: false, message: err.message });
+//     }
+// };
+
 export const addToWishlist = async (req, res) => {
     try {
-        const { productId } = req.params; // ✅ take ID from URL
+        const { productId } = req.params;
         const userId = req.user._id;
 
         if (!mongoose.Types.ObjectId.isValid(productId)) {
             return res.status(400).json({ message: "Invalid product ID" });
         }
 
-        const product = await Product.findById(productId);
-        if (!product) return res.status(404).json({ message: "Product not found" });
+        const product = await Product.findById(productId).select("name");
+        if (!product) {
+            return res.status(404).json({ message: "Product not found" });
+        }
 
-        await User.findByIdAndUpdate(userId, {
-            $addToSet: { wishlist: productId } // prevent duplicates
+        await User.findByIdAndUpdate(
+            userId,
+            {
+                $addToSet: {
+                    wishlist: {
+                        productId,
+                        name: product.name   // 🔥 STORE SNAPSHOT
+                    }
+                }
+            }
+        );
+
+        res.status(200).json({
+            success: true,
+            message: "Added to wishlist"
         });
 
-        res.status(200).json({ success: true, message: "Added to wishlist" });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
 };
 
-
 // ➖ Remove product from wishlist
+// export const removeFromWishlist = async (req, res) => {
+//     try {
+//         const { productId } = req.params;
+//         const userId = req.user._id;
+
+//         await User.findByIdAndUpdate(userId, {
+//             $pull: { wishlist: productId }
+//         });
+
+//         res.status(200).json({ success: true, message: "Removed from wishlist" });
+//     } catch (err) {
+//         res.status(500).json({ success: false, message: err.message });
+//     }
+// };
+
 export const removeFromWishlist = async (req, res) => {
     try {
         const { productId } = req.params;
         const userId = req.user._id;
 
         await User.findByIdAndUpdate(userId, {
-            $pull: { wishlist: productId }
+            $pull: { wishlist: { productId } }
         });
 
-        res.status(200).json({ success: true, message: "Removed from wishlist" });
+        res.status(200).json({
+            success: true,
+            message: "Removed from wishlist"
+        });
+
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }

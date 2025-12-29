@@ -420,12 +420,6 @@ export const productMatchesPromo = (product, promo) => {
             : false;
 
         if (!matchesCat && !matchesHierarchy) {
-            console.log("Category promo skipped:", {
-                product: product._id,
-                productCategory: product.category,
-                hierarchy: product.categoryHierarchy,
-                promoCategories: promo.categories,
-            });
         }
 
         return matchesCat || matchesHierarchy;

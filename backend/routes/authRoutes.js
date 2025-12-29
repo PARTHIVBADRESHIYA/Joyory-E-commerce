@@ -15,8 +15,6 @@ import {
     getUserById,
     updateUserByAdmin,
     deleteUser,
-    getUserAnalytics,
-    getFullCustomerAnalytics,
     listSellers,
     approveProduct,
     changeSellerStatus,
@@ -35,8 +33,6 @@ router.post('/login', loginUnified);
 
 // ✅ User management
 router.get('/users', verifyAdminOrTeamMember, getAllUsers);
-router.get('/users/analytics/full', verifyAdminOrTeamMember, getFullCustomerAnalytics);
-router.get('/users/analytics/:id', verifyAdminOrTeamMember, getUserAnalytics);
 router.get('/users/:id', verifyAdminOrTeamMember, getUserById);
 router.put('/users/:id', verifyAdminOrTeamMember, updateUserByAdmin);
 router.delete('/users/:id', verifyAdminOrTeamMember, deleteUser);

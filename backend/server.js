@@ -506,6 +506,7 @@ import userDiscountRoutes from "./routes/user/userDiscountRoutes.js";
 import userShadeFinderRoutes from "./routes/user/userShadeFinderRoutes.js";
 import userGiftCardRoutes from "./routes/user/userGiftCardRoutes.js";
 import userWalletRoutes from "./routes/user/userWalletRoutes.js";
+import userAnalyticsRoutes from "./routes/user/userAnalyticsRoutes.js";
 
 // ================= CONNECT DB =================
 connectDB();
@@ -708,6 +709,7 @@ app.use("/api/user/shadefinder", userShadeFinderRoutes);
 app.use("/api/user/giftcards", userGiftCardRoutes);
 app.use("/api/referral", referralRoutes);
 app.use("/api/user/wallet", userWalletRoutes);
+app.use ("/api/user/analytics", userAnalyticsRoutes);
 
 
 // ================= HEALTH & TEST =================

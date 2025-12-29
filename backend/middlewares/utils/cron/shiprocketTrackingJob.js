@@ -1056,6 +1056,49 @@ async function processForwardTimeline(orderId, shipment, token) {
             token
         );
 
+        /* ---------------------------------------------
+          AUTO-CANCEL FALLBACK (Shiprocket API Delay)
+       ---------------------------------------------- */
+        if (!res?.data?.tracking_data) {
+
+            // 1) If Shiprocket shows old status but no tracking for 10 days → auto-cancel
+            const createdAt = new Date(shipment.createdAt || shipment.created_date || Date.now());
+            const ageDays = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
+
+            if (ageDays > 10) {
+                srLog("🚫 Auto-cancel fallback triggered (no pickup for 10 days)", srCtx(orderId, shipment));
+
+                await Order.updateOne(
+                    { _id: orderId, "shipments._id": shipment._id },
+                    {
+                        $set: {
+                            "shipments.$.status": "Cancelled",
+                            "shipments.$.cancelReason": "Auto Cancelled by Shiprocket",
+                            "shipments.$.lastTrackingAttemptAt": new Date()
+                        },
+                        $push: {
+                            "shipments.$.tracking_history": {
+                                status: "Cancelled",
+                                timestamp: new Date(),
+                                location: "Shiprocket",
+                                description: "Auto cancelled by Shiprocket (No pickup within 10 days)"
+                            }
+                        }
+                    }
+                );
+                return;
+            }
+
+            // 2) IF NOT CANCELLED: tracking not ready → do NOT error
+            srLog("🟡 Tracking pending (courier has no events yet)", srCtx(orderId, shipment));
+            await Order.updateOne(
+                { _id: orderId, "shipments._id": shipment._id },
+                { $set: { "shipments.$.lastTrackingAttemptAt": new Date() } }
+            );
+            return;
+        }
+
+
         if (!res?.data?.tracking_data) {
             srErr("❌ Invalid tracking payload", srCtx(orderId, shipment));
             return;

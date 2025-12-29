@@ -1738,11 +1738,12 @@ import AffiliatePayout from "../../../models/AffiliatePayout.js";
 import AffiliateOrder from "../../../models/AffiliateOrder.js";
 import mongoose from 'mongoose';
 import User from '../../../models/User.js';
+import UserActivity from '../../../models/UserActivity.js';
 import Referral from '../../../models/Referral.js'; // ✅ You need to import this
 import Razorpay from "razorpay";
 import crypto from "crypto";
 import axios from 'axios';
-import {sendNotification} from '../../../controllers/sendNotification.js';
+import { sendNotification } from '../../../controllers/sendNotification.js';
 import cloudinary from '../../../middlewares/utils/cloudinary.js';
 import { determineOccasions, craftMessage } from "../../../middlewares/services/ecardService.js";
 import { buildEcardPdf } from "../../../middlewares/services/ecardPdf.js";
@@ -2651,6 +2652,296 @@ export const confirmCodOrder = async (req, res) => {
     }
 };
 
+// export const createWalletPayment = async (req, res) => {
+//     const session = await mongoose.startSession();
+//     try {
+//         const { orderId, shippingAddress } = req.body;
+
+//         if (!orderId || !shippingAddress)
+//             return res.status(400).json({ success: false, message: "orderId and shippingAddress are required" });
+
+//         const required = ["name", "phone", "addressLine1", "city", "state", "pincode"];
+//         for (const field of required) {
+//             if (!shippingAddress[field]) {
+//                 return res.status(400).json({ success: false, message: `Shipping address missing: ${field}` });
+//             }
+//         }
+
+//         await session.withTransaction(async () => {
+//             const order = await Order.findById(orderId)
+//                 .session(session)
+//                 .populate("user")
+//                 .populate("products.productId");
+
+//             if (!order) throw new Error("Order not found");
+//             if (order.paid) throw new Error("Already paid");
+
+//             order.shippingAddress = shippingAddress;
+//             order.orderType = "Online";
+//             order.paymentMethod = "Wallet";
+
+//             const Wallet = mongoose.model("Wallet");
+//             let wallet = await Wallet.findOne({ user: order.user._id }).session(session);
+//             if (!wallet) {
+//                 wallet = await Wallet.create([{ user: order.user._id, joyoryCash: 0, rewardPoints: 0, transactions: [] }], { session }).then(d => d[0]);
+//             }
+
+//             const config = await WalletConfig.findOne().session(session);
+//             const pointsRate = config?.pointsToCurrencyRate ?? 0.1;
+
+//             const joyoryCash = Number(wallet.joyoryCash) || 0;
+//             const rewardPoints = Number(wallet.rewardPoints) || 0;
+//             const pointsValue = rewardPoints * pointsRate;
+
+//             const walletBalance = joyoryCash + pointsValue;
+//             const orderAmount = Number(order.amount);
+
+//             if (walletBalance < orderAmount) throw new Error("Not enough wallet balance");
+
+//             let remaining = orderAmount;
+
+//             if (joyoryCash >= remaining) {
+//                 wallet.joyoryCash = joyoryCash - remaining;
+//                 remaining = 0;
+//             } else {
+//                 remaining -= joyoryCash;
+//                 wallet.joyoryCash = 0;
+//             }
+
+//             if (remaining > 0) {
+//                 const pointsNeeded = remaining / pointsRate;
+//                 wallet.rewardPoints = rewardPoints - pointsNeeded;
+//                 remaining = 0;
+//             }
+
+//             const pointsUsed = rewardPoints - wallet.rewardPoints;
+//             const pointsDiscount = pointsUsed * pointsRate;
+
+//             wallet.transactions.push({
+//                 type: "PURCHASE",
+//                 amount: orderAmount,
+//                 mode: "ONLINE",
+//                 description: `Wallet payment for order ${order._id}`,
+//                 timestamp: new Date(),
+//             });
+
+//             order.pointsDiscount = pointsDiscount;
+//             order.pointsUsed = pointsUsed;
+
+//             await wallet.save({ session });
+
+//             order.paid = true;
+//             order.paymentStatus = "success";
+//             order.orderStatus = "Awaiting Admin Confirmation";
+//             order.isDraft = false;   // <-- ADD THIS
+//             order.adminConfirmed = false;
+
+//             /************************************
+//        *  AFFILIATE SYSTEM TRIGGER POINT  *
+//        ************************************/
+//             if (order.affiliate?.slug && !order.affiliate?.applied) {
+
+//                 // 1️⃣ Find affiliate link using slug
+//                 const affiliateLink = await AffiliateLink.findOne({ slug: order.affiliate.slug });
+
+//                 if (affiliateLink) {
+
+//                     // 2️⃣ Find affiliate user from affiliateLink
+//                     const affiliateUser = await AffiliateUser.findById(affiliateLink.affiliateUser);
+
+//                     if (affiliateUser) {
+
+//                         // 3️⃣ Commission calculation
+//                         const commissionRate = affiliateUser.commissionRate || 10; // default 10%
+//                         const commissionAmount = Math.round((order.amount * commissionRate) / 100);
+
+//                         // 4️⃣ Create earning record
+//                         await AffiliateEarning.create({
+//                             affiliateUser: affiliateUser._id,
+//                             affiliateLink: affiliateLink._id,
+
+//                             orderId: order._id,
+//                             orderNumber: order.orderNumber || order.orderId || "-",
+
+//                             orderAmount: order.amount,
+//                             commission: commissionAmount,
+//                             status: "pending"
+//                         });
+
+//                         // 4B️⃣ Create affiliate order (IMPORTANT)
+//                         await AffiliateOrder.create({
+//                             affiliateUser: affiliateUser._id,
+//                             affiliateLink: affiliateLink._id,
+
+//                             orderId: order._id,
+//                             commission: commissionAmount,
+//                             orderValue: order.amount,
+//                             status: "pending"
+//                         });
+
+//                         // 5️⃣ Update ORDER affiliate section
+//                         order.affiliate.applied = true;
+//                         order.affiliate.affiliateUser = affiliateUser._id;
+//                         order.affiliate.affiliateLink = affiliateLink._id;
+
+//                         // 6️⃣ Add pending commission to affiliate user
+//                         affiliateUser.pendingCommission =
+//                             (affiliateUser.pendingCommission || 0) + commissionAmount;
+
+//                         await affiliateUser.save();
+//                     }
+//                 }
+//             }
+
+
+//             order.transactionId = `WALLET-${Date.now()}`;
+
+//             order.tracking_history = order.tracking_history || [];
+//             order.tracking_history.push({
+//                 status: "Payment Successful",
+//                 timestamp: new Date(),
+//                 location: "Wallet"
+//             });
+//             order.tracking_history.push({
+//                 status: "Awaiting Admin Confirmation",
+//                 timestamp: new Date(),
+//                 location: "Store"
+//             });
+
+//             const [paymentDoc] = await Payment.create([{
+//                 order: order._id,
+//                 method: "Wallet",
+//                 status: "Completed",
+//                 transactionId: order.transactionId,
+//                 amount: order.amount,
+//                 isActive: true,
+//             }], { session });
+
+//             if (paymentDoc) order.paymentId = paymentDoc._id;
+
+//             await order.save({ session });
+
+//             // 🔔 Notify Admin: New Wallet Payment Order
+//             await sendNotification({
+//                 type: "order_wallet",
+//                 message: `New Wallet-paid order #${order.orderNumber || order._id} placed`,
+//                 priority: "high",
+//                 meta: {
+//                     orderId: order._id,
+//                     userId: order.user._id,
+//                     amount: order.amount,
+//                     transactionId: order.transactionId
+//                 }
+//             });
+
+
+//             await clearUserCart(order.user._id, session);
+
+//         });
+
+//         const updated = await Order.findById(orderId)
+//             .populate("user")
+//             .populate("products.productId");
+
+//         let invoice;
+//         try {
+//             invoice = await generateAndSaveInvoice(updated);
+
+//             // OPTIONAL: store invoiceId in order schema for linkage
+//             updated.invoice = invoice._id;
+//             await updated.save();
+//         } catch (e) {
+//             console.warn("Invoice generation failed:", e.message);
+//         }
+
+
+//     await sendEmail(
+//         updated.user.email,
+//         `🎯 Wallet Payment Successful! Order #${updated.orderNumber || updated._id}`,
+//         `
+// <!DOCTYPE html>
+// <html>
+// <head>
+//     <style>
+//         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; }
+//         .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+//         .header { background: linear-gradient(135deg, #9c27b0 0%, #673ab7 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+//         .content { padding: 30px; background: #f9f9f9; }
+//         .wallet-card { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin: 20px 0; }
+//         .points-used { background: #e1bee7; color: #4a148c; padding: 10px 20px; border-radius: 10px; margin: 15px 0; }
+//         .benefits { background: #f3e5f5; padding: 20px; border-radius: 10px; margin: 20px 0; }
+//         .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+//     </style>
+// </head>
+// <body>
+//     <div class="container">
+//         <div class="header">
+//             <h1>💳 Wallet Payment Complete!</h1>
+//             <p>You've successfully used your Joyory Beauty Wallet</p>
+//         </div>
+//         <div class="content">
+//             <h2>Hi ${updated.user.name},</h2>
+//             <p>Smart choice! Your wallet payment for order <strong>#${updated.orderNumber || updated._id}</strong> has been processed successfully.</p>
+
+//             <div class="wallet-card">
+//                 <h3>💰 Payment Summary</h3>
+//                 <p><strong>Total Order Value:</strong> ₹${updated.amount}</p>
+//                 <p><strong>Payment Method:</strong> Joyory Wallet</p>
+//                 <p><strong>Transaction ID:</strong> ${updated.transactionId}</p>
+
+//                 ${updated.pointsUsed > 0 ? `
+//                 <div class="points-used">
+//                     <p>🎁 <strong>Reward Points Used:</strong> ${updated.pointsUsed} points</p>
+//                     <p>💰 <strong>Points Value:</strong> ₹${updated.pointsDiscount || 0}</p>
+//                 </div>
+//                 ` : ''}
+
+//                 <p style="color: #4CAF50; font-weight: bold;">✅ Payment Status: Completed</p>
+//             </div>
+
+//             <div class="benefits">
+//                 <h4>🌟 Wallet Benefits You Enjoyed:</h4>
+//                 <ul>
+//                     <li>Instant payment processing</li>
+//                     <li>No additional payment charges</li>
+//                     <li>Secure transaction with rewards</li>
+//                     <li>Faster order processing</li>
+//                 </ul>
+//             </div>
+
+//             <div style="background: #e8f5e9; padding: 20px; border-radius: 10px; margin: 20px 0;">
+//                 <h4>📈 Your Wallet Status:</h4>
+//                 <p>Keep earning rewards on every purchase! Visit your wallet to check balance and rewards.</p>
+//                 <a href="${process.env.FRONTEND_URL}/account/wallet" style="color: #9c27b0; font-weight: bold;">View Wallet Balance →</a>
+//             </div>
+
+//             <div style="text-align: center;">
+//                 <a href="${process.env.FRONTEND_URL}/orders/${updated._id}" style="display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #9c27b0 0%, #673ab7 100%); color: white; text-decoration: none; border-radius: 5px;">View Order Details</a>
+//             </div>
+//         </div>
+//         <div class="footer">
+//             <p>Thank you for using Joyory Beauty Wallet!</p>
+//             <p>Earn 5% cashback on every prepaid order</p>
+//         </div>
+//     </div>
+// </body>
+// </html>
+// `
+//     );
+
+//         return res.json({
+//             success: true,
+//             message: "Wallet payment successful. Awaiting admin confirmation.",
+//             order: updated
+//         });
+
+//     } catch (err) {
+//         return res.status(500).json({ success: false, message: err.message });
+//     } finally {
+//         await session.endSession().catch(() => { });
+//     }
+// };
+
 export const createWalletPayment = async (req, res) => {
     const session = await mongoose.startSession();
     try {
@@ -2665,6 +2956,8 @@ export const createWalletPayment = async (req, res) => {
                 return res.status(400).json({ success: false, message: `Shipping address missing: ${field}` });
             }
         }
+
+        let updatedOrder;
 
         await session.withTransaction(async () => {
             const order = await Order.findById(orderId)
@@ -2732,69 +3025,48 @@ export const createWalletPayment = async (req, res) => {
             order.paid = true;
             order.paymentStatus = "success";
             order.orderStatus = "Awaiting Admin Confirmation";
-            order.isDraft = false;   // <-- ADD THIS
+            order.isDraft = false;
             order.adminConfirmed = false;
 
-            /************************************
-       *  AFFILIATE SYSTEM TRIGGER POINT  *
-       ************************************/
+            // AFFILIATE SYSTEM LOGIC (unchanged)
             if (order.affiliate?.slug && !order.affiliate?.applied) {
-
-                // 1️⃣ Find affiliate link using slug
                 const affiliateLink = await AffiliateLink.findOne({ slug: order.affiliate.slug });
-
                 if (affiliateLink) {
-
-                    // 2️⃣ Find affiliate user from affiliateLink
                     const affiliateUser = await AffiliateUser.findById(affiliateLink.affiliateUser);
-
                     if (affiliateUser) {
-
-                        // 3️⃣ Commission calculation
-                        const commissionRate = affiliateUser.commissionRate || 10; // default 10%
+                        const commissionRate = affiliateUser.commissionRate || 10;
                         const commissionAmount = Math.round((order.amount * commissionRate) / 100);
 
-                        // 4️⃣ Create earning record
-                        await AffiliateEarning.create({
+                        await AffiliateEarning.create([{
                             affiliateUser: affiliateUser._id,
                             affiliateLink: affiliateLink._id,
-
                             orderId: order._id,
                             orderNumber: order.orderNumber || order.orderId || "-",
-
                             orderAmount: order.amount,
                             commission: commissionAmount,
                             status: "pending"
-                        });
+                        }], { session });
 
-                        // 4B️⃣ Create affiliate order (IMPORTANT)
-                        await AffiliateOrder.create({
+                        await AffiliateOrder.create([{
                             affiliateUser: affiliateUser._id,
                             affiliateLink: affiliateLink._id,
-
                             orderId: order._id,
                             commission: commissionAmount,
                             orderValue: order.amount,
                             status: "pending"
-                        });
+                        }], { session });
 
-                        // 5️⃣ Update ORDER affiliate section
                         order.affiliate.applied = true;
                         order.affiliate.affiliateUser = affiliateUser._id;
                         order.affiliate.affiliateLink = affiliateLink._id;
 
-                        // 6️⃣ Add pending commission to affiliate user
-                        affiliateUser.pendingCommission =
-                            (affiliateUser.pendingCommission || 0) + commissionAmount;
-
-                        await affiliateUser.save();
+                        affiliateUser.pendingCommission = (affiliateUser.pendingCommission || 0) + commissionAmount;
+                        await affiliateUser.save({ session });
                     }
                 }
             }
 
-
             order.transactionId = `WALLET-${Date.now()}`;
-
             order.tracking_history = order.tracking_history || [];
             order.tracking_history.push({
                 status: "Payment Successful",
@@ -2820,44 +3092,61 @@ export const createWalletPayment = async (req, res) => {
 
             await order.save({ session });
 
-            // 🔔 Notify Admin: New Wallet Payment Order
-            await sendNotification({
-                type: "order_wallet",
-                message: `New Wallet-paid order #${order.orderNumber || order._id} placed`,
-                priority: "high",
-                meta: {
-                    orderId: order._id,
-                    userId: order.user._id,
-                    amount: order.amount,
-                    transactionId: order.transactionId
-                }
-            });
-
-
-            await clearUserCart(order.user._id, session);
-
+            updatedOrder = order; // keep reference for later non-transaction tasks
         });
 
-        const updated = await Order.findById(orderId)
-            .populate("user")
-            .populate("products.productId");
+        // --- FIRE-AND-FORGET NON-TRANSACTION TASKS ---
+        (async () => {
+            try {
+                // Funnel / conversion stats update
+                await User.findByIdAndUpdate(
+                    updatedOrder.user._id,
+                    [
+                        {
+                            $set: {
+                                "conversionStats.orderCount": {
+                                    $add: [
+                                        { $ifNull: ["$conversionStats.orderCount", 0] },
+                                        1
+                                    ]
+                                }
+                            }
+                        }
+                    ]
+                );
 
-        let invoice;
-        try {
-            invoice = await generateAndSaveInvoice(updated);
+                await UserActivity.create({
+                    user: updatedOrder.user._id,
+                    type: "order"
+                });
 
-            // OPTIONAL: store invoiceId in order schema for linkage
-            updated.invoice = invoice._id;
-            await updated.save();
-        } catch (e) {
-            console.warn("Invoice generation failed:", e.message);
-        }
+                // Notify admin
+                await sendNotification({
+                    type: "order_wallet",
+                    message: `New Wallet-paid order #${updatedOrder.orderNumber || updatedOrder._id} placed`,
+                    priority: "high",
+                    meta: {
+                        orderId: updatedOrder._id,
+                        userId: updatedOrder.user._id,
+                        amount: updatedOrder.amount,
+                        transactionId: updatedOrder.transactionId
+                    }
+                });
 
+                // Clear user cart
+                await clearUserCart(updatedOrder.user._id);
 
-        await sendEmail(
-            updated.user.email,
-            `🎯 Wallet Payment Successful! Order #${updated.orderNumber || updated._id}`,
-            `
+                // Generate invoice
+                const invoice = await generateAndSaveInvoice(updatedOrder);
+                if (invoice) {
+                    updatedOrder.invoice = invoice._id;
+                    await updatedOrder.save().catch(console.warn);
+                }
+
+                await sendEmail(
+                    updatedOrder.user.email,
+                    `🎯 Wallet Payment Successful! Order #${updatedOrder.orderNumber || updatedOrder._id}`,
+                    `
     <!DOCTYPE html>
     <html>
     <head>
@@ -2879,25 +3168,25 @@ export const createWalletPayment = async (req, res) => {
                 <p>You've successfully used your Joyory Beauty Wallet</p>
             </div>
             <div class="content">
-                <h2>Hi ${updated.user.name},</h2>
-                <p>Smart choice! Your wallet payment for order <strong>#${updated.orderNumber || updated._id}</strong> has been processed successfully.</p>
-                
+                <h2>Hi ${updatedOrder.user.name},</h2>
+                <p>Smart choice! Your wallet payment for order <strong>#${updatedOrder.orderNumber || updatedOrder._id}</strong> has been processed successfully.</p>
+
                 <div class="wallet-card">
                     <h3>💰 Payment Summary</h3>
-                    <p><strong>Total Order Value:</strong> ₹${updated.amount}</p>
+                    <p><strong>Total Order Value:</strong> ₹${updatedOrder.amount}</p>
                     <p><strong>Payment Method:</strong> Joyory Wallet</p>
-                    <p><strong>Transaction ID:</strong> ${updated.transactionId}</p>
-                    
-                    ${updated.pointsUsed > 0 ? `
+                    <p><strong>Transaction ID:</strong> ${updatedOrder.transactionId}</p>
+
+                    ${updatedOrder.pointsUsed > 0 ? `
                     <div class="points-used">
-                        <p>🎁 <strong>Reward Points Used:</strong> ${updated.pointsUsed} points</p>
-                        <p>💰 <strong>Points Value:</strong> ₹${updated.pointsDiscount || 0}</p>
+                        <p>🎁 <strong>Reward Points Used:</strong> ${updatedOrder.pointsUsed} points</p>
+                        <p>💰 <strong>Points Value:</strong> ₹${updatedOrder.pointsDiscount || 0}</p>
                     </div>
                     ` : ''}
-                    
+
                     <p style="color: #4CAF50; font-weight: bold;">✅ Payment Status: Completed</p>
                 </div>
-                
+
                 <div class="benefits">
                     <h4>🌟 Wallet Benefits You Enjoyed:</h4>
                     <ul>
@@ -2907,15 +3196,15 @@ export const createWalletPayment = async (req, res) => {
                         <li>Faster order processing</li>
                     </ul>
                 </div>
-                
+
                 <div style="background: #e8f5e9; padding: 20px; border-radius: 10px; margin: 20px 0;">
                     <h4>📈 Your Wallet Status:</h4>
                     <p>Keep earning rewards on every purchase! Visit your wallet to check balance and rewards.</p>
                     <a href="${process.env.FRONTEND_URL}/account/wallet" style="color: #9c27b0; font-weight: bold;">View Wallet Balance →</a>
                 </div>
-                
+
                 <div style="text-align: center;">
-                    <a href="${process.env.FRONTEND_URL}/orders/${updated._id}" style="display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #9c27b0 0%, #673ab7 100%); color: white; text-decoration: none; border-radius: 5px;">View Order Details</a>
+                    <a href="${process.env.FRONTEND_URL}/orders/${updatedOrder._id}" style="display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #9c27b0 0%, #673ab7 100%); color: white; text-decoration: none; border-radius: 5px;">View Order Details</a>
                 </div>
             </div>
             <div class="footer">
@@ -2926,12 +3215,16 @@ export const createWalletPayment = async (req, res) => {
     </body>
     </html>
     `
-        );
+                );
+            } catch (err) {
+                console.error("Post-payment async tasks failed:", err.message);
+            }
+        })();
 
         return res.json({
             success: true,
             message: "Wallet payment successful. Awaiting admin confirmation.",
-            order: updated
+            order: updatedOrder
         });
 
     } catch (err) {

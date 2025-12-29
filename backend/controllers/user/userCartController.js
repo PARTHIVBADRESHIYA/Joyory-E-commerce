@@ -12,7 +12,7 @@ import Promotion from "../../models/Promotion.js";
 import { enrichProductWithStockAndOptions, enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
 import { getRedis } from "../../middlewares/utils/redis.js";
 import crypto from "crypto";
-
+import UserActivity from "../../models/UserActivity.js";
 
 async function invalidateCartCache(userId, sessionId) {
   const redis = getRedis();
@@ -125,10 +125,35 @@ export const addToCart = async (req, res) => {
     try {
       if (req.user?._id) {
         // Logged-in user flow
-        const user = await User.findById(req.user._id);
+        const user = await User.findById(req.user._id); await user.save();
+
         cart = await handleCart(user.cart, product, variants, qty);
         user.cart = cart;
         await user.save();
+
+        // 🔥 Track add-to-cart activity
+        await UserActivity.create({
+          user: user._id,
+          type: "add_to_cart",
+          product: product._id
+        });
+
+        // 🔥 Funnel tracking: Add to Cart
+        await User.findByIdAndUpdate(
+          req.user._id,
+          [
+            {
+              $set: {
+                "conversionStats.addToCartCount": {
+                  $add: [
+                    { $ifNull: ["$conversionStats.addToCartCount", 0] },
+                    1
+                  ]
+                }
+              }
+            }
+          ]
+        );
       } else {
         // Guest flow
         cart = await handleCart(req.session.guestCart, product, variants, qty);

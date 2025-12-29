@@ -75,6 +75,7 @@ const userSchema = new mongoose.Schema({
         default: 'email'
     },
     conversionStats: {
+        viewCount: { type: Number, default: 0 },        // ✅ ADD THIS
         addToCartCount: { type: Number, default: 0 },
         checkoutCount: { type: Number, default: 0 },
         orderCount: { type: Number, default: 0 }
@@ -92,10 +93,11 @@ const userSchema = new mongoose.Schema({
     lastRecommendationUpdate: { type: Date },
     wishlist: [
         {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "Product"
+            productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
+            name: { type: String }
         }
     ],
+
     // 🆕 track selected shade/variant
     selectedVariant: {
         sku: String,

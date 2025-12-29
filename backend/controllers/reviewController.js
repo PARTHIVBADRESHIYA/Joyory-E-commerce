@@ -3,7 +3,7 @@ import Product from "../models/Product.js";
 import Review from "../models/Review.js";
 import Order from "../models/Order.js";
 import { uploadToCloudinary } from '../middlewares/upload.js';
-
+import mongoose from "mongoose";
 /**
  * Submit or update a review
  */
@@ -151,29 +151,168 @@ const voteReviewHelpful = async (req, res) => {
 /**
  * Get reviews for product page (with filters: stars, photosOnly, sort)
  */
+// const getProductReviews = async (req, res) => {
+//     try {
+//         const { productId } = req.params;
+//         const { stars, photosOnly, sort = "recent", variantSku, shadeName } = req.query;
+
+//         const filter = { productId, status: "Active" };
+//         if (stars) filter.rating = Number(stars);
+//         if (photosOnly === "true") filter.images = { $exists: true, $ne: [] };
+
+//         let sortOption = { createdAt: -1 };
+//         if (sort === "helpful") sortOption = { helpfulVotes: -1 };
+
+//         const reviews = await Review.find(filter)
+//             .populate("customer", "name profileImage")
+//             .sort(sortOption);
+
+//         if (!reviews.length) {
+//             return res.json({ message: "No reviews found for this filter." });
+//         }
+
+//         res.status(200).json({ reviews });
+//     } catch (err) {
+//         res.status(500).json({ message: "❌ Failed to fetch reviews", error: err.message });
+//     }
+// };
 const getProductReviews = async (req, res) => {
     try {
         const { productId } = req.params;
-        const { stars, photosOnly, sort = "recent", variantSku, shadeName } = req.query;
 
-        const filter = { productId, status: "Active" };
-        if (stars) filter.rating = Number(stars);
-        if (photosOnly === "true") filter.images = { $exists: true, $ne: [] };
+        const {
+            rating,
+            minRating,
+            maxRating,
+            verified,
+            photosOnly,
+            variantSku,
+            shadeName,
+            search,
+            fromDate,
+            toDate,
+            sort = "recent",
+            page = 1,
+            limit = 10
+        } = req.query;
 
-        let sortOption = { createdAt: -1 };
-        if (sort === "helpful") sortOption = { helpfulVotes: -1 };
+        const match = {
+            productId: new mongoose.Types.ObjectId(productId),
+            status: "Active"
+        };
 
-        const reviews = await Review.find(filter)
-            .populate("customer", "name profileImage")
-            .sort(sortOption);
+        // ---- Rating Filters ----
+        if (rating) match.rating = Number(rating);
 
-        if (!reviews.length) {
-            return res.json({ message: "No reviews found for this filter." });
+        if (minRating || maxRating) {
+            match.rating = {};
+            if (minRating) match.rating.$gte = Number(minRating);
+            if (maxRating) match.rating.$lte = Number(maxRating);
         }
 
-        res.status(200).json({ reviews });
+        // ---- Variant Filters ----
+        if (variantSku) match.variantSku = variantSku;
+        if (shadeName) match.shadeName = new RegExp(shadeName, "i");
+
+        // ---- Verified Purchase ----
+        if (verified === "true") match.verifiedPurchase = true;
+        if (verified === "false") match.verifiedPurchase = false;
+
+        // ---- Photos Only ----
+        if (photosOnly === "true") {
+            match.images = { $exists: true, $ne: [] };
+        }
+
+        // ---- Date Filter ----
+        if (fromDate || toDate) {
+            match.createdAt = {};
+            if (fromDate) match.createdAt.$gte = new Date(fromDate);
+            if (toDate) match.createdAt.$lte = new Date(toDate);
+        }
+
+        const skip = (Number(page) - 1) * Number(limit);
+
+        const sortOption = {
+            recent: { createdAt: -1 },
+            oldest: { createdAt: 1 },
+            rating_desc: { rating: -1 },
+            rating_asc: { rating: 1 },
+            helpful: { helpfulVotes: -1 }
+        }[sort] || { createdAt: -1 };
+
+        // --------------------------
+        // 🔥 AGGREGATION PIPELINE
+        // --------------------------
+        const pipeline = [
+            { $match: match },
+
+            // Join customer
+            {
+                $lookup: {
+                    from: "users",
+                    localField: "customer",
+                    foreignField: "_id",
+                    as: "customer"
+                }
+            },
+            { $unwind: { path: "$customer", preserveNullAndEmptyArrays: true } }
+        ];
+
+        // ---- Search ----
+        if (search) {
+            const reg = new RegExp(search, "i");
+            pipeline.push({
+                $match: {
+                    $or: [
+                        { comment: reg },
+                        { "customer.name": reg }
+                    ]
+                }
+            });
+        }
+
+        // ---- Count ----
+        const countPipeline = [...pipeline, { $count: "total" }];
+        const totalResult = await Review.aggregate(countPipeline);
+        const total = totalResult[0]?.total || 0;
+
+        // ---- Sort + Pagination ----
+        pipeline.push({ $sort: sortOption });
+        pipeline.push({ $skip: skip });
+        pipeline.push({ $limit: Number(limit) });
+
+        // ---- Final Projection ----
+        pipeline.push({
+            $project: {
+                _id: 1,
+                rating: 1,
+                comment: 1,
+                images: 1,
+                helpfulVotes: 1,
+                verifiedPurchase: 1,
+                variantSku: 1,
+                shadeName: 1,
+                createdAt: 1,
+
+                customerName: "$customer.name",
+                customerProfileImage: "$customer.profileImage"
+            }
+        });
+
+        const reviews = await Review.aggregate(pipeline);
+
+        res.status(200).json({
+            total,
+            page: Number(page),
+            limit: Number(limit),
+            reviews
+        });
+
     } catch (err) {
-        res.status(500).json({ message: "❌ Failed to fetch reviews", error: err.message });
+        res.status(500).json({
+            message: "Failed to fetch product reviews",
+            error: err.message
+        });
     }
 };
 
