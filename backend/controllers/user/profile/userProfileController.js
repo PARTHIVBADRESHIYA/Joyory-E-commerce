@@ -4,7 +4,7 @@ import { generateOTP } from '../../../middlewares/utils/generateOTP.js';
 import { sendEmail } from '../../../middlewares/utils/emailService.js';
 import { sendSms } from '../../../middlewares/utils/sendSms.js';
 import { addressSchema } from "../../../middlewares/validations/userProfileValidation.js";
-// import { validatePincodeServiceability } from "../../../middlewares/services/shiprocket.js";
+import { validatePincodeServiceabilityDelhivery } from "../../../middlewares/services/delhiveryService.js";
 import { uploadToCloudinary } from "../../../middlewares/upload.js";
 import bcrypt from 'bcryptjs';
 
@@ -211,109 +211,8 @@ export const getProfileImage = async (req, res) => {
 };
 
 //--------------------------------------------------------------Addresses---------------------------------------------------------------//
-// // ✅ Add Address
-// export const addUserAddress = async (req, res) => {
-//     try {
-//         const { error } = addressSchema.validate(req.body);
-//         if (error) return res.status(400).json({ message: error.details[0].message });
 
-//         const user = await User.findById(req.user._id);
-//         if (!user) return res.status(404).json({ message: "User not found" });
-
-//         const { name, phone, email, pincode, addressLine1, city, state, houseNumber } = req.body;
-
-//         const normalized = {
-//             name: name.trim(),
-//             phone: phone.trim(),
-//             email: email?.trim().toLowerCase() || user.email,
-//             pincode: String(pincode).trim(),
-//             addressLine1: addressLine1.trim().toLowerCase(),
-//             city: city.trim().toLowerCase(),
-//             state: state.trim().toLowerCase(),
-//             houseNumber: houseNumber ? houseNumber.trim().toLowerCase() : ""
-//         };
-
-//         const exists = user.addresses.some(addr =>
-//             addr.email === normalized.email &&
-//             addr.phone === normalized.phone &&
-//             String(addr.pincode).trim() === normalized.pincode &&
-//             addr.addressLine1.trim().toLowerCase() === normalized.addressLine1 &&
-//             addr.city.trim().toLowerCase() === normalized.city &&
-//             addr.state.trim().toLowerCase() === normalized.state &&
-//             (addr.houseNumber ? addr.houseNumber.trim().toLowerCase() : "") === normalized.houseNumber
-//         );
-
-//         if (exists) return res.status(400).json({ message: "❌ This address with same contact already exists" });
-
-//         user.addresses.push(normalized);
-//         await user.save();
-
-//         res.status(201).json({ message: "✅ Address added", addresses: user.addresses });
-//     } catch (err) {
-//         res.status(500).json({ message: "Failed to add address", error: err.message });
-//     }
-// };
-
-// // ✅ Update Address
-// export const updateUserAddress = async (req, res) => {
-//     try {
-//         const { error } = addressSchema.validate(req.body);
-//         if (error) return res.status(400).json({ message: error.details[0].message });
-
-//         const user = await User.findById(req.user._id);
-//         if (!user) return res.status(404).json({ message: "User not found" });
-
-//         const address = user.addresses.id(req.params.id);
-//         if (!address) return res.status(404).json({ message: "Address not found" });
-
-//         const { name, phone, email, pincode, addressLine1, city, state, houseNumber } = req.body;
-
-//         const normalized = {
-//             name: name.trim(),
-//             phone: phone.trim(),
-//             email: email?.trim().toLowerCase() || user.email,
-//             pincode: String(pincode).trim(),
-//             addressLine1: addressLine1.trim().toLowerCase(),
-//             city: city.trim().toLowerCase(),
-//             state: state.trim().toLowerCase(),
-//             houseNumber: houseNumber ? houseNumber.trim().toLowerCase() : ""
-//         };
-
-//         const isSameAsCurrent =
-//             address.name === normalized.name &&
-//             address.phone === normalized.phone &&
-//             address.email === normalized.email &&
-//             String(address.pincode).trim() === normalized.pincode &&
-//             address.addressLine1.trim().toLowerCase() === normalized.addressLine1 &&
-//             address.city.trim().toLowerCase() === normalized.city &&
-//             address.state.trim().toLowerCase() === normalized.state &&
-//             (address.houseNumber ? address.houseNumber.trim().toLowerCase() : "") === normalized.houseNumber;
-
-//         if (isSameAsCurrent) return res.status(400).json({ message: "⚠️ This is already your current address & contact details, enter different details to update" });
-
-//         const exists = user.addresses.some(addr =>
-//             addr._id.toString() !== req.params.id &&
-//             addr.email === normalized.email &&
-//             addr.phone === normalized.phone &&
-//             String(addr.pincode).trim() === normalized.pincode &&
-//             addr.addressLine1.trim().toLowerCase() === normalized.addressLine1 &&
-//             addr.city.trim().toLowerCase() === normalized.city &&
-//             addr.state.trim().toLowerCase() === normalized.state &&
-//             (addr.houseNumber ? addr.houseNumber.trim().toLowerCase() : "") === normalized.houseNumber
-//         );
-
-//         if (exists) return res.status(400).json({ message: "❌ Another address with same contact already exists" });
-
-//         Object.assign(address, normalized);
-//         await user.save();
-
-//         res.status(200).json({ message: "✅ Address updated successfully", addresses: user.addresses });
-//     } catch (err) {
-//         res.status(500).json({ message: "Failed to update address", error: err.message });
-//     }
-// };
-
-// ✅ Add User Address with Shiprocket Pincode Validation
+// ✅ Add User Address with Delhivery Pincode Validation
 export const addUserAddress = async (req, res) => {
     try {
         const { error } = addressSchema.validate(req.body);
@@ -326,18 +225,18 @@ export const addUserAddress = async (req, res) => {
 
         const { name, phone, email, pincode, addressLine1, city, state, houseNumber } = req.body;
 
-        // 🧠 Step 1: Validate pincode via Shiprocket (GET)
+        // 🧠 Step 1: Validate pincode via Delhivery
         let serviceable = false;
         let couriers = [];
 
         try {
-            const result = await validatePincodeServiceability(pincode);
+            const result = await validatePincodeServiceabilityDelhivery(pincode); // FIXED
             serviceable = result.serviceable;
             couriers = result.couriers || [];
         } catch (err) {
             console.error("❌ Pincode validation skipped:", err.message);
             return res.status(400).json({
-                message: `🚫 Unable to validate pincode ${pincode} with Shiprocket. Try again.`,
+                message: `🚫 Unable to validate pincode ${pincode} with Delhivery. Try again.`, // FIXED
             });
         }
 
@@ -346,6 +245,7 @@ export const addUserAddress = async (req, res) => {
                 message: `🚫 Delivery not available for pincode ${pincode}. Please enter a different one.`,
             });
         }
+
 
         // Step 2: Normalize and check duplicates
         const normalized = {
@@ -386,7 +286,7 @@ export const addUserAddress = async (req, res) => {
     }
 };
 
-// ✅ Update Address (with Shiprocket pincode validation)
+// ✅ Update Address (with Delhivery pincode validation)
 export const updateUserAddress = async (req, res) => {
     try {
         const { error } = addressSchema.validate(req.body);
@@ -403,18 +303,18 @@ export const updateUserAddress = async (req, res) => {
 
         const { name, phone, email, pincode, addressLine1, city, state, houseNumber } = req.body;
 
-        // 🧠 Step 1: Validate pincode via Shiprocket (GET)
+        // 🧠 Step 1: Validate pincode via Delhivery (GET)
         let serviceable = false;
         let couriers = [];
 
         try {
-            const result = await validatePincodeServiceability(pincode);
+            const result = await validatePincodeServiceabilityDelhivery(pincode);
             serviceable = result.serviceable;
             couriers = result.couriers || [];
         } catch (err) {
             console.error("❌ Pincode validation skipped:", err.message);
             return res.status(400).json({
-                message: `🚫 Unable to validate pincode ${pincode} with Shiprocket. Try again.`,
+                message: `🚫 Unable to validate pincode ${pincode} with Delhivery. Try again.`,
             });
         }
 

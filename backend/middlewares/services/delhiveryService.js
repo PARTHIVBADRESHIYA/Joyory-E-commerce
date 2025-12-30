@@ -3,13 +3,16 @@ import qs from "qs";
 
 const DELHIVERY_BASE_URL = process.env.DELHIVERY_BASE_URL;
 const DELHIVERY_API_KEY = process.env.DELHIVERY_API_KEY;
+const DELHIVERY_WAREHOUSE_CODE = process.env.DELHIVERY_WAREHOUSE_CODE;
 
 export const createDelhiveryShipment = async ({
     order,
     pickup,
     shipping_address,
     customer,
-    items
+    items,
+    productDescription
+
 }) => {
     const quantity = items.reduce((s, i) => s + i.quantity, 0);
 
@@ -39,7 +42,7 @@ export const createDelhiveryShipment = async ({
             weight: 500,                // 🔥 grams
             shipping_mode: "Surface",
 
-            products_desc: "Joyory Products",
+            products_desc: productDescription,
             hsn_code: "330499",
 
             seller_inv: order.order_id,
@@ -85,10 +88,102 @@ export const createDelhiveryShipment = async ({
 
     const pkg = response.data.packages[0];
 
+    // 🔥 HARD VALIDATION
+    if (!pkg || !pkg.waybill || pkg.waybill.trim() === "") {
+        throw new Error(
+            `Delhivery AWB not generated. Raw response: ${JSON.stringify(response.data)}`
+        );
+    }
+
+
     return {
         waybill: pkg.waybill,
         pickup_id: pkg.refnum,
         tracking_url: `https://www.delhivery.com/track/package/${pkg.waybill}`
     };
 };
+
+
+
+export const cancelDelhiveryShipment = async (waybill) => {
+    if (!waybill) throw new Error("Missing AWB for delhivery cancel.");
+
+    try {
+        const response = await axios.post(
+            "https://track.delhivery.com/api/p/edit",
+            {
+                waybill: waybill,
+                status: "Cancelled",
+            },
+            {
+                headers: {
+                    Authorization: `Token ${process.env.DELHIVERY_API_KEY}`,
+                }
+            }
+        );
+
+        if (!response.data?.success) {
+            throw new Error(`Delhivery cancel failed: ${JSON.stringify(response.data)}`);
+        }
+
+        return response.data;
+    } catch (err) {
+        console.error("Delhivery Cancel Shipment Error:", err?.response?.data || err.message);
+        throw err;
+    }
+};
+
+
+
+
+
+
+
+export async function validatePincodeServiceabilityDelhivery(pincode, cod = true) {
+    try {
+        const token = process.env.DELHIVERY_API_KEY;
+        if (!token) throw new Error("Delhivery API key missing");
+
+        const url = `https://track.delhivery.com/c/api/pin-codes/json/?filter_codes=${String(
+            pincode
+        ).trim()}`;
+
+        const res = await axios.get(url, {
+            headers: { Authorization: `Token ${token}` }
+        });
+
+        const list = res.data?.delivery_codes || [];
+        if (!list.length) {
+            return { serviceable: false, couriers: [] };
+        }
+
+        const details = list[0]?.postal_code || {};
+
+        // FIX: Correct Delhivery fields
+        const isCodAvailable = details.cod === "Y";
+        const isPrepaidAvailable = details.pre_paid === "Y";
+
+        if (cod && !isCodAvailable) {
+            return { serviceable: false, couriers: [] };
+        }
+
+        return {
+            serviceable: true,
+            couriers: [
+                {
+                    name: "Delhivery",
+                    cod: isCodAvailable,
+                    prepaid: isPrepaidAvailable,
+                    state: details.state_code || "",
+                    city: details.city || "",
+                    district: details.district || "",
+                }
+            ]
+        };
+
+    } catch (err) {
+        console.error("❌ Delhivery Pincode Validation Failed:", err.response?.data || err.message);
+        throw new Error("Failed to check pincode with Delhivery");
+    }
+}
 

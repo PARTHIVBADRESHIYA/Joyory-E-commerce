@@ -3370,6 +3370,7 @@ export const createGiftCardPayment = async (req, res) => {
 
             await order.save({ session });
 
+            
             // 🔔 Notify Admin: New Gift Card Order
             await sendNotification({
                 type: "order_giftcard",

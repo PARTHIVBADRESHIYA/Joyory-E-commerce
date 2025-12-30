@@ -27,47 +27,51 @@ const shiprocketStatusMap = {
     10: "RTO Delivered"
 };
 
+function buildShipmentsFromAllocation(txOrder, allocationMap) {
+    const shipmentMap = {}; // warehouseCode → shipment
 
-// export function computeOrderStatus(shipments = []) {
-//     if (!shipments || shipments.length === 0) return "Pending";
+    txOrder.products.forEach((orderItem, index) => {
+        allocationMap[index].forEach(alloc => {
+            const whCode = alloc.warehouseCode;
 
-//     const normalize = (s = "") => s.trim().toLowerCase();
+            if (!shipmentMap[whCode]) {
+                shipmentMap[whCode] = {
+                    warehouseCode: whCode,
+                    provider: "delhivery",
+                    status: "Pending",
+                    products: [],
+                    tracking_history: []
+                };
+            }
 
-//     // Map numeric status / deliveredAt to proper string
-//     const statuses = shipments.map(s => {
-//         if (s.deliveredAt) return "Delivered";
-//         if (s.status === "cancelled") return "Cancelled"; // your cancelled code
-//         if (["shipped", "out for delivery", "in transit"].includes(s.status.toLowerCase()))
-//             return "Shipped";
+            shipmentMap[whCode].products.push({
+                productId: orderItem.productId,
+                quantity: alloc.qty,
 
-//         // fallback to last tracking_history status
-//         const lastTracking = s.tracking_history?.[s.tracking_history.length - 1]?.status;
-//         if (lastTracking) return lastTracking;
-//         return "Processing";
-//     });
+                // 🔒 PRICE SNAPSHOT
+                price: orderItem.price,
 
-//     const total = statuses.length;
-//     const count = (s) => statuses.filter(x => normalize(x) === normalize(s)).length;
-//     const has = (s) => count(s) > 0;
-//     const all = (s) => count(s) === total;
+                // 🔒 VARIANT SNAPSHOT
+                variant: {
+                    sku: orderItem.variant?.sku,
+                    shadeName: orderItem.variant?.shadeName,
+                    hex: orderItem.variant?.hex,
+                    image: orderItem.variant?.image,
 
-//     if (all("delivered")) return "Delivered";
-//     if (all("cancelled")) return "Cancelled";
-//     if (statuses.every(s => ["shipped", "out for delivery", "in transit"].includes(normalize(s))))
-//         return "Shipped";
+                    originalPrice: orderItem.variant?.originalPrice,
+                    discountedPrice: orderItem.variant?.discountedPrice,
+                    displayPrice: orderItem.variant?.displayPrice,
 
-//     if (has("delivered") && has("cancelled") && !has("shipped") && !has("processing"))
-//         return "Partially Delivered / Cancelled";
-//     if (has("delivered") && !has("cancelled"))
-//         return "Partially Delivered";
-//     if (has("cancelled") && !has("delivered"))
-//         return "Partially Cancelled";
+                    discountPercent: orderItem.variant?.discountPercent,
+                    discountAmount: orderItem.variant?.discountAmount
+                }
+            });
+        });
+    });
 
-//     if (has("shipped") || has("out for delivery") || has("in transit"))
-//         return "Processing";
+    return Object.values(shipmentMap);
+}
 
-//     return "Processing";
-// }
 export function computeOrderStatus(shipments = []) {
     if (!Array.isArray(shipments) || shipments.length === 0) {
         return "Pending";
@@ -80,6 +84,7 @@ export function computeOrderStatus(shipments = []) {
     let shipped = 0;
     let processing = 0;
     let returned = 0;
+    let rto = 0;
 
     for (const shipment of shipments) {
 
@@ -91,9 +96,13 @@ export function computeOrderStatus(shipments = []) {
         if (shipment.deliveredAt || forwardStatus === "delivered") {
             delivered++;
         }
-        else if (forwardStatus === "cancelled" || forwardStatus === "rto delivered") {
+        else if (forwardStatus === "cancelled") {
             cancelled++;
         }
+        else if (forwardStatus.includes("rto")) {
+            rto++;
+        }
+
         else if (
             ["shipped", "in transit", "out for delivery"].includes(forwardStatus)
         ) {
@@ -438,6 +447,8 @@ export const adminListOrders = async (req, res) => {
 //         try { await session.endSession(); } catch (e) { }
 //     }
 // };
+
+
 export const adminConfirmOrder = async (req, res) => {
     const session = await mongoose.startSession();
 
@@ -495,8 +506,7 @@ export const adminConfirmOrder = async (req, res) => {
                 await product.save({ session });
             }
 
-            /* ---------- SPLIT ORDERS ---------- */
-            await splitOrderForPersistence(txOrder, { session });
+            txOrder.shipments = buildShipmentsFromAllocation(txOrder, allocationMap);
 
             /* ---------- CREATE SHIPMENTS (🔥 FIX) ---------- */
             if (!txOrder.shipments || txOrder.shipments.length === 0) {
@@ -505,12 +515,19 @@ export const adminConfirmOrder = async (req, res) => {
                     status: "Pending",
                     products: split.items.map(i => {
 
-                        const orderItem = txOrder.products.find(
-                            p =>
-                                p.productId.toString() === i.productId.toString()
+                        const orderItem = txOrder.products.find(p =>
+                            p.productId._id
+                                ? p.productId._id.toString() === i.productId.toString()
+                                : p.productId.toString() === i.productId.toString()
                         );
 
                         if (!orderItem) {
+                            console.error("❌ SNAPSHOT FAIL DEBUG", {
+                                splitProductId: i.productId.toString(),
+                                orderProducts: txOrder.products.map(p => ({
+                                    id: p.productId._id?.toString?.() || p.productId.toString()
+                                }))
+                            });
                             throw new Error("Order item missing while creating shipment snapshot");
                         }
 
@@ -581,7 +598,8 @@ export const adminConfirmOrder = async (req, res) => {
         console.log("🚚 DELHIVERY START — Shipments:", finalOrder.shipments.length);
 
         for (const shipment of finalOrder.shipments) {
-            const orderId = finalOrder.customOrderId || `JOY-${finalOrder._id.toString()}`;
+            const baseOrderId = finalOrder.customOrderId || `JOY-${finalOrder._id.toString()}`;
+            const shipmentOrderId = `${baseOrderId}-S${shipment._id.toString().slice(-4)}`;
 
             if (shipment.waybill) continue;
 
@@ -608,11 +626,45 @@ export const adminConfirmOrder = async (req, res) => {
                     };
                 });
 
+                const productDescription = shipment.products
+                    .map(p => {
+                        const product = p.productId;
+
+                        return [
+                            `Product: ${product.name || "Item"}`,
+                            `SKU: ${p.variant?.sku || "-"}`,
+                            p.variant?.shadeName ? `Shade: ${p.variant.shadeName}` : null,
+                            `Qty: ${p.quantity}`,
+                            `Price: ₹${p.variant?.displayPrice || p.price}`,
+                        ]
+                            .filter(Boolean)
+                            .join("\n");
+                    })
+                    .join("\n\n"); // blank line between products
+
+                const shipmentTotal = shipment.products.reduce((sum, p) => {
+                    const unitPrice =
+                        p.variant?.displayPrice ??
+                        p.variant?.discountedPrice ??
+                        p.price;
+
+                    return sum + unitPrice * p.quantity;
+                }, 0);
+
+                shipment.shipment_value = shipmentTotal;
+
+                shipment.cod_amount =
+                    finalOrder.paymentMethod === "COD"
+                        ? shipmentTotal
+                        : 0;
+
+                await finalOrder.save(); // 🔒 SNAPSHOT FREEZE
+
                 const payload = {
                     order: {
-                        order_id: orderId,
+                        order_id: shipmentOrderId,
                         payment_mode: finalOrder.paymentMethod === "COD" ? "COD" : "Prepaid",
-                        total_amount: finalOrder.amount
+                        total_amount: shipment.shipment_value
                     },
                     pickup: JSON.parse(process.env.WAREHOUSE_JSON),
                     shipping_address: {
@@ -626,10 +678,15 @@ export const adminConfirmOrder = async (req, res) => {
                     customer: {
                         email: finalOrder.user.email
                     },
-                    items
+                    items,
+                    productDescription // 🔥 ADD THIS
+
                 };
 
                 console.log("📤 DELHIVERY PAYLOAD:", JSON.stringify(payload, null, 2));
+
+
+
 
                 const delhiveryRes = await createDelhiveryShipment(payload);
 

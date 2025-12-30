@@ -541,6 +541,7 @@ const ShipmentSchema = new mongoose.Schema({
     tracking_history: [
         {
             status: String,
+            courierStatus: String,
             timestamp: Date,
             location: String,
             description: String
@@ -564,6 +565,7 @@ const orderSchema = new mongoose.Schema({
     products: [
         {
             productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product", required: true },
+            name: String,               // ✅ SNAPSHOT
             quantity: Number,
             price: Number,
             seller: { type: mongoose.Schema.Types.ObjectId, ref: "Seller" },

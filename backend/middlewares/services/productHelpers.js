@@ -574,7 +574,7 @@ export const enrichProductsUnified = async (products, promotions = [], options =
                 normalizedVariants.find(v => v.stock > 0 && v.isActive) ||
                 normalizedVariants[0] || {};
 
-            const price = displayVariant.displayPrice ?? enriched.price ?? 0;
+            const price = displayVariant.originalPrice ?? enriched.price ?? 0;
             const mrp = displayVariant.originalPrice ?? enriched.mrp ?? enriched.price ?? 0;
             const discountPercent = mrp > price ? Math.round(((mrp - price) / mrp) * 100) : 0;
             const status = displayVariant.status || (enriched.quantity > 0 ? "inStock" : "outOfStock");

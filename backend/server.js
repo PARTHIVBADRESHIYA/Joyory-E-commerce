@@ -433,16 +433,16 @@ import "./middlewares/utils/cron/scheduler.js";
 import "./middlewares/utils/cron/promotionScheduler.js";
 import "./middlewares/utils/cron/cleanUpOrders.js";
 
-import "./middlewares/utils/cron/shiprocketRetry.js";
-// import { startDelhiveryCron } from "./middlewares/services/delhiveryTrackingService.js";
+// import "./middlewares/utils/cron/shiprocketRetry.js";
+import { startDelhiveryCron } from "./middlewares/services/delhiveryTrackingService.js";
 
 
 import "./middlewares/utils/cron/autoPayout.js";
 import "./middlewares/utils/cron/returnCron.js";
 
-// // ================= START CRON JOBS =================
-// startDelhiveryCron();
-// console.log("🚀 Delhivery tracking job started...");
+// ================= START CRON JOBS =================
+startDelhiveryCron();
+console.log("🚀 Delhivery tracking job started...");
 
 // 🔹 Routes
 import authRoutes from "./routes/authRoutes.js";
