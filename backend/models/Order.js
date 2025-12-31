@@ -414,6 +414,7 @@ const ShipmentReturnSchema = new mongoose.Schema({
         type: String,
         enum: [
             "requested",
+            "approved",
             "pickup_scheduled",
             "picked_up",
             "in_transit",
@@ -473,6 +474,17 @@ const ShipmentReturnSchema = new mongoose.Schema({
         images: [String],
         status: { type: String, enum: ["pending", "passed", "failed"] }
     },
+
+    audit_trail: [
+        {
+            status: String,
+            action: String,
+            performedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Admin" },
+            performedByModel: { type: String, enum: ["Admin", "System"] },
+            timestamp: { type: Date, default: Date.now },
+            notes: String
+        }
+    ],
 
     refund: {
         amount: Number,

@@ -3,8 +3,12 @@ import mongoose from 'mongoose';
 import Discount from '../../models/Discount.js';
 import Product from '../../models/Product.js';
 import Order from '../../models/Order.js';
+import Category from '../../models/Category.js';
+import Brand from '../../models/Brand.js';
 import { getCache, setCache, clearCache } from '../../middlewares/utils/simpleCache.js';
-
+import { getRedis } from '../../middlewares/utils/redis.js';
+import { enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
+import Promotion from '../../models/Promotion.js';
 /* ------------------------- Constants ------------------------- */
 const ELIGIBLE_CACHE_TTL_MS = 30 * 1000; // 30 seconds
 
@@ -303,6 +307,7 @@ export const getEligibleDiscountsForCart = async (req, res) => {
                 payload.push({
                     code: d.code,
                     label: d.name,
+                    description: d.description,
                     type: d.type,
                     value: d.value,
                     appliesTo: d.appliesTo?.type || 'Entire Order',
@@ -388,6 +393,192 @@ export async function reserveDiscountUsage({ code, userId, cart }) {
 
     return { success: true, discount: updated, priced };
 }
+
+
+export const getDiscountProducts = async (req, res) => {
+    try {
+        const { discountId } = req.params;
+        const redis = getRedis();
+
+        if (!mongoose.isValidObjectId(discountId)) {
+            return res.status(400).json({ success: false, message: "Invalid discountId" });
+        }
+
+        const discount = await Discount.findById(discountId).lean();
+        if (!discount) {
+            return res.status(404).json({ success: false, message: "Discount not found" });
+        }
+
+        // -----------------------------------------------------
+        // ⚠ If Entire Order → return ZERO products (as required)
+        // -----------------------------------------------------
+        if (discount.appliesTo?.type === "Entire Order") {
+            return res.json({
+                success: true,
+                discountId,
+                products: [],
+                totalCount: 0,
+                totalPages: 0,
+                currentPage: 1,
+
+            });
+        }
+
+        // -----------------------------
+        // Query + Cache Key
+        // -----------------------------
+        const redisKey = `disc:v2:${discountId}:${JSON.stringify(req.query)}`;
+        const cached = await redis.get(redisKey);
+        if (cached) return res.json(JSON.parse(cached));
+
+        let {
+            page = 1,
+            limit = 12,
+            sort = "recent",
+            priceMin,
+            priceMax,
+            rating,
+            inStock,
+            ...extraFilters
+        } = req.query;
+
+        page = Number(page);
+        limit = Number(limit);
+
+        // -----------------------------
+        // Base Discount Scope
+        // -----------------------------
+        const scopeFilter = {};
+        const applies = discount.appliesTo?.type;
+
+        if (applies === "Product") {
+            scopeFilter._id = {
+                $in: (discount.appliesTo.productIds || []).map(id => new mongoose.Types.ObjectId(id))
+            };
+        }
+
+        if (applies === "Category") {
+            scopeFilter.category = { $in: discount.appliesTo.categoryIds || [] };
+        }
+
+        if (applies === "Brand") {
+            scopeFilter.brand = { $in: discount.appliesTo.brandIds || [] };
+        }
+
+        // -----------------------------
+        // Extra Filters
+        // -----------------------------
+        if (priceMin) scopeFilter.price = { ...scopeFilter.price, $gte: Number(priceMin) };
+        if (priceMax) scopeFilter.price = { ...scopeFilter.price, $lte: Number(priceMax) };
+        if (rating) scopeFilter.rating = { $gte: Number(rating) };
+        if (inStock === "true") scopeFilter.stock = { $gt: 0 };
+
+        // Variant filters
+        for (const [key, val] of Object.entries(extraFilters)) {
+            if (val) {
+                scopeFilter[`attributes.${key}`] = val;
+            }
+        }
+
+        // -----------------------------
+        // Sorting
+        // -----------------------------
+        const sortStage = {};
+        switch (sort) {
+            case "low-high":
+                sortStage.price = 1;
+                break;
+            case "high-low":
+                sortStage.price = -1;
+                break;
+            case "discount":
+                sortStage.discountPercentage = -1;
+                break;
+            case "popularity":
+                sortStage.popularity = -1;
+                break;
+            default:
+                sortStage.createdAt = -1;
+        }
+
+        // -----------------------------
+        // Fetch Products
+        // -----------------------------
+        const totalCount = await Product.countDocuments(scopeFilter);
+
+        const products = await Product.find(scopeFilter)
+            .select("name slugs price discountedPrice minPrice maxPrice brand category variants avgRating images stock shortDescription")
+            .populate("brand", "name slug")
+            .populate("category", "name slug")
+            .sort(sortStage)
+            .skip((page - 1) * limit)
+            .limit(limit)
+            .lean();
+
+        // -----------------------------------------------------
+        // 🔥 Fetch Active Promotions (use same cache as Category API)
+        // -----------------------------------------------------
+        let promotions = await redis.get("active_promotions");
+        if (!promotions) {
+            promotions = await Promotion.find({
+                status: "active",
+                startDate: { $lte: new Date() },
+                endDate: { $gte: new Date() }
+            }).lean();
+
+            await redis.set("active_promotions", JSON.stringify(promotions), "EX", 120);
+        } else {
+            promotions = JSON.parse(promotions);
+        }
+
+        // -----------------------------------------------------
+        // 🔥 Unified Enrichment (same as Category API)
+        // BUT inject forced discountOverride so discount always applies
+        // -----------------------------------------------------
+        const discountOverride = {
+            type: discount.type,
+            value: discount.value,
+            code: discount.code,
+            priority: 9999 // ensures discount supersedes promotions if needed
+        };
+
+        const enriched = await enrichProductsUnified(products, promotions, discountOverride);
+
+        // -----------------------------
+        // Sidebar
+        // -----------------------------
+
+        const priceValues = products.map(p => p.price);
+        const priceRange = {
+            min: priceValues.length ? Math.min(...priceValues) : 0,
+            max: priceValues.length ? Math.max(...priceValues) : 0
+        };
+
+        // -----------------------------
+        // Response
+        // -----------------------------
+        const response = {
+            success: true,
+            discountId,
+            products: enriched,
+            totalCount,
+            totalPages: Math.ceil(totalCount / limit),
+            currentPage: page
+        };
+
+        await redis.set(redisKey, JSON.stringify(response), "EX", 120);
+
+        return res.json(response);
+
+    } catch (err) {
+        console.error("getDiscountProducts error:", err);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to load discount products"
+        });
+    }
+};
+
 
 /* ------------------------- Exports ------------------------- */
 

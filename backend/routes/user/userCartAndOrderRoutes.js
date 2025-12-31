@@ -16,6 +16,9 @@ import {
     cancelOrder
 } from '../../controllers/user/userOrderController.js';
 
+import {getDiscountProducts} from '../../controllers/user/userDiscountController.js';
+
+
 import { protect, optionalAuth, guestSession } from '../../middlewares/authMiddleware.js';
 import { validateDiscount } from '../../middlewares/validateDiscount.js';
 
@@ -42,5 +45,7 @@ router.get("/shipment/:shipment_id", protect, getShipmentDetails);
 router.put("/shipment/cancel/:shipment_id", protect, cancelShipment);
 
 router.put("/cancel/:orderId", protect, cancelOrder);
+
+router.get("/discount/:discountId", protect, getDiscountProducts);
 
 export default router;

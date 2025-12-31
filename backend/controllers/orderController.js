@@ -10,7 +10,7 @@ import { splitOrderForPersistence } from "../middlewares/services/orderSplit.js"
 import { sendEmail } from "../middlewares/utils/emailService.js"; // ✅ assume you already have an email service
 import { allocateWarehousesForOrder } from "../middlewares/utils/warehouseAllocator.js";
 import { buildCourierTimeline } from "../controllers/user/userOrderController.js";
-import { createDelhiveryShipment } from "../middlewares/services/delhiveryService.js";
+import { createDelhiveryShipment, cancelDelhiveryShipment } from "../middlewares/services/delhiveryService.js";
 
 
 const shiprocketStatusMap = {
@@ -134,10 +134,16 @@ export function computeOrderStatus(shipments = []) {
      *  3️⃣ FINAL ORDER STATUS
      * -------------------- */
 
-    // ✅ Fully Delivered
+    // ✅ Fully Delivered (no cancellation)
     if (delivered === total && cancelled === 0) {
-        return returned > 0 ? "Returned" : "Delivered";
+        return "Delivered";
     }
+
+    // ♻️ Fully Returned (all delivered + all returned)
+    if (returned === total && delivered === total) {
+        return "Returned";
+    }
+
 
     // ❌ Fully Cancelled
     if (cancelled === total) {
@@ -750,32 +756,17 @@ export const adminConfirmOrder = async (req, res) => {
 
 
 
-
-
 export const adminCancelOrder = async (req, res) => {
     const session = await mongoose.startSession();
+
     try {
-        const orderId = req.params.id;
+        const { id: orderId } = req.params;
         const { reason } = req.body;
-        const adminId = req.user?._id;
+        const adminId = req.user._id;
 
-        const order = await Order.findById(orderId)
-            .populate("products.productId")
-            .populate("user");
-
-        if (!order)
+        const order = await Order.findById(orderId).populate("user");
+        if (!order) {
             return res.status(404).json({ success: false, message: "Order not found" });
-
-        if (order.orderStatus === "Cancelled")
-            return res.status(400).json({ success: false, message: "Order already cancelled" });
-
-        // Cannot cancel after shipped
-        const nonCancelable = ["Shipped", "Out for Delivery", "Delivered"];
-        if (nonCancelable.includes(order.orderStatus)) {
-            return res.status(400).json({
-                success: false,
-                message: `Order cannot be cancelled once ${order.orderStatus}`,
-            });
         }
 
         await session.withTransaction(async () => {
@@ -783,9 +774,48 @@ export const adminCancelOrder = async (req, res) => {
                 .session(session)
                 .populate("products.productId");
 
-            if (!txOrder) throw new Error("Order disappeared during transaction");
+            if (!txOrder) throw new Error("Order missing in transaction");
 
-            // ⭐ REVERSE STOCK + SALES ONLY IF ADMIN CONFIRMED
+            /* --------------------------------
+               🔁 CANCEL ALL SHIPMENTS
+            -------------------------------- */
+            const nonCancelableShipmentStates = [
+                "Picked Up",
+                "In Transit",
+                "Out for Delivery",
+                "Delivered"
+            ];
+
+            for (const shipment of txOrder.shipments) {
+
+                // Idempotent
+                if (shipment.status === "Cancelled") continue;
+
+                // 🚫 Block if ANY shipment is already moving
+                if (nonCancelableShipmentStates.includes(shipment.status)) {
+                    throw new Error(
+                        `Order cannot be cancelled because shipment ${shipment.waybill} is already ${shipment.status}`
+                    );
+                }
+
+                // 🚚 Cancel at Delhivery
+                if (shipment.provider === "delhivery" && shipment.waybill) {
+                    await cancelDelhiveryShipment(shipment.waybill);
+                }
+
+                // 📦 Update shipment locally
+                shipment.status = "Cancelled";
+                shipment.tracking_history.push({
+                    status: "Cancelled",
+                    timestamp: new Date(),
+                    location: `Admin`,
+                    description: reason || "Cancelled by admin"
+                });
+            }
+
+            /* --------------------------------
+               🔁 STOCK ROLLBACK
+            -------------------------------- */
             if (txOrder.adminConfirmed) {
                 for (const item of txOrder.products) {
                     const product = await Product.findById(item.productId._id).session(session);
@@ -793,81 +823,25 @@ export const adminCancelOrder = async (req, res) => {
 
                     const qty = Number(item.quantity || 0);
 
-                    if (item.variant?.sku) {
-                        const variantIndex = product.variants.findIndex(v => v.sku === item.variant.sku);
-                        if (variantIndex !== -1) {
-                            const variant = product.variants[variantIndex];
+                    const variant = item.variant?.sku
+                        ? product.variants.find(v => v.sku === item.variant.sku)
+                        : null;
 
-                            // Restore stock
-                            variant.stock += qty;
-
-                            // Decrease sales count
-                            variant.sales = Math.max(0, (variant.sales || 0) - qty);
-                        }
-                    } else {
-                        product.quantity += qty;
+                    if (variant) {
+                        variant.stock += qty;
+                        variant.sales = Math.max(0, (variant.sales || 0) - qty);
                     }
 
-                    // Product-wide sales rollback
                     product.sales = Math.max(0, (product.sales || 0) - qty);
-
-                    // Update product.quantity (if variants exist)
-                    if (product.variants?.length > 0) {
-                        product.quantity = product.variants.reduce((s, v) => s + (v.stock || 0), 0);
-                    }
-
-                    // Update status
-                    if (product.quantity <= 0) product.status = "Out of stock";
-                    else if (product.thresholdValue != null && product.quantity < product.thresholdValue)
-                        product.status = "Low stock";
-                    else product.status = "In-stock";
+                    product.quantity = product.variants.reduce((s, v) => s + v.stock, 0);
 
                     await product.save({ session });
                 }
             }
 
-            if (Array.isArray(txOrder.shipments)) {
-                for (const sh of txOrder.shipments) {
-
-                    // Use proper ID
-                    const srShipmentId = sh.shipment_id;
-                    const srOrderId = sh.shiprocket_order_id;
-
-                    try {
-                        if (srShipmentId) {
-                            await cancelShiprocketShipment(srShipmentId); // Shipment cancel API
-                        } else if (srOrderId) {
-                            await cancelShiprocketOrder(srOrderId); // Order cancel API
-                        }
-                    } catch (ex) {
-                        console.error("Shiprocket cancel failed:", ex?.response?.data || ex.message);
-                    }
-
-                    // Update local
-                    sh.status = "Cancelled";
-                    sh.tracking_history = sh.tracking_history || [];
-
-                    sh.tracking_history.push({
-                        status: "Cancelled",
-                        timestamp: new Date(),
-                        location: `Admin:${adminId}`
-                    });
-
-                }
-            }
-            else if (txOrder.shipment?.shiprocket_order_id) {
-                // fallback to legacy single shipment field
-                try {
-                    await cancelShiprocketShipment(txOrder.shipment.shiprocket_order_id);
-                } catch (err) {
-                    console.error("Shiprocket cancel failed:", err.response?.data || err.message);
-                }
-            }
-
-
-            // Payment status
-            txOrder.paymentStatus = txOrder.paid ? "refund_requested" : "cancelled";
-
+            /* --------------------------------
+               📦 ORDER STATE (DERIVED)
+            -------------------------------- */
             txOrder.cancellation = {
                 cancelledBy: adminId,
                 reason: reason || "Cancelled by admin",
@@ -875,118 +849,179 @@ export const adminCancelOrder = async (req, res) => {
                 allowed: true
             };
 
-            txOrder.orderStatus = "Cancelled";
-
-            txOrder.tracking_history = txOrder.tracking_history || [];
-
-            txOrder.tracking_history.push({
-                status: "Cancelled",
-                timestamp: new Date(),
-                location: `Admin:${adminId}`
-            });
+            txOrder.orderStatus = computeOrderStatus(txOrder.shipments);
 
             await txOrder.save({ session });
         });
 
-        // Email notify
-        try {
-            await sendEmail(
-                order.user.email,
-                "Order Cancelled",
-                `<p>Hi ${order.user.name},</p>
-                 <p>Your order #${order.orderId || order._id} has been cancelled by admin.</p>
-                 <p>Reason: ${reason || "Cancelled by admin"}</p>`
-            );
-        } catch (emailErr) {
-            console.warn("Email sending failed:", emailErr);
-        }
+        // 📧 Email (non-blocking)
+        sendEmail(
+            order.user.email,
+            "Order Cancelled",
+            `<p>Your order has been cancelled.</p>
+             <p>Reason: ${reason || "Cancelled by admin"}</p>`
+        ).catch(console.warn);
 
-        return res.status(200).json({
+        return res.json({
             success: true,
-            message: order.paid
-                ? "Order cancelled. Refund has been requested."
-                : "Order cancelled successfully.",
-            order
+            message: "Order cancelled successfully"
         });
 
     } catch (err) {
-        console.error("adminCancelOrder:", err);
-        res.status(500).json({ success: false, message: "Admin cancel failed" });
+        console.error("ADMIN CANCEL ERROR:", err);
+        return res.status(400).json({
+            success: false,
+            message: err.message
+        });
     } finally {
         await session.endSession();
     }
 };
 
 
-// export const getAllOrders = async (req, res) => {
+// export const adminCancelOrder = async (req, res) => {
+//     const session = await mongoose.startSession();
+
 //     try {
-//         const { status, orderType, fromDate, toDate, paid, refundStatus } = req.query;
-//         const query = { isDraft: false };
+//         const { id: orderId } = req.params;
+//         const { reason } = req.body;
+//         const adminId = req.user._id;
 
-//         if (status && status !== "all") {
-//             query.status = status;
+//         const order = await Order.findById(orderId).populate("user");
+//         if (!order) {
+//             return res.status(404).json({ success: false, message: "Order not found" });
 //         }
 
-//         if (orderType && orderType !== "all") {
-//             query.orderType = orderType;
+//         const nonCancelableShipmentStates = [
+//             "Picked Up",
+//             "In Transit",
+//             "Out for Delivery",
+//             "Delivered"
+//         ];
+
+//         if (nonCancelableShipmentStates.includes(shipment.status)) {
+//             throw new Error(`Shipment ${shipment.waybill} already in transit`);
 //         }
 
-//         // NEW REFUND FILTER
-//         if (refundStatus && refundStatus !== "all") {
-//             query["refund.status"] = refundStatus;
-//         }
 
-//         if (paid === "true") {
-//             query.$or = [
-//                 { paid: true },
-//                 { paymentStatus: /paid/i },
-//                 { paymentStatus: "success" }
+//         await session.withTransaction(async () => {
+//             const txOrder = await Order.findById(orderId)
+//                 .session(session)
+//                 .populate("products.productId");
+
+//             if (!txOrder) throw new Error("Order missing in transaction");
+
+
+//             // ❌ Already picked / shipped → block
+//             const nonCancelableShipmentStates = [
+//                 "Picked Up",
+//                 "In Transit",
+//                 "Out for Delivery",
+//                 "Delivered"
 //             ];
-//         } else if (paid === "false") {
-//             query.$or = [
-//                 { paid: false },
-//                 { paymentStatus: /pending|failed|cancelled/i }
-//             ];
-//         }
+//             /* --------------------------------
+//                🔁 CANCEL SHIPMENTS (DELHIVERY)
+//             -------------------------------- */
+//             for (const shipment of txOrder.shipments) {
 
-//         if (fromDate && toDate) {
-//             query.date = {
-//                 $gte: new Date(fromDate),
-//                 $lte: new Date(toDate)
+//                 // Idempotent guard
+//                 if (shipment.status === "Cancelled") continue;
+
+
+
+//                 if (nonCancelableShipmentStates.includes(shipment.status)) {
+//                     throw new Error(`Shipment ${shipment.waybill} already in transit`);
+//                 }
+
+//                 // 🚚 DELHIVERY CANCEL
+//                 if (shipment.provider === "delhivery" && shipment.waybill) {
+//                     await cancelDelhiveryShipment(shipment.waybill);
+//                 }
+
+//                 // 📦 UPDATE SHIPMENT LOCALLY
+//                 shipment.status = "Cancelled";
+//                 shipment.tracking_history.push({
+//                     status: "Cancelled",
+//                     timestamp: new Date(),
+//                     location: `Admin:${adminId}`
+//                 });
+//             }
+
+//             /* --------------------------------
+//                🔁 STOCK ROLLBACK (ONLY IF CONFIRMED)
+//             -------------------------------- */
+//             if (txOrder.adminConfirmed) {
+//                 for (const item of txOrder.products) {
+//                     const product = await Product.findById(item.productId._id).session(session);
+//                     if (!product) continue;
+
+//                     const qty = Number(item.quantity || 0);
+
+//                     const variant = item.variant?.sku
+//                         ? product.variants.find(v => v.sku === item.variant.sku)
+//                         : null;
+
+//                     if (variant) {
+//                         variant.stock += qty;
+//                         variant.sales = Math.max(0, (variant.sales || 0) - qty);
+//                     }
+
+//                     product.sales = Math.max(0, (product.sales || 0) - qty);
+//                     product.quantity = product.variants.reduce((s, v) => s + v.stock, 0);
+
+//                     await product.save({ session });
+//                 }
+//             }
+
+//             /* --------------------------------
+//                📦 ORDER STATE
+//             -------------------------------- */
+//             txOrder.cancellation = {
+//                 cancelledBy: adminId,
+//                 reason: reason || "Cancelled by admin",
+//                 requestedAt: new Date(),
+//                 allowed: true
 //             };
-//         } else if (fromDate) {
-//             query.date = { $gte: new Date(fromDate) };
-//         } else if (toDate) {
-//             query.date = { $lte: new Date(toDate) };
-//         }
 
-//         const orders = await Order.find(query)
-//             .populate('products.productId', 'name')
-//             .sort({ createdAt: -1 });
+//             txOrder.orderStatus = computeOrderStatus(txOrder.shipments);
+//             txOrder.paymentStatus = txOrder.paid ? "refund_requested" : "cancelled";
 
-//         const formatted = orders.map(order => ({
-//             _id: order._id,
-//             orderId: order.orderId,
-//             date: order.date?.toDateString() || "N/A",
-//             customerName: order.customerName || "Unknown",
-//             status: order.orderStatus,
-//             orderType: order.orderType,
-//             paid: order.paid,
-//             paymentStatus: order.paymentStatus,
-//             amount: `₹${order.amount}`,
-//             products: order.products.map(p => ({
-//                 name: p.productId?.name || 'Unknown',
-//                 quantity: p.quantity,
-//                 price: `₹${p.price}`
-//             }))
-//         }));
+//             txOrder.tracking_history.push({
+//                 status: "Order Cancelled",
+//                 timestamp: new Date(),
+//                 location: `Admin:${adminId}`
+//             });
 
-//         res.status(200).json(formatted);
-//     } catch (error) {
-//         console.error(error);
-//         res.status(500).json({ message: 'Failed to fetch orders', error });
+//             await txOrder.save({ session });
+//         });
+
+//         /* --------------------------------
+//            📧 EMAIL (NON-BLOCKING)
+//         -------------------------------- */
+//         sendEmail(
+//             order.user.email,
+//             "Order Cancelled",
+//             `<p>Your order has been cancelled.</p>
+//              <p>Reason: ${reason || "Cancelled by admin"}</p>`
+//         ).catch(console.warn);
+
+//         return res.json({
+//             success: true,
+//             message: "Order cancelled successfully",
+//         });
+
+//     } catch (err) {
+//         console.error("ADMIN CANCEL ERROR:", err);
+//         return res.status(500).json({
+//             success: false,
+//             message: err.message || "Cancellation failed"
+//         });
+//     } finally {
+//         await session.endSession();
 //     }
 // };
+
+
 
 export const getAllOrders = async (req, res) => {
     try {

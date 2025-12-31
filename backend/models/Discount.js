@@ -6,6 +6,7 @@ const discountSchema = new mongoose.Schema({
         type: String, required: true, trim: true,
         unique: true
     },
+    description: { type: String, required: true },
     type: { type: String, enum: ['Flat', 'Percentage'], required: true },
     value: { type: Number, required: true },
     status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' }, // ✅ Add this
@@ -14,7 +15,7 @@ const discountSchema = new mongoose.Schema({
     appliesTo: {
         type: {
             type: String,
-            enum: ['Entire Order', 'Product', 'Category', 'Brand'], 
+            enum: ['Entire Order', 'Product', 'Category', 'Brand'],
             required: true,
         },
         productIds: [mongoose.Schema.Types.ObjectId],

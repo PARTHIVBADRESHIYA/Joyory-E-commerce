@@ -7,7 +7,7 @@ import User from '../models/User.js';
 export const createDiscount = async (req, res) => {
     try {
         const {
-            name, code, status, type, value,
+            name, code, description,status, type, value,
             eligibility, startDate, endDate,
             totalLimit, perCustomerLimit,
             appliesTo, productIds, collectionIds, minimumOrderAmount
@@ -18,6 +18,7 @@ export const createDiscount = async (req, res) => {
         const discount = new Discount({
             name,
             code: discountCode,
+            description,
             status,
             type,
             value,

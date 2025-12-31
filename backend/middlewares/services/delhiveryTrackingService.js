@@ -1,7 +1,14 @@
+
+
+
+
+
+
+
 // import axios from "axios";
 // import Order from "../../models/Order.js";
 // import cron from "node-cron";
-
+// import {computeOrderStatus} from "../../controllers/orderController.js";
 // const DELHIVERY_TRACK_URL =
 //     "https://track.delhivery.com/api/v1/packages/json/";
 // const DELHIVERY_API_KEY = process.env.DELHIVERY_API_KEY;
@@ -14,10 +21,11 @@
 //     "In Transit": 5,
 //     "Out for Delivery": 6,
 //     "Delivered": 7,
-//     "Cancelled": 8,
-//     "RTO Initiated": 9,
-//     "RTO Delivered": 10
+//     "RTO Initiated": 8,
+//     "RTO Delivered": 9,
+//     "Cancelled": 99   // 🔒 terminal
 // };
+
 
 // const mapDelhiveryStatus = (status = "") => {
 //     const s = status.toLowerCase();
@@ -159,7 +167,8 @@
 //         /* ✅ Resolve order status */
 //         if (orderDirty) {
 //             order.orderStatus =
-//                 resolveOrderStatusFromShipments(order.shipments);
+//                 computeOrderStatus(order.shipments);
+
 
 //             await order.save();
 //         }
@@ -176,9 +185,9 @@
 
 
 
-// /* ---------------------------
-//    🔹 CRON (1 mins)
-// ---------------------------- */
+// // /* ---------------------------
+// //    🔹 CRON (1 mins)
+// // ---------------------------- */
 // // export const startDelhiveryCron = () => {
 // //     cron.schedule("* * * * *", async () => {
 // //         console.log("🔄 Delhivery tracking sync running");
@@ -202,11 +211,7 @@
 
 
 
-
-
-
-
-//the above aprt is completed for forward order,. now for canncel order do bottom part ,. changes ,...
+//the above aprt is completed for forward order,. now for retun  order do bottom part ,. changes ,...
 
 
 
@@ -221,7 +226,7 @@
 import axios from "axios";
 import Order from "../../models/Order.js";
 import cron from "node-cron";
-
+import { computeOrderStatus } from "../../controllers/orderController.js";
 const DELHIVERY_TRACK_URL =
     "https://track.delhivery.com/api/v1/packages/json/";
 const DELHIVERY_API_KEY = process.env.DELHIVERY_API_KEY;
@@ -234,9 +239,20 @@ const SHIPMENT_STATUS_RANK = {
     "In Transit": 5,
     "Out for Delivery": 6,
     "Delivered": 7,
-    "Cancelled": 8,
-    "RTO Initiated": 9,
-    "RTO Delivered": 10
+    "RTO Initiated": 8,
+    "RTO Delivered": 9,
+    "Cancelled": 99   // 🔒 terminal
+};
+
+const RETURN_STATUS_RANK = {
+    requested: 1,
+    pickup_scheduled: 2,
+    picked_up: 3,
+    in_transit: 4,
+    delivered_to_warehouse: 5,
+    qc_passed: 6,
+    qc_failed: 6,
+    cancelled: 99
 };
 
 const mapDelhiveryStatus = (status = "") => {
@@ -253,6 +269,23 @@ const mapDelhiveryStatus = (status = "") => {
         return "In Transit";
 
     return "In Transit";
+};
+
+const mapDelhiveryReturnStatus = (status = "") => {
+    const s = status.toLowerCase();
+
+    if (s.includes("cancel")) return "cancelled";
+    if (s.includes("qc pass")) return "qc_passed";
+    if (s.includes("qc fail")) return "qc_failed";
+    if (s.includes("delivered") || s.includes("hub"))
+        return "delivered_to_warehouse";
+    if (s.includes("picked")) return "picked_up";
+    if (s.includes("manifest") || s.includes("pickup"))
+        return "pickup_scheduled";
+    if (s.includes("transit") || s.includes("dispatched"))
+        return "in_transit";
+
+    return "in_transit";
 };
 
 
@@ -376,32 +409,94 @@ export const syncDelhiveryShipments = async () => {
             }
         }
 
+        for (const shipment of order.shipments) {
+
+            if (!Array.isArray(shipment.returns)) continue;
+
+            for (const ret of shipment.returns) {
+
+                if (
+                    ret.provider !== "delhivery" ||
+                    !ret.waybill ||
+                    ["qc_passed", "qc_failed", "cancelled"].includes(ret.status)
+                ) continue;
+
+                try {
+                    const data = await trackDelhiveryWaybill(ret.waybill);
+                    if (!data) continue;
+
+                    const scans = data.Scans || [];
+
+                    for (const scan of scans) {
+                        const scanDetail = scan?.ScanDetail;
+                        if (!scanDetail) continue;
+
+                        const rawStatus = scanDetail.Scan;
+                        const statusTime = scanDetail.ScanDateTime;
+                        const mappedStatus = mapDelhiveryReturnStatus(rawStatus);
+
+                        // ⛔ prevent duplicates
+                        if (
+                            ret.tracking_history.some(h =>
+                                h.status === mappedStatus &&
+                                new Date(h.timestamp).getTime() === new Date(statusTime).getTime()
+                            )
+                        ) continue;
+
+                        ret.tracking_history.push({
+                            status: mappedStatus,
+                            timestamp: new Date(statusTime),
+                            location: scanDetail.ScannedLocation || "Delhivery",
+                            description: scanDetail.Instructions || ""
+                        });
+
+                        // ⛔ prevent regression
+                        if (
+                            RETURN_STATUS_RANK[mappedStatus] >
+                            RETURN_STATUS_RANK[ret.status]
+                        ) {
+                            ret.status = mappedStatus;
+                        }
+
+                        orderDirty = true;
+                    }
+
+                } catch (err) {
+                    console.error(
+                        `❌ Delhivery RETURN tracking failed (${ret.waybill}):`,
+                        err.message
+                    );
+                }
+            }
+        }
+
         /* ✅ Resolve order status */
         if (orderDirty) {
             order.orderStatus =
-                resolveOrderStatusFromShipments(order.shipments);
+                computeOrderStatus(order.shipments);
+
 
             await order.save();
         }
     }
 };
 
-// export const startDelhiveryCron = () => {
-//     cron.schedule("*/5 * * * *", async () => {
-//         console.log("🔄 Delhivery tracking sync running every 5 minutes");
-//         await syncDelhiveryShipments();
-//     });
-// };
-
-
-
-
-/* ---------------------------
-   🔹 CRON (1 mins)
----------------------------- */
 export const startDelhiveryCron = () => {
-    cron.schedule("* * * * *", async () => {
-        console.log("🔄 Delhivery tracking sync running");
+    cron.schedule("*/5 * * * *", async () => {
+        console.log("🔄 Delhivery tracking sync running every 5 minutes");
         await syncDelhiveryShipments();
     });
 };
+
+
+
+
+// /* ---------------------------
+//    🔹 CRON (1 mins)
+// ---------------------------- */
+// export const startDelhiveryCron = () => {
+//     cron.schedule("* * * * *", async () => {
+//         console.log("🔄 Delhivery tracking sync running");
+//         await syncDelhiveryShipments();
+//     });
+// };

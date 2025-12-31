@@ -428,7 +428,6 @@ import MongoStore from "connect-mongo";
 import { Server } from "socket.io";
 import bodyParser from "body-parser";
 import connectDB from "./config/db.js";
-import cron from "node-cron";
 import "./middlewares/utils/cron/scheduler.js";
 import "./middlewares/utils/cron/promotionScheduler.js";
 import "./middlewares/utils/cron/cleanUpOrders.js";
@@ -438,7 +437,6 @@ import { startDelhiveryCron } from "./middlewares/services/delhiveryTrackingServ
 
 
 import "./middlewares/utils/cron/autoPayout.js";
-import "./middlewares/utils/cron/returnCron.js";
 
 // ================= START CRON JOBS =================
 startDelhiveryCron();
@@ -489,7 +487,7 @@ import virtualTryOnRoutes from "./routes/virtualTryOnRoutes.js";
 import permissionsRoutes from "./routes/permissionsRoutes.js";
 import adminProfileRoutes from "./routes/adminProfileRoutes.js";
 import affiliateRoutes from "./routes/affiliateRoutes.js";
-// import returnRoutes from "./routes/returnRoutes.js";
+import returnRoutes from "./routes/returnRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
 import securityRoutes from "./routes/settings/admin/securityRoutes.js";
 // User side
@@ -685,7 +683,7 @@ app.use("/api/vto", virtualTryOnRoutes);
 app.use("/api/permissions", permissionsRoutes);
 app.use("/api/admin/profile", adminProfileRoutes);
 app.use("/api/affiliate", affiliateRoutes);
-// app.use("/api/returns", returnRoutes);
+app.use("/api/returns", returnRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use('/api/security', securityRoutes);
 

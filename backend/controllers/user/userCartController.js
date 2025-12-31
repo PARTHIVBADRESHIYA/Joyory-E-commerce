@@ -1187,6 +1187,7 @@ export const getCartSummary = async (req, res) => {
                 return {
                   code: d.code,
                   label: d.name,
+                  description: d.description,
                   type: d.type,
                   value: d.value,
                   status: "Applicable",
@@ -1196,6 +1197,7 @@ export const getCartSummary = async (req, res) => {
                 return {
                   code: d.code,
                   label: d.name,
+                  description: d.description,
                   type: d.type,
                   value: d.value,
                   status: "Not applicable",

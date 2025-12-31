@@ -106,35 +106,182 @@ export const createDelhiveryShipment = async ({
 
 
 export const cancelDelhiveryShipment = async (waybill) => {
-    if (!waybill) throw new Error("Missing AWB for delhivery cancel.");
+    if (!waybill) throw new Error("Waybill required for Delhivery cancel");
 
-    try {
-        const response = await axios.post(
-            "https://track.delhivery.com/api/p/edit",
+    const payload = {
+        waybill,
+        cancellation: "true"
+    };
+
+    const res = await axios.post(
+        `${DELHIVERY_BASE_URL}/api/p/edit`,
+        qs.stringify(payload),
+        {
+            headers: {
+                Authorization: `Token ${DELHIVERY_API_KEY}`,
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
+        }
+    );
+
+    const data = res.data;
+
+    // ✅ SUCCESS CASES
+    if (
+        data?.status === true ||                      // boolean success
+        data?.status === "success" ||                 // string success
+        data?.remark?.toLowerCase().includes("cancelled")
+    ) {
+        return true;
+    }
+
+    // ❌ REAL FAILURE
+    throw new Error(`Delhivery cancel failed: ${JSON.stringify(data)}`);
+
+
+};
+
+export const createDelhiveryReturnShipment = async ({
+    order,
+    returnItems,
+    pickupAddress,
+    warehouseAddress
+}) => {
+
+    // 🔐 BETTER VALIDATION - Handle different address field names
+    let customerAddress = "";
+
+    // Try multiple possible address field names
+    if (pickupAddress?.address) {
+        customerAddress = pickupAddress.address;
+    } else if (pickupAddress?.street) {
+        customerAddress = pickupAddress.street;
+    } else if (pickupAddress?.addressLine1) {
+        customerAddress = pickupAddress.addressLine1;
+    } else if (pickupAddress?.fullAddress) {
+        customerAddress = pickupAddress.fullAddress;
+    } else if (typeof pickupAddress === 'string') {
+        customerAddress = pickupAddress;
+    }
+
+    // Trim if it exists
+    customerAddress = customerAddress?.trim() || "";
+
+    if (!customerAddress) {
+        console.error("🚨 Pickup address fields available:", pickupAddress);
+        throw new Error("Pickup address is missing or empty. Available fields: " + JSON.stringify(pickupAddress));
+    }
+
+    // Also validate other required fields
+    const requiredFields = ['name', 'city', 'state', 'pincode', 'phone'];
+    const missingFields = requiredFields.filter(field => !pickupAddress?.[field]);
+
+    if (missingFields.length > 0) {
+        throw new Error(`Missing required pickup fields: ${missingFields.join(', ')}`);
+    }
+
+    const payload = {
+        shipments: [
             {
-                waybill: waybill,
-                status: "Cancelled",
-            },
+                // 👤 CUSTOMER PICKUP (MANDATORY)
+                name: pickupAddress.name || order.customerName || "Customer",
+                add: customerAddress, // ✅ Use the extracted address
+                city: (pickupAddress.city || "").trim(),
+                state: (pickupAddress.state || "").trim(),
+                pin: String(pickupAddress.pincode || ""), // 🔥 MUST BE STRING
+                phone: pickupAddress.phone || order.shippingAddress?.phone || "0000000000",
+                email: pickupAddress.email || order.user?.email || "customer@example.com",
+                country: "India",
+
+                order: `RET-${order.orderId}-${Date.now()}`,
+                order_date: new Date().toISOString(),
+
+                payment_mode: "Prepaid",
+                cod_amount: 0,
+
+                // 🔥 THESE TWO ARE REQUIRED
+                shipment_value: 1,
+                total_amount: 1,
+
+                quantity: returnItems.reduce((s, i) => s + i.quantity, 0),
+                weight: 0.5,
+                shipping_mode: "Surface",
+
+                products_desc: "Customer Return",
+
+                // 🔁 REVERSE
+                is_reverse: true,
+                return_reason: "Customer Return",
+
+                // 🏬 RETURN DESTINATION (WAREHOUSE)
+                return_name: warehouseAddress.name,
+                return_add: warehouseAddress.address,
+                return_city: warehouseAddress.city.trim(),
+                return_state: warehouseAddress.state.trim(),
+                return_pin: String(warehouseAddress.pincode),
+                return_country: "India",
+                return_phone: warehouseAddress.phone,
+
+                // 🏪 SELLER (MANDATORY)
+                seller_name: process.env.STORE_NAME || "Your Store",
+                seller_address: warehouseAddress.address,
+                seller_city: warehouseAddress.city.trim(),
+                seller_state: warehouseAddress.state.trim(),
+                seller_pin: String(warehouseAddress.pincode),
+                seller_country: "India",
+                seller_phone: warehouseAddress.phone
+            }
+        ],
+
+        // 🔥 MUST MATCH DASHBOARD PICKUP LOCATION NAME EXACTLY
+        pickup_location: {
+            name: process.env.DELHIVERY_PICKUP_NAME || "Main Location"
+        }
+    };
+
+    let res;
+    try {
+        res = await axios.post(
+            `${process.env.DELHIVERY_BASE_URL}/api/cmu/create.json`,
+            qs.stringify({
+                format: "json",
+                data: JSON.stringify(payload)
+            }),
             {
                 headers: {
                     Authorization: `Token ${process.env.DELHIVERY_API_KEY}`,
-                }
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                timeout: 20000
             }
         );
-
-        if (!response.data?.success) {
-            throw new Error(`Delhivery cancel failed: ${JSON.stringify(response.data)}`);
-        }
-
-        return response.data;
     } catch (err) {
-        console.error("Delhivery Cancel Shipment Error:", err?.response?.data || err.message);
-        throw err;
+        console.error("🔴 DELHIVERY CMU ERROR");
+        if (err.response) {
+            console.error("STATUS:", err.response.status);
+            console.error("BODY:", JSON.stringify(err.response.data, null, 2));
+        } else {
+            console.error("ERROR:", err.message);
+        }
+        throw new Error("Delhivery reverse pickup creation failed");
     }
+
+    const pkg = res.data?.packages?.[0];
+
+    if (!pkg || pkg.status !== "Success" || !pkg.waybill) {
+        throw new Error(
+            `Reverse pickup rejected by Delhivery: ${JSON.stringify(pkg)}`
+        );
+    }
+
+    // ✅ WAYBILL ASSIGNED HERE
+    return {
+        provider: "delhivery",
+        waybill: pkg.waybill,
+        status: "pickup_scheduled",
+        tracking_url: `https://www.delhivery.com/track/package/${pkg.waybill}`
+    };
 };
-
-
-
 
 
 
