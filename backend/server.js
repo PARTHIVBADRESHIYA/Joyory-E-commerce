@@ -438,9 +438,7 @@ import { startDelhiveryCron } from "./middlewares/services/delhiveryTrackingServ
 
 import "./middlewares/utils/cron/autoPayout.js";
 
-// ================= START CRON JOBS =================
-startDelhiveryCron();
-console.log("🚀 Delhivery tracking job started...");
+
 
 // 🔹 Routes
 import authRoutes from "./routes/authRoutes.js";
@@ -508,9 +506,23 @@ import userAnalyticsRoutes from "./routes/user/userAnalyticsRoutes.js";
 // ================= CONNECT DB =================
 connectDB();
 
+// ================= START CRON JOBS =================
+startDelhiveryCron();
+console.log("🚀 Delhivery tracking job started...");
+
+
 const app = express();
 
 app.set("trust proxy", 1);
+
+const isProduction = process.env.NODE_ENV === "production";
+
+const sessionStore = MongoStore.create({
+    mongoUrl: process.env.MONGO_URI,
+    collectionName: "sessions",
+    ttl: 7 * 24 * 60 * 60,
+});
+
 
 // 🔹 Webhook: Razorpay requires RAW body
 // ✅ Razorpay webhook - must be before express.json()
@@ -596,31 +608,25 @@ app.use(cookieParser()); // ✅ add this
 // );
 
 // ================= SESSION =================
-app.set("trust proxy", 1);
 
-app.use((req, res, next) => {
-    const isSecureRequest =
-        req.secure || req.headers["x-forwarded-proto"] === "https";
-
+app.use(
     session({
         name: "sessionId",
         secret: process.env.SESSION_SECRET || "supersecretkey",
         resave: false,
-        saveUninitialized: true,
-        store: MongoStore.create({
-            mongoUrl: process.env.MONGO_URI,
-            collectionName: "sessions",
-            ttl: 7 * 24 * 60 * 60,
-        }),
+        saveUninitialized: true, // ✅ REQUIRED for guest carts
+        store: sessionStore,
+
         cookie: {
             httpOnly: true,
-            secure: isSecureRequest,                  // ✅ HTTPS only
-            sameSite: isSecureRequest ? "None" : "Lax",
+            secure: isProduction,                   // true only in prod
+            sameSite: isProduction ? "None" : "Lax", // iPhone-safe
             maxAge: 7 * 24 * 60 * 60 * 1000,
-            ...(isSecureRequest && { partitioned: true }),
+            ...(isProduction && { partitioned: true }), // Chrome fix
         },
-    })(req, res, next);
-});
+    })
+);
+
 
 
 
