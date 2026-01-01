@@ -570,7 +570,7 @@ app.use(
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser()); // ✅ add this
 
-//correct sesssion
+// //correct sesssion for iphone and all ,.. just problem foor guest user
 
 // // ================= SESSION =================
 // app.use(
@@ -578,44 +578,51 @@ app.use(cookieParser()); // ✅ add this
 //         name: "sessionId",
 //         secret: process.env.SESSION_SECRET || "supersecretkey",
 //         resave: false,
-//         saveUninitialized: true,   // 👈 change to false
+//         saveUninitialized: false,
 //         store: MongoStore.create({
 //             mongoUrl: process.env.MONGO_URI,
 //             collectionName: "sessions",
 //         }),
 //         cookie: {
-//             maxAge: 7 * 24 * 60 * 60 * 1000,
 //             httpOnly: true,
-//             secure: false,  // must be false for localhost
-//             sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+//             secure: true, // Must be true for SameSite=None
+//             sameSite: "None",
+//             // REMOVE the 'domain' attribute for now
+//             // domain: ".joyory.com", // ⚠️ Comment out or delete this line
+//             maxAge: 7 * 24 * 60 * 60 * 1000,
+//             partitioned: true // 🔥 Critical for Chrome's new policy [citation:1]
 //         },
 //     })
 // );
 
+// ================= SESSION =================
+app.set("trust proxy", 1);
 
-// ================= SESSION =================
-// ================= SESSION =================
-app.use(
+app.use((req, res, next) => {
+    const isSecureRequest =
+        req.secure || req.headers["x-forwarded-proto"] === "https";
+
     session({
         name: "sessionId",
         secret: process.env.SESSION_SECRET || "supersecretkey",
         resave: false,
-        saveUninitialized: false,
+        saveUninitialized: true,
         store: MongoStore.create({
             mongoUrl: process.env.MONGO_URI,
             collectionName: "sessions",
+            ttl: 7 * 24 * 60 * 60,
         }),
         cookie: {
             httpOnly: true,
-            secure: true, // Must be true for SameSite=None
-            sameSite: "None",
-            // REMOVE the 'domain' attribute for now
-            // domain: ".joyory.com", // ⚠️ Comment out or delete this line
+            secure: isSecureRequest,                  // ✅ HTTPS only
+            sameSite: isSecureRequest ? "None" : "Lax",
             maxAge: 7 * 24 * 60 * 60 * 1000,
-            partitioned: true // 🔥 Critical for Chrome's new policy [citation:1]
+            ...(isSecureRequest && { partitioned: true }),
         },
-    })
-);
+    })(req, res, next);
+});
+
+
 
 
 // ================= SOCKET.IO =================
@@ -701,7 +708,7 @@ app.use("/api/user/shadefinder", userShadeFinderRoutes);
 app.use("/api/user/giftcards", userGiftCardRoutes);
 app.use("/api/referral", referralRoutes);
 app.use("/api/user/wallet", userWalletRoutes);
-app.use ("/api/user/analytics", userAnalyticsRoutes);
+app.use("/api/user/analytics", userAnalyticsRoutes);
 
 
 // ================= HEALTH & TEST =================

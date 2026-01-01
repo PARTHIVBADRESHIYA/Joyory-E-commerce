@@ -404,14 +404,22 @@ export const getDiscountProducts = async (req, res) => {
             return res.status(400).json({ success: false, message: "Invalid discountId" });
         }
 
-        const discount = await Discount.findById(discountId).lean();
+        // -------------------------------
+        // 1️⃣ DISCOUNT CACHE (60s)
+        // -------------------------------
+        const discountCacheKey = `disc_obj:${discountId}`;
+        let discount = await redis.get(discountCacheKey);
         if (!discount) {
-            return res.status(404).json({ success: false, message: "Discount not found" });
+            discount = await Discount.findById(discountId).lean();
+            if (!discount) {
+                return res.status(404).json({ success: false, message: "Discount not found" });
+            }
+            await redis.set(discountCacheKey, JSON.stringify(discount), "EX", 60);
+        } else {
+            discount = JSON.parse(discount);
         }
 
-        // -----------------------------------------------------
-        // ⚠ If Entire Order → return ZERO products (as required)
-        // -----------------------------------------------------
+        // Entire Order → return empty
         if (discount.appliesTo?.type === "Entire Order") {
             return res.json({
                 success: true,
@@ -420,14 +428,13 @@ export const getDiscountProducts = async (req, res) => {
                 totalCount: 0,
                 totalPages: 0,
                 currentPage: 1,
-
             });
         }
 
-        // -----------------------------
-        // Query + Cache Key
-        // -----------------------------
-        const redisKey = `disc:v2:${discountId}:${JSON.stringify(req.query)}`;
+        // -------------------------------
+        // 2️⃣ QUERY + CACHE KEY
+        // -------------------------------
+        const redisKey = `disc:v3:${discountId}:${JSON.stringify(req.query)}`;
         const cached = await redis.get(redisKey);
         if (cached) return res.json(JSON.parse(cached));
 
@@ -445,67 +452,75 @@ export const getDiscountProducts = async (req, res) => {
         page = Number(page);
         limit = Number(limit);
 
-        // -----------------------------
-        // Base Discount Scope
-        // -----------------------------
-        const scopeFilter = {};
-        const applies = discount.appliesTo?.type;
+        // -------------------------------
+        // 3️⃣ PRECOMPUTED SCOPE (on discount)
+        // -------------------------------
+        // Cache this expensive block for 5 minutes
+        const scopeCacheKey = `disc_scope:${discountId}`;
+        let scopeFilter = await redis.get(scopeCacheKey);
 
-        if (applies === "Product") {
-            scopeFilter._id = {
-                $in: (discount.appliesTo.productIds || []).map(id => new mongoose.Types.ObjectId(id))
-            };
+        if (!scopeFilter) {
+            scopeFilter = {};
+
+            const applies = discount.appliesTo?.type;
+
+            if (applies === "Product") {
+                scopeFilter._id = {
+                    $in: (discount.appliesTo.productIds || []).map(id => new mongoose.Types.ObjectId(id))
+                };
+            }
+            if (applies === "Category") {
+                scopeFilter.category = { $in: discount.appliesTo.categoryIds || [] };
+            }
+            if (applies === "Brand") {
+                scopeFilter.brand = { $in: discount.appliesTo.brandIds || [] };
+            }
+
+            await redis.set(scopeCacheKey, JSON.stringify(scopeFilter), "EX", 300);
+        } else {
+            scopeFilter = JSON.parse(scopeFilter);
         }
 
-        if (applies === "Category") {
-            scopeFilter.category = { $in: discount.appliesTo.categoryIds || [] };
-        }
-
-        if (applies === "Brand") {
-            scopeFilter.brand = { $in: discount.appliesTo.brandIds || [] };
-        }
-
-        // -----------------------------
-        // Extra Filters
-        // -----------------------------
+        // -------------------------------
+        // 4️⃣ APPLY EXTRA FILTERS (fast)
+        // -------------------------------
         if (priceMin) scopeFilter.price = { ...scopeFilter.price, $gte: Number(priceMin) };
         if (priceMax) scopeFilter.price = { ...scopeFilter.price, $lte: Number(priceMax) };
         if (rating) scopeFilter.rating = { $gte: Number(rating) };
         if (inStock === "true") scopeFilter.stock = { $gt: 0 };
 
-        // Variant filters
-        for (const [key, val] of Object.entries(extraFilters)) {
-            if (val) {
-                scopeFilter[`attributes.${key}`] = val;
-            }
+        for (const [k, v] of Object.entries(extraFilters)) {
+            if (v) scopeFilter[`attributes.${k}`] = v;
         }
 
-        // -----------------------------
-        // Sorting
-        // -----------------------------
-        const sortStage = {};
-        switch (sort) {
-            case "low-high":
-                sortStage.price = 1;
-                break;
-            case "high-low":
-                sortStage.price = -1;
-                break;
-            case "discount":
-                sortStage.discountPercentage = -1;
-                break;
-            case "popularity":
-                sortStage.popularity = -1;
-                break;
-            default:
-                sortStage.createdAt = -1;
+        // -------------------------------
+        // 5️⃣ SORTING (very lightweight)
+        // -------------------------------
+        const sortStage = {
+            "low-high": { price: 1 },
+            "high-low": { price: -1 },
+            "discount": { discountPercentage: -1 },
+            "popularity": { popularity: -1 },
+            "recent": { createdAt: -1 }
+        }[sort] || { createdAt: -1 };
+
+        // -------------------------------------------------
+        // 6️⃣ ULTRA-FAST COUNT (use estimatedDocumentCount if no filters)
+        // -------------------------------------------------
+        let totalCount = 0;
+
+        const hasFilters = Object.keys(scopeFilter).length > 0;
+        if (hasFilters) {
+            // Normal precise count
+            totalCount = await Product.countDocuments(scopeFilter);
+        } else {
+            // Much faster O(1) count
+            totalCount = await Product.estimatedDocumentCount();
         }
 
-        // -----------------------------
-        // Fetch Products
-        // -----------------------------
-        const totalCount = await Product.countDocuments(scopeFilter);
-
+        // -------------------------------
+        // 7️⃣ GET PRODUCTS (lean + low select)
+        // -------------------------------
         const products = await Product.find(scopeFilter)
             .select("name slugs price discountedPrice minPrice maxPrice brand category variants avgRating images stock shortDescription")
             .populate("brand", "name slug")
@@ -513,17 +528,18 @@ export const getDiscountProducts = async (req, res) => {
             .sort(sortStage)
             .skip((page - 1) * limit)
             .limit(limit)
-            .lean();
+            .lean({ getters: false, virtuals: false });
 
-        // -----------------------------------------------------
-        // 🔥 Fetch Active Promotions (use same cache as Category API)
-        // -----------------------------------------------------
+        // -------------------------------
+        // 8️⃣ PROMOTION CACHE (120s)
+        // -------------------------------
         let promotions = await redis.get("active_promotions");
+
         if (!promotions) {
             promotions = await Promotion.find({
                 status: "active",
                 startDate: { $lte: new Date() },
-                endDate: { $gte: new Date() }
+                endDate: { $gte: new Date() },
             }).lean();
 
             await redis.set("active_promotions", JSON.stringify(promotions), "EX", 120);
@@ -531,32 +547,21 @@ export const getDiscountProducts = async (req, res) => {
             promotions = JSON.parse(promotions);
         }
 
-        // -----------------------------------------------------
-        // 🔥 Unified Enrichment (same as Category API)
-        // BUT inject forced discountOverride so discount always applies
-        // -----------------------------------------------------
+        // -------------------------------
+        // 9️⃣ MERGE OVERRIDE DISCOUNT
+        // -------------------------------
         const discountOverride = {
             type: discount.type,
             value: discount.value,
             code: discount.code,
-            priority: 9999 // ensures discount supersedes promotions if needed
+            priority: 9999
         };
 
         const enriched = await enrichProductsUnified(products, promotions, discountOverride);
 
-        // -----------------------------
-        // Sidebar
-        // -----------------------------
-
-        const priceValues = products.map(p => p.price);
-        const priceRange = {
-            min: priceValues.length ? Math.min(...priceValues) : 0,
-            max: priceValues.length ? Math.max(...priceValues) : 0
-        };
-
-        // -----------------------------
-        // Response
-        // -----------------------------
+        // -------------------------------
+        // 🔟 RESPONSE BUILD
+        // -------------------------------
         const response = {
             success: true,
             discountId,
@@ -567,7 +572,6 @@ export const getDiscountProducts = async (req, res) => {
         };
 
         await redis.set(redisKey, JSON.stringify(response), "EX", 120);
-
         return res.json(response);
 
     } catch (err) {

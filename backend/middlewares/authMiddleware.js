@@ -435,26 +435,13 @@ export const optionalAuth = async (req, res, next) => {
 };
 
 export const guestSession = (req, res, next) => {
-    try {
-        if (req.user?._id) return next(); // logged-in user
+    if (req.user?._id) return next();
 
-        if (!req.session.guestId) {
-            req.session.guestId = new mongoose.Types.ObjectId().toString();
-        }
-
-        req.guestId = req.session.guestId;
-        res.setHeader("x-guest-id", req.guestId);
-
-        if (!Array.isArray(req.session.guestCart)) {
-            req.session.guestCart = [];
-        }
-
-        req.guestCart = req.session.guestCart;
-        next();
-    } catch (err) {
-        console.error("guestSession middleware error:", err);
-        next();
+    if (!Array.isArray(req.session.guestCart)) {
+        req.session.guestCart = [];
     }
+
+    next();
 };
 
 export const protect = authenticateUser;

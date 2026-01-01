@@ -24,12 +24,12 @@ import { validateDiscount } from '../../middlewares/validateDiscount.js';
 
 const router = express.Router();
 
-// 🛒 Cart Routes
-router.get('/', optionalAuth, guestSession, getCart);
-router.post('/add', optionalAuth, guestSession, addToCart);
-router.put('/update', optionalAuth, guestSession, updateCartItem);
-router.get('/summary', optionalAuth, guestSession, validateDiscount, getCartSummary);
-router.delete('/remove/:productId', optionalAuth, guestSession, removeFromCart);
+                                                                                                                                                                        // 🛒 Cart Routes
+                                                                                                                                                                        router.get('/', optionalAuth, guestSession, getCart);
+                                                                                                                                                                        router.post('/add', optionalAuth, guestSession, addToCart);
+                                                                                                                                                                        router.put('/update', optionalAuth, guestSession, updateCartItem);
+                                                                                                                                                                        router.get('/summary', optionalAuth, guestSession, validateDiscount, getCartSummary);
+                                                                                                                                                                        router.delete('/remove/:productId', optionalAuth, guestSession, removeFromCart);
 
 // 📦 Order from Cart Route
 // NEW - Initiate Order from Cart
