@@ -458,8 +458,41 @@ export const syncDelhiveryShipments = async () => {
                             ret.status = mappedStatus;
                         }
 
+
+                        /* -------------------------------
+                                   🔥 AUTO-TRIGGER REFUND WHEN QC PASSED
+                                -------------------------------- */
+                        if (
+                            ret.status === "qc_passed" &&
+                            !ret.refund?.gatewayRefundId &&
+                            !["initiated", "processing", "completed"].includes(ret.refund?.status)
+                        ) {
+                            console.log(`🚀 Auto refund triggered for Order ${order._id}, Return ${ret._id}`);
+
+                            const paymentId = order.transactionId;
+                            const isTestPayment =
+                                paymentId?.startsWith("pay_TEST") ||
+                                paymentId?.toLowerCase().includes("test");
+
+                            if (isTestPayment) {
+                                console.log("⚠️ Skipping real refund — Test mode payment");
+                            } else {
+                                await addRefundJob(order._id, ret._id);
+                            }
+
+                            ret.refund = {
+                                status: isTestPayment ? "test_mode" : "initiated",
+                                amount: 0,
+                                gatewayRefundId: null,
+                                refundedAt: null
+                            };
+
+                            orderDirty = true;
+                        }
+
                         orderDirty = true;
                     }
+
 
                 } catch (err) {
                     console.error(

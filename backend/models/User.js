@@ -91,10 +91,31 @@ const userSchema = new mongoose.Schema({
     ,
     savedRecommendations: [{ type: mongoose.Schema.Types.ObjectId, ref: "Product" }],
     lastRecommendationUpdate: { type: Date },
+    // wishlist: [
+    //     {
+    //         productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
+    //         name: { type: String }
+    //     }
+    // ],
     wishlist: [
         {
-            productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
-            name: { type: String }
+            productId: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "Product",
+                required: true
+            },
+            sku: {
+                type: String,
+                required: true
+            },
+            name: String,
+            shadeName: String,
+            hex: String,
+            image: String,
+            addedAt: {
+                type: Date,
+                default: Date.now
+            }
         }
     ],
 

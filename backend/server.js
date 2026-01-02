@@ -418,7 +418,7 @@
 
 
 import "./config/env.js";
-
+import mongoose from "mongoose";
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
@@ -434,11 +434,7 @@ import "./middlewares/utils/cron/cleanUpOrders.js";
 
 // import "./middlewares/utils/cron/shiprocketRetry.js";
 import { startDelhiveryCron } from "./middlewares/services/delhiveryTrackingService.js";
-
-
 import "./middlewares/utils/cron/autoPayout.js";
-
-
 
 // 🔹 Routes
 import authRoutes from "./routes/authRoutes.js";
@@ -518,10 +514,11 @@ app.set("trust proxy", 1);
 const isProduction = process.env.NODE_ENV === "production";
 
 const sessionStore = MongoStore.create({
-    mongoUrl: process.env.MONGO_URI,
+    client: mongoose.connection.getClient(),
     collectionName: "sessions",
     ttl: 7 * 24 * 60 * 60,
 });
+
 
 
 // 🔹 Webhook: Razorpay requires RAW body

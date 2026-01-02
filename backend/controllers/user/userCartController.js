@@ -14,8 +14,6 @@ import { getRedis } from "../../middlewares/utils/redis.js";
 import crypto from "crypto";
 import UserActivity from "../../models/UserActivity.js";
 
-
-
 async function invalidateCartCache(userId, sessionId) {
   const redis = getRedis();
 
@@ -137,8 +135,8 @@ export const addToCart = async (req, res) => {
 
     try {
       if (req.user?._id) {
-        // ========== LOGGED-IN USER ==========
-        const user = await User.findById(req.user._id);
+        // Logged-in user flow
+        const user = await User.findById(req.user._id); await user.save();
 
         cart = await handleCart(user.cart, product, variants, qty);
         user.cart = cart;
@@ -167,35 +165,22 @@ export const addToCart = async (req, res) => {
             }
           ]
         );
-
-        console.log("✅ Logged-in user cart updated:", cart.length, "items");
-
       } else {
-        // ========== GUEST USER ==========
-        // Initialize guest cart if it doesn't exist
-        if (!req.session.guestCart || !Array.isArray(req.session.guestCart)) {
-          req.session.guestCart = [];
-        }
-
+        // Guest flow
         cart = await handleCart(req.session.guestCart, product, variants, qty);
         req.session.guestCart = cart;
-
-        // Save session properly
         await new Promise((resolve, reject) => {
           req.session.save(err => (err ? reject(err) : resolve()));
         });
-
-        console.log("✅ Guest cart after adding:", req.session.guestCart);
-        console.log("✅ Guest session ID:", req.sessionID);
       }
     } catch (validationErr) {
+      // 🧠 Known validation issue (like stock or variant error)
       return res.status(400).json({
         success: false,
         message: validationErr.message,
       });
     }
 
-    // Invalidate cache
     await invalidateCartCache(req.user?._id, req.sessionID);
 
     res.status(200).json({
@@ -211,6 +196,7 @@ export const addToCart = async (req, res) => {
     });
   }
 };
+
 // Helper to add/update cart items
 async function handleCart(cart, product, variants, qty) {
   if (!Array.isArray(cart)) cart = [];
@@ -307,177 +293,6 @@ async function handleCart(cart, product, variants, qty) {
 
   return cart;
 }
-
-
-// export const addToCart = async (req, res) => {
-//   try {
-//     const { productId, variants = [], quantity: qty = 1 } = req.body;
-//     const product = await Product.findById(productId);
-//     if (!product)
-//       return res.status(404).json({ success: false, message: "Product not found." });
-
-//     let cart;
-
-//     try {
-//       if (req.user?._id) {
-//         // Logged-in user flow
-//         const user = await User.findById(req.user._id); await user.save();
-
-//         cart = await handleCart(user.cart, product, variants, qty);
-//         user.cart = cart;
-//         await user.save();
-
-//         // 🔥 Track add-to-cart activity
-//         await UserActivity.create({
-//           user: user._id,
-//           type: "add_to_cart",
-//           product: product._id
-//         });
-
-//         // 🔥 Funnel tracking: Add to Cart
-//         await User.findByIdAndUpdate(
-//           req.user._id,
-//           [
-//             {
-//               $set: {
-//                 "conversionStats.addToCartCount": {
-//                   $add: [
-//                     { $ifNull: ["$conversionStats.addToCartCount", 0] },
-//                     1
-//                   ]
-//                 }
-//               }
-//             }
-//           ]
-//         );
-//       } else {
-//         // Guest flow
-//         cart = await handleCart(req.session.guestCart, product, variants, qty);
-//         req.session.guestCart = cart;
-//         await new Promise((resolve, reject) => {
-//           req.session.save(err => (err ? reject(err) : resolve()));
-//         });
-//       }
-//     } catch (validationErr) {
-//       // 🧠 Known validation issue (like stock or variant error)
-//       return res.status(400).json({
-//         success: false,
-//         message: validationErr.message,
-//       });
-//     }
-
-//     await invalidateCartCache(req.user?._id, req.sessionID);
-
-//     res.status(200).json({
-//       success: true,
-//       message: "✅ Added to cart successfully!",
-//       cart,
-//     });
-//   } catch (err) {
-//     console.error("❌ addToCart server error:", err);
-//     res.status(500).json({
-//       success: false,
-//       message: "Oops! Something went wrong. Please try again later.",
-//     });
-//   }
-// };
-
-// // Helper to add/update cart items
-// async function handleCart(cart, product, variants, qty) {
-//   if (!Array.isArray(cart)) cart = [];
-
-//   // 🧩 CASE 1 — Non-variant product
-//   if (variants.length === 0) {
-//     const stock = Number(product.quantity ?? 0);
-
-//     if (stock <= 0) {
-//       throw new Error("This product is currently out of stock.");
-//     }
-
-//     if (qty > stock) {
-//       throw new Error(`Only ${stock} item(s) available in stock.`);
-//     }
-
-//     const existing = cart.find(
-//       item => item.product.toString() === product._id.toString() && !item.selectedVariant
-//     );
-
-//     if (existing) {
-//       if (existing.quantity + qty > stock) {
-//         const canAdd = Math.max(0, stock - existing.quantity);
-//         throw new Error(
-//           `You can only add ${canAdd} more item${canAdd !== 1 ? "s" : ""} for this product.`
-//         );
-//       }
-//       existing.quantity += qty;
-//     } else {
-//       cart.push({ product: product._id, quantity: qty, selectedVariant: null });
-//     }
-
-//     return cart;
-//   }
-
-//   // 🧩 CASE 2 — Variant product
-//   for (const { variantSku, quantity } of variants) {
-//     if (!quantity || quantity <= 0) continue;
-
-//     const variant = product.variants.find(v => v.sku === variantSku);
-//     if (!variant)
-//       throw new Error(`This product variant is no longer available.`);
-
-//     const stock = Number(variant.stock ?? 0);
-
-//     if (stock <= 0) {
-//       throw new Error(`${variant.shadeName || "This variant"} is out of stock.`);
-//     }
-
-//     // 🛑 Stock check — prevent adding beyond available
-//     if (quantity > stock) {
-//       throw new Error(
-//         `Only ${stock} item(s) available for ${variant.shadeName || variantSku}.`
-//       );
-//     }
-
-//     const existing = cart.find(
-//       item =>
-//         item.product.toString() === product._id.toString() &&
-//         item.selectedVariant?.sku === variantSku
-//     );
-
-//     if (existing) {
-//       if (existing.quantity >= stock) {
-//         // already at or above stock
-//         throw new Error(
-//           `Only ${stock} item${stock !== 1 ? "s" : ""} available for ${variant.shadeName || variantSku}.`
-//         );
-//       }
-
-//       if (existing.quantity + quantity > stock) {
-//         const canAdd = Math.max(0, stock - existing.quantity);
-//         throw new Error(
-//           `You can only add ${canAdd} more item${canAdd !== 1 ? "s" : ""} for ${variant.shadeName || variantSku}.`
-//         );
-//       }
-
-//       existing.quantity += quantity;
-//     }
-//     else {
-//       const selectedVariant = {
-//         sku: variant.sku,
-//         shadeName: variant.shadeName || null,
-//         hex: variant.hex || null,
-//         images: variant.images?.length ? variant.images : product.images || [],
-//         price: variant.price ?? product.price,
-//         discountedPrice: variant.discountedPrice ?? product.discountedPrice ?? product.price,
-//         stock,
-//       };
-
-//       cart.push({ product: product._id, quantity, selectedVariant });
-//     }
-//   }
-
-//   return cart;
-// }
 
 // // // --- CACHES / TTLs ---
 // let _promoCache = { data: null, ts: 0, ttl: 5000 };   // existing (kept)
@@ -1144,11 +959,55 @@ function promoHashFromPromos(promos = []) {
   }
 }
 
-
+// ---------- MAIN optimized controller (drop-in) ----------
 export const getCartSummary = async (req, res) => {
   try {
 
     const redis = getRedis();  // 🔥 REQUIRED FIX
+
+    // -------------------- Redis snapshot cache --------------------
+    const cartKeySnapshot = (() => {
+      try {
+        const cartItemsSnapshot = (req.user && req.user._id && req.user.cart)
+          ? req.user.cart.map(i => ({
+            product: String(i.product?._id || i.product),
+            qty: i.quantity,
+            sku: i.selectedVariant?.sku || null,
+          }))
+          : (req.session?.guestCart || []).map(i => ({
+            product: String(i.product),
+            qty: i.quantity,
+            sku: i.selectedVariant?.sku || null,
+          }));
+
+        return JSON.stringify({
+          userId: req.user?._id ? String(req.user._id) : null,
+          sessionId: req.sessionID || null,
+          items: cartItemsSnapshot,
+          q: {
+            discount: req.query.discount || null,
+          },
+        });
+      } catch {
+        return null;
+      }
+    })();
+
+    const snapshotHash = crypto
+      .createHash("md5")
+      .update(cartKeySnapshot || "")
+      .digest("hex");
+
+    const redisKey = `cart:${req.user?._id || req.sessionID}:${snapshotHash}`;
+
+    // Try fast path: return cached cart snapshot
+    try {
+      const cached = await redis.get(redisKey);
+      if (cached) return res.status(200).json(JSON.parse(cached));
+    } catch (err) {
+      console.error("Redis get failed:", err);
+      // degrade gracefully
+    }
 
     // -------------------- Determine Cart Source --------------------
     let cartSource;
@@ -1178,111 +1037,18 @@ export const getCartSummary = async (req, res) => {
         }
       }
 
-    } else {
-      // GUEST USER FIX
+    } else if (req.session?.guestCart?.length) {
       isGuest = true;
-
-      // Initialize guest cart if it doesn't exist
-      if (!req.session.guestCart || !Array.isArray(req.session.guestCart)) {
-        req.session.guestCart = [];
-      }
-
       cartSource = req.session.guestCart;
-
-      // Debug logging
-      console.log("Guest session ID:", req.sessionID);
-      console.log("Guest cart from session:", req.session.guestCart);
-      console.log("Is array?", Array.isArray(req.session.guestCart));
-      console.log("Cart length:", req.session.guestCart?.length || 0);
+    } else {
+      return res.status(400).json({ message: "Cart is empty" });
     }
 
-    // Check if cart is empty
-    if (!cartSource || !Array.isArray(cartSource) || cartSource.length === 0) {
-      return res.status(200).json({
-        cart: [],
-        freebies: [],
-        priceDetails: {
-          bagMrp: 0,
-          totalSavings: 0,
-          bagDiscount: 0,
-          autoDiscount: 0,
-          couponDiscount: 0,
-          shippingCharge: 0,
-          shippingMessage: "Add items to see shipping details",
-          taxableAmount: 0,
-          gstRate: "12%",
-          gstAmount: 0,
-          gstMessage: "No GST on empty cart",
-          payable: 0,
-          promoFreeShipping: false,
-          savingsMessage: "",
-        },
-        appliedCoupon: null,
-        appliedPromotions: [],
-        applicableCoupons: [],
-        inapplicableCoupons: [],
-        grandTotal: 0,
-        isGuest,
-      });
+    if (!cartSource.length) {
+      return res.status(400).json({ message: "Cart is empty" });
     }
 
-    const validCartItems = cartSource.filter(item =>
-      item && item.product && (item.product._id || item.product)
-    );
-
-    if (validCartItems.length === 0) {
-      return res.status(200).json({
-        cart: [],
-        freebies: [],
-        priceDetails: {
-          bagMrp: 0,
-          totalSavings: 0,
-          bagDiscount: 0,
-          autoDiscount: 0,
-          couponDiscount: 0,
-          shippingCharge: 0,
-          shippingMessage: "Add items to see shipping details",
-          taxableAmount: 0,
-          gstRate: "12%",
-          gstAmount: 0,
-          gstMessage: "No GST on empty cart",
-          payable: 0,
-          promoFreeShipping: false,
-          savingsMessage: "",
-        },
-        appliedCoupon: null,
-        appliedPromotions: [],
-        applicableCoupons: [],
-        inapplicableCoupons: [],
-        grandTotal: 0,
-        isGuest,
-      });
-    }
-
-    // -------------------- Redis snapshot cache (CORRECT PLACE) --------------------
-    const cartItemsSnapshot = validCartItems.map(i => ({
-      product: String(i.product?._id || i.product),
-      qty: i.quantity,
-      sku: i.selectedVariant?.sku || null,
-    }));
-
-    const snapshotHash = crypto
-      .createHash("md5")
-      .update(JSON.stringify({
-        userId: req.user?._id ? String(req.user._id) : null,
-        sessionId: req.sessionID || null,
-        items: cartItemsSnapshot,
-        discount: req.query.discount || null,
-      }))
-      .digest("hex");
-
-    const redisKey = `cart:${req.user?._id || req.sessionID}:${snapshotHash}`;
-
-    // Fast path: snapshot hit
-    const cachedSnapshot = await redis.get(redisKey);
-    if (cachedSnapshot) {
-      return res.status(200).json(JSON.parse(cachedSnapshot));
-    }
+    const validCartItems = cartSource;
 
     // -------------------- Build itemsInput for promotions --------------------
     const itemsInput = validCartItems.map(i => ({
@@ -1721,533 +1487,3 @@ export const getCartSummary = async (req, res) => {
     });
   }
 };
-
-
-// ---------- MAIN optimized controller (drop-in) ----------
-// export const getCartSummary = async (req, res) => {
-//   try {
-
-//     const redis = getRedis();  // 🔥 REQUIRED FIX
-
-//     // -------------------- Redis snapshot cache --------------------
-//     const cartKeySnapshot = (() => {
-//       try {
-//         const cartItemsSnapshot = (req.user && req.user._id && req.user.cart)
-//           ? req.user.cart.map(i => ({
-//             product: String(i.product?._id || i.product),
-//             qty: i.quantity,
-//             sku: i.selectedVariant?.sku || null,
-//           }))
-//           : (req.session?.guestCart || []).map(i => ({
-//             product: String(i.product),
-//             qty: i.quantity,
-//             sku: i.selectedVariant?.sku || null,
-//           }));
-
-//         return JSON.stringify({
-//           userId: req.user?._id ? String(req.user._id) : null,
-//           sessionId: req.sessionID || null,
-//           items: cartItemsSnapshot,
-//           q: {
-//             discount: req.query.discount || null,
-//           },
-//         });
-//       } catch {
-//         return null;
-//       }
-//     })();
-
-//     const snapshotHash = crypto
-//       .createHash("md5")
-//       .update(cartKeySnapshot || "")
-//       .digest("hex");
-
-//     const redisKey = `cart:${req.user?._id || req.sessionID}:${snapshotHash}`;
-
-//     // Try fast path: return cached cart snapshot
-//     try {
-//       const cached = await redis.get(redisKey);
-//       if (cached) return res.status(200).json(JSON.parse(cached));
-//     } catch (err) {
-//       console.error("Redis get failed:", err);
-//       // degrade gracefully
-//     }
-
-//     // -------------------- Determine Cart Source --------------------
-//     let cartSource;
-//     let isGuest = false;
-
-//     if (req.user && req.user._id) {
-//       if (req.user && req.user._id) {
-//         const userCartKey = `usercart:${req.user._id}`;
-
-//         // Try Redis first
-//         const cachedUserCart = await redis.get(userCartKey);
-
-//         if (cachedUserCart) {
-//           cartSource = JSON.parse(cachedUserCart);
-//         } else {
-//           const user = await User.findById(req.user._id).select("cart").lean();
-//           if (!user) return res.status(404).json({ message: "User not found" });
-
-//           cartSource = (user.cart || []).filter(it => it && it.product);
-
-//           await redis.set(
-//             userCartKey,
-//             JSON.stringify(cartSource),
-//             "EX",
-//             60 // 60 sec cache
-//           );
-//         }
-//       }
-
-//     } else if (req.session?.guestCart?.length) {
-//       isGuest = true;
-//       cartSource = req.session.guestCart;
-//     } else {
-//       return res.status(400).json({ message: "Cart is empty" });
-//     }
-
-//     if (!cartSource.length) {
-//       return res.status(400).json({ message: "Cart is empty" });
-//     }
-
-//     const validCartItems = cartSource;
-
-//     // -------------------- Build itemsInput for promotions --------------------
-//     const itemsInput = validCartItems.map(i => ({
-//       productId: String(i.product?._id || i.product),
-//       qty: i.quantity,
-//       selectedVariant: i.selectedVariant || null,
-//     }));
-
-//     // Normalize SKU case to avoid mismatches during applyPromotions
-//     itemsInput.forEach(i => {
-//       if (i.selectedVariant && i.selectedVariant.sku) {
-//         i.selectedVariant.sku = String(i.selectedVariant.sku).trim().toLowerCase();
-//       }
-//     });
-
-//     // Precompute product id list for parallel DB ops
-//     const productIds = validCartItems.map(i => String(i.product?._id || i.product));
-//     const uniqueIds = [...new Set(productIds)];
-
-//     // -------------------- Kick off parallel loads (optimized) --------------------
-//     // don't change helpers — we call them as-is
-//     // ----------- PROMO RESULT CACHE (BIG SPEED FIX) -----------
-//     const promoKey = `promo:${snapshotHash}`;
-//     let promoResult;
-
-//     const cachedPromo = await redis.get(promoKey);
-//     if (cachedPromo) {
-//       promoResult = JSON.parse(cachedPromo);
-//     } else {
-//       promoResult = await applyPromotions(itemsInput, {
-//         userContext: req.user ? { isNewUser: req.user.isNewUser } : {},
-//       });
-
-//       await redis.set(promoKey, JSON.stringify(promoResult), "EX", 20);
-//     }
-
-
-//     // Coupon docs (cache layer)
-//     const loadCouponsPromise = (async () => {
-//       try {
-//         const now = Date.now();
-//         if (_couponCache.data && now - _couponCache.ts < (_couponCache.ttl || COUPON_CACHE_TTL * 1000)) {
-//           return _couponCache.data;
-//         }
-//         const docs = await Discount.find({ status: "Active" }).lean();
-//         _couponCache = { data: docs, ts: Date.now(), ttl: COUPON_CACHE_TTL * 1000 };
-//         return docs;
-//       } catch (err) {
-//         console.error("Failed to load coupons:", err);
-//         return [];
-//       }
-//     })();
-
-//     // Promotions (cache layer)
-//     const loadActivePromotionsPromise = (async () => {
-//       try {
-//         const now = Date.now();
-//         if (_promoCache.data && now - _promoCache.ts < (_promoCache.ttl || PROMO_CACHE_TTL * 1000)) {
-//           return _promoCache.data;
-//         }
-//         const dbNow = new Date();
-//         const promos = await Promotion.find({
-//           status: "active",
-//           startDate: { $lte: dbNow },
-//           endDate: { $gte: dbNow },
-//         }).lean();
-//         _promoCache = { data: promos, ts: Date.now(), ttl: PROMO_CACHE_TTL * 1000 };
-//         return promos;
-//       } catch (err) {
-//         console.error("Failed to load promotions:", err);
-//         return [];
-//       }
-//     })();
-
-//     // FIX: proper batched product fetch
-//     const loadProductsPromise = getMultipleProducts(uniqueIds);
-
-//     const [
-//       allDiscountDocs,
-//       activePromotions,
-//       allProducts
-//     ] = await Promise.all([
-//       loadCouponsPromise,
-//       loadActivePromotionsPromise,
-//       loadProductsPromise,
-//     ]);
-
-
-//     const {
-//       items: promoItems,
-//       summary,
-//       appliedPromotions,
-//       freebies = []
-//     } = promoResult || {
-//       items: [],
-//       summary: {},
-//       appliedPromotions: [],
-//       freebies: []
-//     };
-
-//     // -------------------- Coupons Evaluation (unchanged logic) --------------------
-//     // -------------------- Coupons Evaluation --------------------
-//     let applicableCoupons = [],
-//       inapplicableCoupons = [],
-//       appliedCoupon = null,
-//       discountFromCoupon = 0;
-
-//     if (req.user && req.user._id) {
-
-//       let continueCoupon = true;  // 🔥 CONTROL FLAG
-
-//       // ------------- COUPON CACHE START ----------------
-//       const couponKeyFinal = `coupon:${req.user._id}:${snapshotHash}`;
-//       const cachedCouponFinal = await redis.get(couponKeyFinal);
-
-//       if (cachedCouponFinal) {
-//         const parsed = JSON.parse(cachedCouponFinal);
-//         applicableCoupons = parsed.applicableCoupons;
-//         inapplicableCoupons = parsed.inapplicableCoupons;
-//         appliedCoupon = parsed.appliedCoupon;
-//         discountFromCoupon = parsed.discountFromCoupon;
-
-//         continueCoupon = false;  // 🔥 SKIP heavy logic completely
-//       }
-//       // -------------------------------------------------
-
-
-//       if (continueCoupon) {
-
-//         const nonPromoItemsInput = (promoItems || [])
-//           .filter(i => !i.discounts?.length)
-//           .map(i => ({
-//             productId: i.productId,
-//             qty: i.qty,
-//           }));
-
-//         if (nonPromoItemsInput.length && Array.isArray(allDiscountDocs) && allDiscountDocs.length) {
-//           const couponsChecked = await Promise.all(
-//             allDiscountDocs.map(async d => {
-//               try {
-//                 await validateDiscountForCartInternal({
-//                   code: d.code,
-//                   cart: nonPromoItemsInput,
-//                   userId: req.user._id,
-//                 });
-
-//                 return {
-//                   discountId: String(d._id),
-//                   code: d.code,
-//                   label: d.name,
-//                   description: d.description,
-//                   type: d.type,
-//                   value: d.value,
-//                   status: "Applicable",
-//                   message: `Apply code ${d.code}`,
-//                 };
-//               } catch {
-//                 return {
-//                   discountId: String(d._id),
-//                   code: d.code,
-//                   label: d.name,
-//                   description: d.description,
-//                   type: d.type,
-//                   value: d.value,
-//                   status: "Not applicable",
-//                   message: "Not valid for current cart",
-//                 };
-//               }
-//             })
-//           );
-
-//           applicableCoupons = couponsChecked.filter(c => c.status === "Applicable");
-//           inapplicableCoupons = couponsChecked.filter(c => c.status !== "Applicable");
-
-//           // Apply selected coupon
-//           if (req.query.discount && nonPromoItemsInput.length) {
-//             try {
-//               const result = await validateDiscountForCartInternal({
-//                 code: req.query.discount.trim(),
-//                 cart: nonPromoItemsInput,
-//                 userId: req.user._id,
-//               });
-
-//               const CAP = result.discount.maxCap || 500;
-//               discountFromCoupon = Math.min(result.priced.discountAmount, CAP);
-
-//               appliedCoupon = {
-//                 code: result.discount.code,
-//                 discount: discountFromCoupon,
-//               };
-//             } catch {
-//               appliedCoupon = null;
-//               discountFromCoupon = 0;
-//             }
-//           }
-
-//           // SAVE RESULT IN REDIS (🔥 REQUIRED)
-//           await redis.set(
-//             couponKeyFinal,
-//             JSON.stringify({
-//               applicableCoupons,
-//               inapplicableCoupons,
-//               appliedCoupon,
-//               discountFromCoupon
-//             }),
-//             "EX",
-//             COUPON_CACHE_TTL
-//           );
-
-//         } else {
-//           applicableCoupons = [];
-//           inapplicableCoupons = Array.isArray(allDiscountDocs)
-//             ? allDiscountDocs.map(d => ({
-//               code: d.code,
-//               label: d.name,
-//               type: d.type,
-//               value: d.value,
-//               status: "Not applicable",
-//               message: "Not valid for current cart",
-//             }))
-//             : [];
-//         }
-//       }
-//     }
-
-//     // -------------------- Enrich products (cached per promotion state) --------------------
-//     const promoHash = promoHashFromPromos(activePromotions || []);
-
-//     // allProducts may contain nulls for missing; ensure clean list
-//     const rawProducts = (allProducts || []).filter(Boolean);
-
-//     // Pre-enrich all products in parallel (caches per promoHash)
-//     const enrichedPromises = rawProducts.map(p => getEnrichedProduct(p, promoHash, activePromotions || []));
-//     const enrichedProducts = await Promise.all(enrichedPromises);
-
-//     // Build product map from enriched products (keep ids as strings)
-//     const productMap = new Map((enrichedProducts || []).filter(Boolean).map(p => [String(p._id), p]));
-
-//     // -------------------- Build Final Cart (synchronous mapping) --------------------
-//     const round2 = n => Math.round((Number(n) || 0) * 100) / 100;
-
-//     const finalCart = validCartItems.map(item => {
-//       const productIdStr = String(item.product?._id || item.product).trim();
-//       const productFromDB = productMap.get(productIdStr);
-
-//       // product removed
-//       if (!productFromDB) {
-//         return {
-//           _id: item._id,
-//           product: null,
-//           name: "Product unavailable",
-//           quantity: item.quantity || 1,
-//           stockStatus: "deleted",
-//           stockMessage: "❌ This product was removed by admin.",
-//           canCheckout: false,
-//           variant: {
-//             sku: item.selectedVariant?.sku || null,
-//             shadeName: null,
-//             hex: null,
-//             image: null,
-//             stock: 0,
-//             originalPrice: 0,
-//             discountedPrice: 0,
-//             displayPrice: 0,
-//             discountPercent: 0,
-//             discountAmount: 0,
-//           },
-//         };
-//       }
-
-//       const enriched = productFromDB; // already enriched
-//       const enrichedVariant =
-//         enriched.variants.find(
-//           v => String(v.sku || "").trim().toLowerCase() === String(item.selectedVariant?.sku || "").trim().toLowerCase()
-//         ) || enriched.variants[0];
-
-//       const stock = enrichedVariant.stock ?? 0;
-//       let stockStatus = "in_stock";
-//       let stockMessage = "";
-
-//       if (stock <= 0) {
-//         stockStatus = "out_of_stock";
-//         stockMessage = "⚠️ This item is currently out of stock.";
-//       } else if (stock < item.quantity) {
-//         stockStatus = "limited_stock";
-//         stockMessage = `Only ${stock} left in stock.`;
-//       }
-
-//       return {
-//         _id: item._id,
-//         product: productFromDB._id,
-//         name: enrichedVariant.shadeName
-//           ? `${productFromDB.name} - ${enrichedVariant.shadeName}`
-//           : productFromDB.name,
-//         quantity: item.quantity || 1,
-//         stockStatus,
-//         stockMessage,
-//         canCheckout: stock > 0 && stock >= item.quantity,
-//         variant: {
-//           sku: enrichedVariant.sku,
-//           shadeName: enrichedVariant.shadeName,
-//           hex: enrichedVariant.hex,
-//           image: enrichedVariant.images?.[0] || productFromDB.images?.[0] || null,
-//           stock,
-//           originalPrice: enrichedVariant.originalPrice,
-//           discountedPrice: enrichedVariant.displayPrice,
-//           displayPrice: enrichedVariant.displayPrice,
-//           discountPercent: enrichedVariant.discountPercent,
-//           discountAmount: enrichedVariant.discountAmount,
-//         },
-//         freebies: item.freebies || [],   // 🔥 ADD THIS
-
-//       };
-//     });
-
-//     // -------------------- Price Calculation --------------------
-//     const activeItems = finalCart.filter(i => i.stockStatus !== "deleted");
-
-//     const bagMrp = round2(
-//       activeItems.reduce(
-//         (sum, i) => sum + i.variant.originalPrice * i.quantity,
-//         0
-//       )
-//     );
-
-//     const sellingTotal = round2(
-//       activeItems.reduce(
-//         (sum, i) => sum + i.variant.displayPrice * i.quantity,
-//         0
-//       )
-//     );
-
-//     const productDiscount = round2(bagMrp - sellingTotal);
-
-//     const bogoDiscount = round2(
-//       promoItems.reduce((s, i) => s + (i._bogoFreeAmount || 0), 0)
-//     );
-
-//     const bagPayable = round2(sellingTotal - bogoDiscount);
-
-
-
-//     const totalSavings = round2(
-//       bagMrp - bagPayable + discountFromCoupon
-//     );
-
-//     let grandTotal = round2(bagPayable - discountFromCoupon);
-
-//     // -------------------- Shipping --------------------
-//     const SHIPPING_CHARGE = 70;
-//     const FREE_SHIPPING_THRESHOLD = 499;
-
-//     let shippingCharge = 0;
-//     let shippingMessage = "";
-
-//     if (summary.freeShipping) {
-//       shippingCharge = 0;
-//       shippingMessage = "🚚 Free shipping via promotion!";
-//     } else if (grandTotal >= FREE_SHIPPING_THRESHOLD) {
-//       shippingCharge = 0;
-//       shippingMessage = "🎉 Free shipping on your order!";
-//     } else {
-//       shippingCharge = SHIPPING_CHARGE;
-//       const amountToFree = round2(FREE_SHIPPING_THRESHOLD - grandTotal);
-//       shippingMessage = `📦 Add ₹${amountToFree} more for free shipping!`;
-//     }
-
-//     // -------------------- GST Calculation --------------------
-//     const GST_RATE = 0.12; // 12%
-
-//     const taxableAmount = round2(bagPayable - discountFromCoupon + shippingCharge);
-
-//     const gstAmount = round2(grandTotal * GST_RATE);
-
-//     const payableWithGST = round2(taxableAmount + gstAmount);
-
-
-//     // Friendly message (frontend ready)
-//     const gstMessage = `🧾 Includes 12% GST (₹${gstAmount})`;
-
-
-//     // -------------------- Final Response --------------------
-//     const responseData = {
-//       cart: finalCart,
-//       // 👇👇 ADD THIS
-//       freebies: freebies.map(f => ({
-//         productId: f.productId,
-//         name: f.name || "",
-//         qty: f.qty || f.quantity || 1,
-//         variant: f.variant || null,
-//         price: 0,
-//         message: f.message || "Free item"
-//       })),
-//       priceDetails: {
-//         bagMrp,
-//         totalSavings,
-//         bagDiscount: round2(bagMrp - bagPayable),
-//         autoDiscount: round2(bagMrp - bagPayable),
-//         couponDiscount: round2(discountFromCoupon),
-//         shippingCharge: round2(shippingCharge),
-//         shippingMessage,
-//         taxableAmount,       // 🔥 important
-//         gstRate: "12%",
-//         gstAmount,
-//         gstMessage,
-//         payable: payableWithGST,
-//         promoFreeShipping: !!summary.freeShipping,
-//         savingsMessage:
-//           totalSavings > 0 ? `🎉 You saved ₹${totalSavings} on this order!` : "",
-//       },
-//       appliedCoupon,
-//       appliedPromotions,
-
-//       // 👇 include raw freebies here too for debugging
-//       rawFreebies: freebies,
-//       applicableCoupons,
-//       inapplicableCoupons,
-//       grandTotal: payableWithGST,
-//       isGuest,
-//     };
-
-//     // Cache the final response (longer TTL)
-//     try {
-//       await redis.set(redisKey, JSON.stringify(responseData), "EX", CART_CACHE_TTL);
-//     } catch (err) {
-//       console.error("Redis set failed:", err);
-//     }
-
-
-//     return res.json(responseData);
-//   } catch (error) {
-//     console.error("❌ getCartSummary error:", error);
-//     return res.status(500).json({
-//       message: "Failed to get cart summary",
-//       error: error.message,
-//     });
-//   }
-// };

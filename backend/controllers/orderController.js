@@ -1378,52 +1378,96 @@ export const getOrderById = async (req, res) => {
 
         const order = await Order.findById(id)
             .populate("user", "name email phone")
-            .populate("products.productId", "name brand category images price variants")
+            .populate("products.productId", "name brand category images variants")
             .populate("affiliate", "name referralCode")
             .populate("discount", "code type value")
             .lean();
 
-        if (!order) return res.status(404).json({ message: "Order not found" });
+        if (!order) {
+            return res.status(404).json({ message: "Order not found" });
+        }
 
-        // ✅ TIMELINE WITH HUMAN-READABLE SHIPROCKET STATUS
-        const timeline = [];
+        /* -------------------------------------------------
+           🕒 TIMELINE (FIXED: Delhivery + multi-shipment)
+       /* -------------------------------------------------
+   🕒 TIMELINE (Shipment-wise + merged)
+-------------------------------------------------- */
 
-        (order.tracking_history || [])
-            .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-            .forEach(entry => {
+        const shipmentTimelines = [];
+        const mergedTimeline = [];
+
+        (order.shipments || []).forEach((shipment, index) => {
+            const shipmentTimeline = [];
+
+            (shipment.tracking_history || []).forEach(entry => {
                 const cleanStatus =
                     shiprocketStatusMap[entry.status] || entry.status;
 
-                const last = timeline[timeline.length - 1];
+                const last =
+                    shipmentTimeline[shipmentTimeline.length - 1];
 
+                // prevent duplicate consecutive statuses (per shipment)
                 if (!last || last.status !== cleanStatus) {
-                    timeline.push({
+                    const event = {
                         status: cleanStatus,
                         timestamp: entry.timestamp,
-                        location: entry.location || null
-                    });
+                        location: entry.location || null,
+                        shipmentIndex: index,
+                        waybill: shipment.waybill || null
+                    };
+
+                    shipmentTimeline.push(event);
+                    mergedTimeline.push(event);
                 }
             });
 
-        // 🧾 SUMMARY
+            shipmentTimeline.sort(
+                (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
+            );
+
+            shipmentTimelines.push({
+                shipmentId: shipment._id,
+                waybill: shipment.waybill || null,
+                provider: shipment.provider,
+                courierName: shipment.courier_name || null,
+                timeline: shipmentTimeline
+            });
+        });
+
+        mergedTimeline.sort(
+            (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
+        );
+
+
+        /* -------------------------------------------------
+           📦 LAST SHIPMENT (used for current status)
+        -------------------------------------------------- */
+        const lastShipment =
+            order.shipments?.[order.shipments.length - 1];
+
+        /* -------------------------------------------------
+           🧾 SUMMARY (FIXED: removed order.shipment)
+        -------------------------------------------------- */
         const summary = {
             orderId: order.orderId || order._id,
             orderNumber: order.orderNumber,
             date: order.date,
             totalAmount: order.amount,
 
-            // Set correct final status
             status: order.orderStatus,
+
             currentStatus:
-                shiprocketStatusMap[order.shipment?.status] ||  // map if numeric
+                shiprocketStatusMap[lastShipment?.status] ||
+                lastShipment?.status ||
                 order.orderStatus ||
-                order.shipment?.status ||
                 "Pending",
 
             orderType: order.orderType || "Online",
         };
 
-        // 👤 CUSTOMER
+        /* -------------------------------------------------
+           👤 CUSTOMER
+        -------------------------------------------------- */
         const customer = {
             id: order.user?._id || null,
             name: order.user?.name || order.customerName || "",
@@ -1431,13 +1475,16 @@ export const getOrderById = async (req, res) => {
             phone: order.user?.phone || "",
         };
 
-        // 📦 PRODUCTS WITH VARIANT LOGIC (like getUserOrders)
-        const products = order.products.map((p) => {
+        /* -------------------------------------------------
+           📦 PRODUCTS (variant-safe, Nykaa-style)
+        -------------------------------------------------- */
+        const products = (order.products || []).map(p => {
             const product = p.productId || {};
 
-            // Detect variant if exists
             const variantObj =
-                product?.variants?.find(v => String(v.sku) === String(p.variant?.sku));
+                product.variants?.find(
+                    v => String(v.sku) === String(p.variant?.sku)
+                ) || null;
 
             const variantName =
                 p.variant?.shadeName ||
@@ -1451,22 +1498,24 @@ export const getOrderById = async (req, res) => {
                 null;
 
             return {
-                id: product._id,
-                name: product.name,
+                id: product._id || null,
+                name: product.name || p.name || "",
                 brand: product.brand || "Unknown",
-                category: product.category,
+                category: product.category || null,
                 image: variantImage,
                 quantity: p.quantity,
                 price: p.price,
                 total: p.quantity * p.price,
-                variant: variantName
+                variant: variantName,
             };
         });
 
-        // 🚚 SHIPPING
+        /* -------------------------------------------------
+           🚚 SHIPPING
+        -------------------------------------------------- */
         const shipping = {
-            name: order.shippingAddress?.name,
-            phone: order.shippingAddress?.phone,
+            name: order.shippingAddress?.name || "",
+            phone: order.shippingAddress?.phone || "",
             address: [
                 order.shippingAddress?.addressLine1,
                 order.shippingAddress?.city,
@@ -1476,7 +1525,9 @@ export const getOrderById = async (req, res) => {
             expectedDelivery: order.expectedDelivery || null,
         };
 
-        // 💳 PAYMENT
+        /* -------------------------------------------------
+           💳 PAYMENT
+        -------------------------------------------------- */
         const payment = {
             method: order.paymentMethod || "Not specified",
             status: order.paymentStatus || "Pending",
@@ -1484,7 +1535,9 @@ export const getOrderById = async (req, res) => {
             amount: order.amount,
         };
 
-        // 🎁 DISCOUNT
+        /* -------------------------------------------------
+           🎁 DISCOUNT
+        -------------------------------------------------- */
         const discount = order.discount
             ? {
                 code: order.discount.code,
@@ -1495,7 +1548,9 @@ export const getOrderById = async (req, res) => {
             }
             : null;
 
-        // 🌐 AFFILIATE
+        /* -------------------------------------------------
+           🌐 AFFILIATE
+        -------------------------------------------------- */
         const affiliate = order.affiliate
             ? {
                 id: order.affiliate._id,
@@ -1504,32 +1559,41 @@ export const getOrderById = async (req, res) => {
             }
             : null;
 
-        // 🛳️ SHIPMENT WITH HUMAN-READABLE STATUS
-        const shipment = order.shipment
-            ? {
-                courierName: order.shipment.courier_name || null,
-                trackingNumber: order.shipment.awb_code || null,
+        /* -------------------------------------------------
+           🚚 SHIPMENTS (FIXED: plural, Delhivery-ready)
+        -------------------------------------------------- */
+        const shipments = (order.shipments || []).map(s => ({
+            id: s._id,
+            type: s.type,
+            provider: s.provider,
+            courierName: s.courier_name || null,
+            trackingNumber: s.waybill || null,
+            trackingUrl: s.tracking_url || null,
 
-                currentStatus:
-                    shiprocketStatusMap[order.shipment.status] ||
-                    order.shipment.status ||
-                    "Created",
+            currentStatus:
+                shiprocketStatusMap[s.status] ||
+                s.status ||
+                "Created",
 
-                assignedAt: order.shipment.assignedAt || null,
-            }
-            : null;
+            deliveredAt: s.deliveredAt || null,
+            hasReturn: Array.isArray(s.returns) && s.returns.length > 0,
+        }));
 
-        // 📊 TOTALS
-        const subtotal = order.subtotal || 0;
+        /* -------------------------------------------------
+           📊 TOTALS (matches your stored order math)
+        -------------------------------------------------- */
+        const totals = {
+            subtotal: order.subtotal || 0,
+            shipping: order.shippingCharge || 0,
+            tax: order.gst?.amount || order.taxAmount || 0,
+            totalSavings: order.totalSavings || 0,
+            totalPrice: order.amount, // always final paid
+        };
 
-        const shippingCharge = order.shippingCharge || 0;
-        const tax = order.taxAmount || 0;
-
-        const totalPrice = order.amount; // FINAL AMOUNT STORED IN ORDER
-        const totalSavings = order.totalSavings || 0;
-
-        // FINAL RESPONSE
-        const response = {
+        /* -------------------------------------------------
+           ✅ FINAL RESPONSE
+        -------------------------------------------------- */
+        return res.status(200).json({
             summary,
             customer,
             products,
@@ -1537,22 +1601,20 @@ export const getOrderById = async (req, res) => {
             payment,
             discount,
             affiliate,
-            shipment,
-            totals: {
-                subtotal,
-                shipping: shippingCharge,
-                tax,
-                totalSavings, // 💥 new field
-                totalPrice, // always exactly what customer paid
+            shipments,
+            totals,
+            timeline: {
+                merged: mergedTimeline,
+                byShipment: shipmentTimelines
             },
+        });
 
-            timeline,
-        };
-
-        res.status(200).json(response);
     } catch (err) {
         console.error("🔥 getOrderById failed:", err);
-        res.status(500).json({ message: "Failed to fetch order", error: err.message });
+        return res.status(500).json({
+            message: "Failed to fetch order",
+            error: err.message,
+        });
     }
 };
 

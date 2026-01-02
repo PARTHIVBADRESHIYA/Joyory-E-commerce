@@ -255,7 +255,7 @@ const userSignup = async (req, res) => {
                 error: err.message,
             });
         }
-
+        
         return res.status(201).json({
             message: "Signup successful. OTP sent.",
             otpSent: true,

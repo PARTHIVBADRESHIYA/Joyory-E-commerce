@@ -33,228 +33,35 @@ const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
 // ---------------------- USER ENDPOINTS ----------------------
 
-// export const requestShipmentReturn = async (req, res) => {
-//     try {
-//         const userId = req.user._id;
-//         const { shipment_id } = req.params;
-//         const {
-//             items,
-//             reason,
-//             reasonDescription = "",
-//             type
-//         } = req.body;
-
-//         if (!shipment_id) {
-//             return res.status(400).json({ success: false, message: "shipment_id is required" });
-//         }
-
-//         if (!["return", "replace"].includes(type)) {
-//             return res.status(400).json({ success: false, message: "Invalid return type" });
-//         }
-
-//         // 1️⃣ FIND ORDER & SHIPMENT
-//         const order = await Order.findOne({ "shipments.shipment_id": shipment_id });
-//         if (!order) return res.status(404).json({ success: false, message: "Shipment not found" });
-
-//         const shipment = order.shipments.find(s => s.shipment_id === shipment_id);
-//         if (!shipment) return res.status(404).json({ success: false, message: "Shipment not found" });
-
-//         // 2️⃣ OWNERSHIP CHECK
-//         if (order.user.toString() !== userId.toString()) {
-//             return res.status(403).json({ success: false, message: "Not your shipment" });
-//         }
-
-//         // 3️⃣ MUST BE DELIVERED
-//         if (!shipment.deliveredAt && shipment.status !== "Delivered") {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: "Return allowed only after delivery"
-//             });
-//         }
-
-//         // 4️⃣ RETURN WINDOW
-//         const deliveredAt = shipment.deliveredAt;
-//         const allowedDays = order.returnPolicy?.days || 7;
-//         const diffDays = Math.floor((Date.now() - new Date(deliveredAt)) / 86400000);
-
-//         if (diffDays > allowedDays) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: `Return window expired (${allowedDays} days)`
-//             });
-//         }
-
-//         // 5️⃣ ITEMS VALIDATION
-//         if (!Array.isArray(items) || items.length === 0) {
-//             return res.status(400).json({ success: false, message: "Items are required" });
-//         }
-
-//         const validatedItems = [];
-
-//         for (const item of items) {
-//             const { productId, quantity, variant, condition } = item;
-
-//             if (!productId || !quantity || quantity <= 0) {
-//                 return res.status(400).json({ success: false, message: "Invalid item data" });
-//             }
-
-//             // 6️⃣ FIND PRODUCT IN SHIPMENT
-//             const found = shipment.products.find(p =>
-//                 p.productId.toString() === productId &&
-//                 (!variant || p.variant?.sku === variant.sku)
-//             );
-
-//             if (!found) {
-//                 return res.status(400).json({
-//                     success: false,
-//                     message: "Item does not belong to this shipment"
-//                 });
-//             }
-
-//             // 7️⃣ QUANTITY ABUSE PROTECTION (IMPORTANT)
-//             const alreadyReturnedQty = shipment.returns
-//                 ?.filter(r => r.status !== "cancelled")
-//                 .flatMap(r => r.items)
-//                 .filter(i =>
-//                     i.productId.toString() === productId &&
-//                     (!variant || i.variant?.sku === variant.sku)
-//                 )
-//                 .reduce((sum, i) => sum + i.quantity, 0) || 0;
-
-//             if (alreadyReturnedQty + quantity > found.quantity) {
-//                 return res.status(400).json({
-//                     success: false,
-//                     message: "Return quantity exceeds purchased quantity"
-//                 });
-//             }
-
-//             // 8️⃣ DUPLICATE ACTIVE RETURN CHECK (FIXED)
-//             const duplicate = shipment.returns?.some(r =>
-//                 r.status !== "cancelled" &&
-//                 r.items.some(i =>
-//                     i.productId.toString() === productId &&
-//                     (!variant || i.variant?.sku === variant.sku)
-//                 )
-//             );
-
-//             if (duplicate) {
-//                 return res.status(400).json({
-//                     success: false,
-//                     message: "Return already requested for this item"
-//                 });
-//             }
-
-//             // 9️⃣ IMAGE HANDLING
-//             let uploadedImages = [];
-//             const fieldKey = `images_${productId}`;
-
-//             if (req.files && req.files[fieldKey]) {
-//                 const imgFiles = Array.isArray(req.files[fieldKey])
-//                     ? req.files[fieldKey]
-//                     : [req.files[fieldKey]];
-
-//                 if (imgFiles.length > MAX_IMAGES_PER_ITEM) {
-//                     return res.status(400).json({
-//                         success: false,
-//                         message: `Maximum ${MAX_IMAGES_PER_ITEM} images allowed per item`
-//                     });
-//                 }
-
-//                 for (const img of imgFiles) {
-//                     const result = await uploadToCloudinary(
-//                         img.buffer,
-//                         `returns/${shipment_id}/${productId}`
-//                     );
-//                     uploadedImages.push(result.secure_url ?? result);
-//                 }
-//             }
-
-//             // 🔟 IMAGE REQUIRED RULE (NYKAA STYLE)
-//             const rule = RETURN_REASON_RULES[reason];
-//             if (rule?.imagesRequired && uploadedImages.length === 0) {
-//                 return res.status(400).json({
-//                     success: false,
-//                     message: `Images required for reason: ${reason}`
-//                 });
-//             }
-
-//             validatedItems.push({
-//                 _id: new mongoose.Types.ObjectId(),
-//                 productId,
-//                 quantity,
-//                 ...(variant ? { variant } : {}),
-//                 reason,
-//                 reasonDescription,
-//                 images: uploadedImages,
-//                 condition: condition || "Unopened"
-//             });
-//         }
-
-//         // 1️⃣1️⃣ FINAL RETURN ENTRY
-//         const returnEntry = {
-//             _id: new mongoose.Types.ObjectId(),
-//             shipment_id,
-//             status: "requested",
-//             type, // return | replace
-
-//             items: validatedItems,
-//             tracking_history: [],
-
-//             qc: {
-//                 status: null,
-//                 notes: "",
-//                 images: []
-//             },
-
-//             refund: {
-//                 amount: 0,
-//                 status: "pending"
-//             },
-
-//             audit_trail: [
-//                 {
-//                     status: "requested",
-//                     action: type === "replace" ? "Replacement Requested" : "Return Requested",
-//                     performedBy: userId,
-//                     performedByModel: "User",
-//                     notes: reasonDescription
-//                 }
-//             ],
-
-//             requestedBy: userId,
-//             requestedAt: new Date(),
-//             reason,
-//             description: reasonDescription
-//         };
-
-//         shipment.returns = shipment.returns || [];
-//         shipment.returns.push(returnEntry);
-
-//         // ANALYTICS
-//         order.returnStats.totalReturns += 1;
-//         if (type === "replace") order.returnStats.totalReplacements += 1;
-
-//         await order.save();
-
-//         return res.status(201).json({
-//             success: true,
-//             message: type === "replace"
-//                 ? "Replacement request submitted"
-//                 : "Return request submitted",
-//             returnId: returnEntry._id,
-//             data: returnEntry
-//         });
-
-//     } catch (err) {
-//         console.error("Return Request Error:", err);
-//         return res.status(500).json({ success: false, message: err.message });
-//     }
-// };
-
 export const requestShipmentReturn = async (req, res) => {
     try {
         const userId = req.user._id;
         const { shipmentId } = req.params;
+
+        if (req.body.items && typeof req.body.items === "string") {
+            try {
+                req.body.items = JSON.parse(req.body.items);
+            } catch {
+                return res.status(400).json({ success: false, message: "Invalid JSON for items" });
+            }
+        }
+
+        // convert req.files (array) → object grouped by fieldname
+        function groupFilesByField(filesArray) {
+            const grouped = {};
+            for (const f of filesArray || []) {
+                if (!grouped[f.fieldname]) grouped[f.fieldname] = [];
+                grouped[f.fieldname].push(f);
+            }
+            return grouped;
+        }
+
+        if (Array.isArray(req.body.items)) {
+            req.body.items = req.body.items.map(it => ({
+                ...it,
+                productId: String(it.productId)
+            }));
+        }
 
         const {
             items,
@@ -372,13 +179,14 @@ export const requestShipmentReturn = async (req, res) => {
             // -------------------------------
             // IMAGE HANDLING
             // -------------------------------
-            let uploadedImages = [];
-            const fieldKey = `images_${productId}`;
+            // convert req.files array → { images_<productId>: [files] }
+            const groupedFiles = groupFilesByField(req.files);
 
-            if (req.files && req.files[fieldKey]) {
-                const imgs = Array.isArray(req.files[fieldKey])
-                    ? req.files[fieldKey]
-                    : [req.files[fieldKey]];
+            const fieldKey = `images_${productId}`;
+            let uploadedImages = [];
+
+            if (groupedFiles[fieldKey]) {
+                const imgs = groupedFiles[fieldKey];
 
                 if (imgs.length > 5) {
                     return res.status(400).json({
@@ -395,6 +203,7 @@ export const requestShipmentReturn = async (req, res) => {
                     uploadedImages.push(result.secure_url ?? result);
                 }
             }
+
 
             // IMAGE REQUIRED RULES
             const rule = RETURN_REASON_RULES[reason];
@@ -555,202 +364,124 @@ export const getShipmentReturnDetails = async (req, res) => {
     }
 };
 
-// export const cancelShipmentReturn = async (req, res) => {
-//     try {
-//         const userId = req.user._id;
-//         const { shipment_id, returnId } = req.params;
-
-//         if (!mongoose.Types.ObjectId.isValid(returnId)) {
-//             return res.status(400).json({ success: false, message: "Invalid returnId" });
-//         }
-
-//         const order = await Order.findOne({ "shipments.shipment_id": shipment_id });
-//         if (!order) return res.status(404).json({ success: false, message: "Shipment not found" });
-
-//         const shipment = order.shipments.find(s => s.shipment_id === shipment_id);
-//         if (!shipment) return res.status(404).json({ success: false, message: "Shipment not found" });
-
-//         if (order.user.toString() !== userId.toString()) {
-//             return res.status(403).json({ success: false, message: "Not your shipment" });
-//         }
-
-//         const ret = shipment.returns.id(returnId);
-//         if (!ret) return res.status(404).json({ success: false, message: "Return not found" });
-
-//         if (ret.status !== "requested") {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: "Cannot cancel after processing"
-//             });
-//         }
-
-//         ret.status = "cancelled";
-
-//         if (!ret.tracking_history) ret.tracking_history = [];
-//         if (!ret.audit_trail) ret.audit_trail = [];
-
-//         // tracking entry
-//         ret.tracking_history.push({
-//             status: "cancelled",
-//             timestamp: new Date(),
-//             location: "User",
-//             description: req.body?.notes || "User cancelled the return"
-//         });
-
-//         // audit entry
-//         ret.audit_trail.push({
-//             status: "cancelled",
-//             action: "user_cancelled",
-//             performedBy: userId,
-//             performedByModel: "User",
-//             timestamp: new Date(),
-//             notes: req.body?.notes || "User cancelled the return"
-//         });
-
-//         await order.save();
-
-//         if (order.user?.email) {
-//             await sendEmail(
-//                 order.user.email,
-//                 `Return Cancelled - Shipment ${shipment.shipment_id}`,
-//                 `<p>Your return request has been cancelled.</p>`
-//             );
-//         }
-
-//         return res.json({
-//             success: true,
-//             message: "Return cancelled successfully"
-//         });
-
-//     } catch (err) {
-//         console.error("cancelShipmentReturn Error:", err);
-//         return res.status(500).json({ success: false, message: err.message });
-//     }
-// };
-
-// ---------------------- ADMIN ENDPOINTS ----------------------
 export const cancelShipmentReturn = async (req, res) => {
     try {
         const { shipmentId, returnId } = req.params;
         const userId = req.user?._id;
 
-        const shipment = await Shipment.findById(shipmentId);
-        if (!shipment) {
+        // -------------------------------
+        // 1. Find Order + Shipment
+        // -------------------------------
+        const order = await Order.findOne({ "shipments._id": shipmentId });
+        if (!order) {
             return res.status(404).json({
                 success: false,
-                message: "Shipment not found.",
+                message: "Shipment not found."
             });
         }
 
+        const shipment = order.shipments.id(shipmentId);
+        if (!shipment) {
+            return res.status(404).json({
+                success: false,
+                message: "Shipment not found."
+            });
+        }
+
+        // Must be user’s own order
+        if (order.user.toString() !== userId.toString()) {
+            return res.status(403).json({
+                success: false,
+                message: "Not allowed to cancel return for this shipment."
+            });
+        }
+
+        // -------------------------------
+        // 2. Find Return Entry
+        // -------------------------------
         const ret = shipment.returns.id(returnId);
         if (!ret) {
             return res.status(404).json({
                 success: false,
-                message: "Return request not found.",
+                message: "Return request not found."
             });
         }
 
-        // ------------------------------
-        // 1. Check Already Cancelled
-
+        // -------------------------------
+        // 3. Already Cancelled
+        // -------------------------------
         if (ret.status === "cancelled") {
             return res.json({
                 success: true,
-                message: "Return request already cancelled.",
+                message: "Return request already cancelled."
             });
         }
 
-        // ------------------------------
-        // 2. Block cancellation after irreversible stages
-        // ------------------------------
-        const nonCancelableStatuses = [
+        // -------------------------------
+        // 4. Non-Cancelable Stages
+        // return flow: requested → approved → pickup_scheduled → picked_up → in_transit → delivered_to_warehouse → qc_passed/qc_failed
+        // -------------------------------
+        const nonCancelable = [
+            "approved",
+            "pickup_scheduled",
+            "picked_up",
+            "in_transit",
+            "delivered_to_warehouse",
             "qc_passed",
-            "refund_initiated",
-            "refund_completed",
-            "replacement_initiated",
-            "replacement_completed",
-            "completed",
-            "received"
+            "qc_failed"
         ];
 
-        if (nonCancelableStatuses.includes(ret.status)) {
+        if (nonCancelable.includes(ret.status)) {
             return res.status(400).json({
                 success: false,
-                message: `Return cannot be cancelled at '${ret.status}' stage.`,
+                message: `Cannot cancel return at stage '${ret.status}'.`
             });
         }
 
-        // ------------------------------
-        // 3. Permission Check — customer can only cancel their own
-        // ------------------------------
-        const isAdmin = req.admin?._id;
-        const isOwner = shipment.user?.toString() === userId?.toString();
-
-        if (!isAdmin && !isOwner) {
-            return res.status(403).json({
+        // Only "requested" can be cancelled
+        if (ret.status !== "requested") {
+            return res.status(400).json({
                 success: false,
-                message: "Not allowed to cancel this return.",
+                message: "Return cannot be cancelled now."
             });
         }
 
-        // ------------------------------
-        // 4. Mark Return As Cancelled
-        // ------------------------------
+        // -------------------------------
+        // 5. Apply Cancellation
+        // -------------------------------
         ret.status = "cancelled";
         ret.cancelledAt = new Date();
 
-        // ------------------------------
-        // 5. Update returnStats
-        // ------------------------------
-        shipment.returnStats.cancelled += 1;
-
-        // If it was in progress, decrease counter
-        if (ret.status !== "requested") {
-            shipment.returnStats.inProgress =
-                Math.max(0, shipment.returnStats.inProgress - 1);
-        }
-
-        // ------------------------------
-        // 6. Tracking History Entry
-        // ------------------------------
-        ret.tracking_history.push({
-            status: "cancelled",
-            timestamp: new Date(),
-            location: "system",
-            message: "Return request canceled by user/admin.",
-        });
-
-        // ------------------------------
-        // 7. Add Audit Trail
-        // ------------------------------
+        // Add audit trail entry
         ret.audit_trail.push({
+            status: "cancelled",
             action: "return_cancelled",
-            actor: isAdmin ? "admin" : "user",
-            actorId: isAdmin ? req.admin._id : userId,
+            performedBy: userId,
+            performedByModel: "User",
             timestamp: new Date(),
-            message: "Return request canceled.",
+            notes: "User cancelled return request"
         });
 
-        // ------------------------------
-        // 8. Save
-        // ------------------------------
-        await shipment.save();
+        // Reduce analytics
+        order.returnStats.totalReturns = Math.max(order.returnStats.totalReturns - 1, 0);
+
+        await order.save();
 
         return res.json({
             success: true,
             message: "Return request cancelled successfully.",
-            data: ret,
+            data: ret
         });
 
     } catch (err) {
         console.error("Cancel Return Error:", err);
         return res.status(500).json({
             success: false,
-            message: "Something went wrong while canceling return.",
-            error: err?.message,
+            message: err.message
         });
     }
 };
+
 
 export const getAllReturnsForAdmin = async (req, res) => {
     try {
@@ -814,7 +545,7 @@ export const getAllReturnsForAdmin = async (req, res) => {
                         shipment_id: "$shipments.shipment_id",
                         status: "$shipments.status",
                         deliveredAt: "$shipments.deliveredAt",
-                        awb_code: "$shipments.awb_code",
+                        awb_code: "$shipments.waybill",
                         courier_name: "$shipments.courier_name"
                     },
 
@@ -856,120 +587,6 @@ export const getAllReturnsForAdmin = async (req, res) => {
     }
 };
 
-// export const approveShipmentReturn = async (req, res) => {
-//     try {
-//         const { shipment_id, returnId } = req.params;
-
-//         // 1️⃣ Find order
-//         const order = await Order.findOne({
-//             "shipments.shipment_id": shipment_id
-//         }).populate("user");
-
-//         if (!order) {
-//             return res.status(404).json({ success: false, message: "Order / Shipment not found" });
-//         }
-
-//         // 2️⃣ Find shipment
-//         const shipment = order.shipments.find(s => s.shipment_id === shipment_id);
-//         if (!shipment) {
-//             return res.status(404).json({ success: false, message: "Shipment not found" });
-//         }
-
-//         // 3️⃣ Find return
-//         const ret = shipment.returns.id(returnId);
-//         if (!ret) {
-//             return res.status(404).json({ success: false, message: "Return not found" });
-//         }
-
-//         // 4️⃣ State validation
-//         if (ret.status !== "requested") {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: `Return already processed (current: ${ret.status})`
-//             });
-//         }
-
-//         // 5️⃣ Idempotency safety
-//         if (ret.shiprocket_order_id) {
-//             return res.json({
-//                 success: true,
-//                 message: "Return already approved & Shiprocket created",
-//                 shiprocket_order_id: ret.shiprocket_order_id
-//             });
-//         }
-
-//         // 6️⃣ Create Shiprocket return
-//         let srData;
-//         try {
-//             srData = await createShiprocketReturnOrder(order, shipment, ret);
-//         } catch (err) {
-//             ret.audit_trail.push({
-//                 status: "shiprocket_failed",
-//                 action: "shiprocket_api_error",
-//                 performedBy: req.admin?._id,
-//                 performedByModel: "Admin",
-//                 timestamp: new Date(),
-//                 notes: err.message
-//             });
-
-//             await order.save();
-
-//             return res.status(422).json({
-//                 success: false,
-//                 message: "Shiprocket return creation failed",
-//                 error: err.message
-//             });
-//         }
-
-//         // 7️⃣ Update SAME return (IMPORTANT)
-//         ret.shiprocket_order_id = srData.order_id;
-//         ret.shipment_id = srData.shipment_id;
-//         ret.awb_code = srData.awb_code || null;
-//         ret.courier_name = srData.courier_name || null;
-//         ret.tracking_url = srData.tracking_url || null;
-
-//         ret.status = "pickup_scheduled";
-
-//         ret.qc = ret.qc || {};
-//         ret.qc.status = "pending";
-
-//         ret.tracking_history.push({
-//             status: "pickup_scheduled",
-//             timestamp: new Date(),
-//             location: "System",
-//             description: "Return pickup scheduled via Shiprocket"
-//         });
-
-//         ret.audit_trail.push({
-//             status: "approved",
-//             action: "admin_approved",
-//             performedBy: req.admin?._id,
-//             performedByModel: "Admin",
-//             timestamp: new Date(),
-//             metadata: { shiprocket: srData }
-//         });
-
-//         await order.save();
-
-//         // 8️⃣ Notify user
-//         if (order.user?.email) {
-//             await sendEmail(
-//                 order.user.email,
-//                 ret.type === "replace" ? "Replacement Approved" : "Return Approved",
-//                 `<p>Your ${ret.type} request for Shipment #${shipment.shipment_id} has been approved.</p>`
-//             );
-//         }
-
-//         return res.json({
-//             success: true,
-//             message: "Return approved & pickup scheduled",
-//             shiprocket: srData
-//         });
-
-//     } catch (err) {
-//         return res.status(500).json({ success: false, message: err.message });
-//     }
-// };
 export const approveShipmentReturn = async (req, res) => {
     try {
         const { shipmentId, returnId } = req.params;
@@ -1196,20 +813,31 @@ export const markShipmentReturnReceived = async (req, res) => {
 
 export const rejectShipmentReturn = async (req, res) => {
     try {
-        const { shipment_id, returnId } = req.params;
-        const { reason } = req.body;
+        const { shipmentId, returnId } = req.params;
+        const adminId = req.admin?._id;
+        const reason = req.body?.reason;
 
-        if (!reason) {
+        // -------------------------------
+        // 1. VALIDATION
+        // -------------------------------
+        if (!reason || typeof reason !== "string" || reason.trim().length === 0) {
             return res.status(400).json({
                 success: false,
                 message: "Rejection reason is required"
             });
         }
 
-        // 1️⃣ Find order
-        const order = await Order.findOne({
-            "shipments.shipment_id": shipment_id
-        }).populate("user");
+        if (!shipmentId || !returnId) {
+            return res.status(400).json({
+                success: false,
+                message: "shipmentId & returnId are required"
+            });
+        }
+
+        // -------------------------------
+        // 2. FETCH ORDER + SHIPMENT
+        // -------------------------------
+        const order = await Order.findOne({ "shipments._id": shipmentId }).populate("user");
 
         if (!order) {
             return res.status(404).json({
@@ -1218,11 +846,7 @@ export const rejectShipmentReturn = async (req, res) => {
             });
         }
 
-        // 2️⃣ Find shipment
-        const shipment = order.shipments.find(
-            s => s.shipment_id === shipment_id
-        );
-
+        const shipment = order.shipments.id(shipmentId);
         if (!shipment) {
             return res.status(404).json({
                 success: false,
@@ -1230,71 +854,103 @@ export const rejectShipmentReturn = async (req, res) => {
             });
         }
 
-        // 3️⃣ Find return
+        // -------------------------------
+        // 3. FETCH RETURN REQUEST
+        // -------------------------------
         const ret = shipment.returns.id(returnId);
         if (!ret) {
             return res.status(404).json({
                 success: false,
-                message: "Return not found"
+                message: "Return request not found"
             });
         }
 
-        // 4️⃣ State validation (STRICT)
+        // -------------------------------
+        // 4. STATUS GATING (STRICT)
+        // -------------------------------
         if (ret.status !== "requested") {
             return res.status(400).json({
                 success: false,
-                message: `Return already processed (current: ${ret.status})`
+                message: `Cannot reject return at stage '${ret.status}'`
             });
         }
 
-        // 5️⃣ Update return status
+        // -------------------------------
+        // 5. UPDATE RETURN STATUS
+        // -------------------------------
         ret.status = "cancelled";
+        ret.cancelledAt = new Date();
 
-        // 6️⃣ Tracking timeline
+        // -------------------------------
+        // 6. TRACKING HISTORY
+        // -------------------------------
         ret.tracking_history.push({
             status: "cancelled",
             timestamp: new Date(),
-            location: "Admin",
-            description: reason
+            location: "Admin Panel",
+            description: `Return rejected by admin: ${reason}`
         });
 
-        // 7️⃣ Audit trail
+        // -------------------------------
+        // 7. AUDIT TRAIL
+        // -------------------------------
         ret.audit_trail.push({
             status: "cancelled",
             action: "admin_rejected",
-            notes: reason,
-            performedBy: req.admin?._id,
+            performedBy: adminId,
             performedByModel: "Admin",
-            timestamp: new Date()
+            timestamp: new Date(),
+            notes: reason
         });
 
+        // -------------------------------
+        // 8. ANALYTICS UPDATE
+        // -------------------------------
+        order.returnStats.totalReturns = Math.max(order.returnStats.totalReturns - 1, 0);
+
+        // -------------------------------
+        // 9. SAVE ORDER
+        // -------------------------------
         await order.save();
 
-        // 8️⃣ Notify user
-        if (order.user?.email) {
-            await sendEmail(
-                order.user.email,
-                "Return Request Rejected",
-                `
-          <p>Your return request for shipment <b>#${shipment.shipment_id}</b> has been rejected.</p>
-          <p><b>Reason:</b> ${reason}</p>
-        `
-            );
+        // -------------------------------
+        // 10. OPTIONAL EMAIL NOTIFICATION
+        // -------------------------------
+        try {
+            if (order.user?.email) {
+                await sendEmail(
+                    order.user.email,
+                    "Return Request Rejected",
+                    `
+                        <p>Your return request for shipment <b>${shipmentId}</b> has been rejected.</p>
+                        <p><b>Reason:</b> ${reason}</p>
+                    `
+                );
+            }
+        } catch (emailErr) {
+            console.warn("Email sending failed (ignored):", emailErr.message);
         }
 
         return res.json({
             success: true,
-            message: "Return rejected successfully"
+            message: "Return request rejected successfully.",
+            data: {
+                returnId,
+                shipmentId,
+                status: ret.status,
+                reason
+            }
         });
 
     } catch (err) {
-        console.error("❌ rejectShipmentReturn error:", err);
+        console.error("❌ rejectShipmentReturn Error:", err);
         return res.status(500).json({
             success: false,
             message: err.message
         });
     }
 };
+
 
 export const getReturnsSummary = async (req, res) => {
     try {
@@ -1319,7 +975,7 @@ export const getReturnsSummary = async (req, res) => {
 
         if (status) match["shipments.returns.status"] = status;
         if (type) match["shipments.returns.type"] = type;
-        if (reason) match["shipments.returns.reason"] = reason;
+        if (reason) match["shipments.returns.items.reason"] = reason;
 
         if (search) {
             match.$or = [
@@ -1339,16 +995,22 @@ export const getReturnsSummary = async (req, res) => {
                     returnId: "$shipments.returns._id",
                     status: "$shipments.returns.status",
                     type: "$shipments.returns.type",
-                    reason: "$shipments.returns.reason",
-                    requestedAt: "$shipments.returns.requestedAt",
+                    reason: {
+                        $ifNull: [
+                            { $arrayElemAt: ["$shipments.returns.items.reason", 0] },
+                            "Not Provided"
+                        ]
+                    },
+                    requestedAt: "$shipments.returns.createdAt",
+
                     refundAmount: "$shipments.returns.refund.amount",
 
                     orderId: 1,
                     customOrderId: 1,
                     customerName: 1,
 
-                    shipmentId: "$shipments.shipment_id",
-                    awb: "$shipments.awb_code",
+                    shipmentId: "$shipments.delhivery_pickup_id",
+                    awb: "$shipments.waybill",
 
                     totalItems: { $size: "$shipments.returns.items" }
                 }
@@ -1494,11 +1156,15 @@ export const getReturnDetails = async (req, res) => {
         const returnId = new mongoose.Types.ObjectId(req.params.returnId);
 
         const pipeline = [
-            { $match: { "shipments.returns._id": returnId } },
             { $unwind: "$shipments" },
             { $unwind: "$shipments.returns" },
-            { $match: { "shipments.returns._id": returnId } },
 
+            // ✅ MATCH AFTER UNWIND
+            {
+                $match: {
+                    "shipments.returns._id": returnId
+                }
+            },
             /* ---------- USER ---------- */
             {
                 $lookup: {
@@ -1561,7 +1227,7 @@ export const getReturnDetails = async (req, res) => {
                         status: "$shipments.returns.status",
                         reason: "$shipments.returns.reason",
                         description: "$shipments.returns.description",
-                        requestedAt: "$shipments.returns.requestedAt",
+                        requestedAt: "$shipments.returns.createdAt",
                         trackingTimeline: "$shipments.returns.tracking_history",
                         auditTrail: "$shipments.returns.audit_trail"
                     },
@@ -1696,8 +1362,8 @@ export const getReturnDetails = async (req, res) => {
 
                     /* ---------- SHIPMENT ---------- */
                     shipment: {
-                        shipmentId: "$shipments.shipment_id",
-                        awb: "$shipments.awb_code",
+                        shipmentId: "$shipments.delhivery_pickup_id",
+                        awb: "$shipments.waybill",
                         courier: "$shipments.courier_name",
                         trackingUrl: "$shipments.tracking_url",
                         status: "$shipments.status",
@@ -1757,7 +1423,7 @@ export const getReturnsAnalytics = async (req, res) => {
             { $unwind: "$shipments" },
             { $unwind: "$shipments.returns" },
             ...(Object.keys(dateFilter).length > 0 ? [
-                { $match: { "shipments.returns.requestedAt": dateFilter } }
+                { $match: { "shipments.returns.createdAt": dateFilter } }
             ] : []),
             {
                 $group: {
@@ -1805,14 +1471,14 @@ export const getReturnsAnalytics = async (req, res) => {
             { $unwind: "$shipments" },
             { $unwind: "$shipments.returns" },
             ...(Object.keys(dateFilter).length > 0 ? [
-                { $match: { "shipments.returns.requestedAt": dateFilter } }
+                { $match: { "shipments.returns.createdAt": dateFilter } }
             ] : []),
             {
                 $group: {
                     _id: {
                         $dateToString: {
                             format: groupByFormat,
-                            date: "$shipments.returns.requestedAt"
+                            date: "$shipments.returns.createdAt"
                         }
                     },
                     returns: { $sum: 1 },
@@ -1831,7 +1497,7 @@ export const getReturnsAnalytics = async (req, res) => {
             { $unwind: "$shipments" },
             { $unwind: "$shipments.returns" },
             ...(Object.keys(dateFilter).length > 0 ? [
-                { $match: { "shipments.returns.requestedAt": dateFilter } }
+                { $match: { "shipments.returns.createdAt": dateFilter } }
             ] : []),
             {
                 $group: {
@@ -1843,18 +1509,19 @@ export const getReturnsAnalytics = async (req, res) => {
             { $sort: { count: -1 } }
         ]);
 
-        // 4. Reason distribution
         const reasonDistribution = await Order.aggregate([
             { $unwind: "$shipments" },
             { $unwind: "$shipments.returns" },
+            { $unwind: "$shipments.returns.items" },
+
             ...(Object.keys(dateFilter).length > 0 ? [
-                { $match: { "shipments.returns.requestedAt": dateFilter } }
+                { $match: { "shipments.returns.createdAt": dateFilter } }
             ] : []),
+
             {
                 $group: {
-                    _id: "$shipments.returns.reason",
-                    count: { $sum: 1 },
-                    percentage: { $avg: 1 }
+                    _id: "$shipments.returns.items.reason",
+                    count: { $sum: 1 }
                 }
             },
             { $sort: { count: -1 } }
@@ -1866,7 +1533,7 @@ export const getReturnsAnalytics = async (req, res) => {
             { $unwind: "$shipments.returns.items" },
 
             ...(Object.keys(dateFilter).length > 0 ? [{
-                $match: { "shipments.returns.requestedAt": dateFilter }
+                $match: { "shipments.returns.createdAt": dateFilter }
             }] : []),
 
             {
@@ -1924,7 +1591,7 @@ export const getReturnsAnalytics = async (req, res) => {
             { $unwind: "$shipments" },
             { $unwind: "$shipments.returns" },
             ...(Object.keys(dateFilter).length > 0 ? [
-                { $match: { "shipments.returns.requestedAt": dateFilter } }
+                { $match: { "shipments.returns.createdAt": dateFilter } }
             ] : []),
             {
                 $group: {

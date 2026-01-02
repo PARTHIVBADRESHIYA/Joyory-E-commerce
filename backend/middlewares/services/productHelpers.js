@@ -632,12 +632,6 @@ export const enrichProductsUnified = async (products, promotions = [], options =
                 selectedVariant: displayVariant,
             };
 
-            if (!finalEnriched.category) {
-                throw new Error(
-                    `Invariant violation: enriched product ${finalEnriched._id} missing category`
-                );
-            }
-
             // 🔹 Short TTL to reflect promo changes immediately
             await redis.set(`enrichedProduct:${p._id}`, JSON.stringify(finalEnriched), "EX", ENRICHED_PRODUCT_TTL);
             enrichedList.push(finalEnriched);

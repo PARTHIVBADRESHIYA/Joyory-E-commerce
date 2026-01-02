@@ -2083,6 +2083,7 @@ export const getTopCategories = async (req, res) => {
             isTopCategory: true,
             isActive: true
         })
+            .sort({ topCategoryOrder: 1 })   // 🔥 THIS IS MANDATORY
             .select("name slug thumbnailImage")
             .lean();
 

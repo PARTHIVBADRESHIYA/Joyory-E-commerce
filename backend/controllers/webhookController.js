@@ -5,7 +5,7 @@ import { io } from "../server.js"; // ✅ import socket.io instance
 import { sendEmail } from "../middlewares/utils/emailService.js"; // ✅ assume you already have an email service
 import { refundQueue } from "../middlewares/services/refundQueue.js";
 
-export const finalizeOrderPayment = async (order, payment) => {
+export const finalizeOrderPayment = async (order, payment, { isTest, isLivePayment }) => {
     try {
         // ✅ Basic payment fields update
         order.paid = true;
@@ -15,6 +15,11 @@ export const finalizeOrderPayment = async (order, payment) => {
         order.razorpayPaymentId = payment.id;
         order.razorpayOrderId = payment.order_id;
         order.paidAt = new Date();
+
+        // Store mode flags
+        order.isTestPayment = isTest;
+        order.isLivePayment = isLivePayment;
+
 
         // ✅ Payment details snapshot
         order.paymentDetails = {
@@ -36,19 +41,21 @@ export const finalizeOrderPayment = async (order, payment) => {
             paymentId: payment.id,
         });
 
-        // ✅ Send confirmation email
-        await sendEmail(
-            order.user.email,
-            "🎉 Payment Successful – Order Confirmed!",
-            `
-        <p>Hi ${order.user.name},</p>
-        <p>Your payment for order <strong>#${order._id}</strong> has been successfully received.</p>
-        <p><strong>Amount:</strong> ₹${payment.amount / 100}</p>
-        <p><strong>Method:</strong> ${payment.method}</p>
-        <p>We’ll notify you once your order is shipped!</p>
-        <p>Regards,<br/>Team Joyory Beauty</p>
-      `
-        );
+        // Probably skip email for test mode (recommended)
+        if (!isTest) {
+            await sendEmail(
+                order.user.email,
+                "🎉 Payment Successful – Order Confirmed!",
+                `
+                <p>Hi ${order.user.name},</p>
+                <p>Your payment for order <strong>#${order._id}</strong> has been successfully received.</p>
+                <p><strong>Amount:</strong> ₹${payment.amount / 100}</p>
+                <p><strong>Method:</strong> ${payment.method}</p>
+                <p>We’ll notify you once your order is shipped!</p>
+                <p>Regards,<br/>Team Joyory Beauty</p>
+                `
+            );
+        }
 
         console.log(`✅ Payment finalized for order ${order._id}`);
         return order;
@@ -102,6 +109,16 @@ export const razorpayWebhook = async (req, res) => {
                 return res.status(200).json({ status: "ignored", reason: "missing_payment_entity" });
             }
 
+            // --------------------------------------------------------
+            // 🔥 ADD HERE — Detect LIVE Payment & Test Payment
+            // --------------------------------------------------------
+            const isTest = payment.id?.startsWith("pay_TEST") || payment.order_id?.startsWith("order_TEST");
+
+            const isLivePayment =
+                payment.gateway === "razorpay" &&
+                payment?.acquirer_data?.auth_code &&
+                !isTest; // prevent marking TEST payments as live
+
             const order = await Order.findOne({
                 $or: [
                     { razorpayOrderId: payment.order_id },
@@ -118,7 +135,10 @@ export const razorpayWebhook = async (req, res) => {
 
             if (!order.paid && typeof finalizeOrderPayment === "function") {
                 try {
-                    await finalizeOrderPayment(order, payment);
+                    await finalizeOrderPayment(order, payment, {
+                        isTest,
+                        isLivePayment
+                    });
                     console.log(`💰 Order ${order._id} marked Paid`);
                 } catch (err) {
                     console.error("❌ Error finalizing payment:", err);
@@ -161,9 +181,24 @@ export const razorpayWebhook = async (req, res) => {
                         }).populate("user"));
 
                         if (linkedOrder && !linkedOrder.paid && typeof finalizeOrderPayment === "function") {
-                            await finalizeOrderPayment(linkedOrder, rpPayment);
+
+                            const _isTest =
+                                rpPayment.id?.startsWith("pay_TEST") ||
+                                rpPayment.order_id?.startsWith("order_TEST");
+
+                            const _isLivePayment =
+                                rpPayment.gateway === "razorpay" &&
+                                rpPayment?.acquirer_data?.auth_code &&
+                                !_isTest;
+
+                            await finalizeOrderPayment(linkedOrder, rpPayment, {
+                                isTest: _isTest,
+                                isLivePayment: _isLivePayment
+                            });
+
                             console.log(`💳 Payment finalized for order ${linkedOrder._id}`);
                         }
+
                     } catch (err) {
                         console.error("❌ Error handling payment_link payment:", err);
                     }

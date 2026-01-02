@@ -356,30 +356,87 @@ export const deleteCategory = async (req, res) => {
     }
 };
 
+// export const setTopCategories = async (req, res) => {
+//     try {
+//         let { categoryIds } = req.body;
+
+//         if (!Array.isArray(categoryIds)) {
+//             return res.status(400).json({ message: "categoryIds must be an array" });
+//         }
+
+//         // 1️⃣ Remove top flag from all
+//         await Category.updateMany({}, { isTopCategory: false });
+
+//         // 2️⃣ Add top flag to selected categories
+//         await Category.updateMany(
+//             { _id: { $in: categoryIds } },
+//             { isTopCategory: true }
+//         );
+
+//         return res.status(200).json({
+//             success: true,
+//             message: "Top categories updated successfully",
+//         });
+
+//     } catch (err) {
+//         console.error("🔥 Failed to update top categories:", err);
+//         return res.status(500).json({
+//             success: false,
+//             message: "Failed to update top categories",
+//             error: err.message
+//         });
+//     }
+// };
 export const setTopCategories = async (req, res) => {
     try {
-        let { categoryIds } = req.body;
+        const { categoryIds } = req.body;
 
         if (!Array.isArray(categoryIds)) {
-            return res.status(400).json({ message: "categoryIds must be an array" });
+            return res.status(400).json({
+                success: false,
+                message: "categoryIds must be an array"
+            });
         }
 
-        // 1️⃣ Remove top flag from all
-        await Category.updateMany({}, { isTopCategory: false });
-
-        // 2️⃣ Add top flag to selected categories
+        // 1️⃣ Remove top flag from categories NOT in the list
         await Category.updateMany(
-            { _id: { $in: categoryIds } },
-            { isTopCategory: true }
+            {
+                isTopCategory: true,
+                _id: { $nin: categoryIds }
+            },
+            {
+                $set: {
+                    isTopCategory: false,
+                    topCategoryOrder: null
+                }
+            }
         );
+
+        // 2️⃣ Apply order EXACTLY as per request
+        const bulkOps = categoryIds.map((categoryId, index) => ({
+            updateOne: {
+                filter: { _id: categoryId },
+                update: {
+                    $set: {
+                        isTopCategory: true,
+                        topCategoryOrder: index + 1 // strict 1-based order
+                    }
+                },
+                upsert: false
+            }
+        }));
+
+        if (bulkOps.length) {
+            await Category.bulkWrite(bulkOps);
+        }
 
         return res.status(200).json({
             success: true,
-            message: "Top categories updated successfully",
+            message: "Top categories synced and reordered successfully"
         });
 
     } catch (err) {
-        console.error("🔥 Failed to update top categories:", err);
+        console.error("🔥 Failed to sync top categories:", err);
         return res.status(500).json({
             success: false,
             message: "Failed to update top categories",

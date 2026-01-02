@@ -11,7 +11,7 @@ import { sendEmail } from "../../middlewares/utils/emailService.js";
 import UserActivity from "../../models/UserActivity.js";
 
 import { cancelDelhiveryShipment } from "../../middlewares/services/delhiveryService.js";
-import {computeOrderStatus} from "../../controllers/orderController.js";
+import { computeOrderStatus } from "../../controllers/orderController.js";
 
 
 export function mapShipmentToUIStatus(shipment) {
@@ -437,7 +437,7 @@ export const getUserOrders = async (req, res) => {
         const firstProduct = (s.products && s.products[0]) || {};
         const prod = firstProduct.productId || {};
         return {
-          shipment_id: String(s.shipment_id),
+          shipment_id: String(s._id),
           label: `Shipment ${idx + 1}`,
           status: mapShipmentToUIStatus(s),
 
@@ -931,7 +931,7 @@ export const getShipmentDetails = async (req, res) => {
     }
 
     const order = await Order.findOne({
-      "shipments.shipment_id": shipment_id
+      "shipments._id": shipment_id
     })
       .populate("shipments.products.productId")
       .lean();
@@ -941,7 +941,7 @@ export const getShipmentDetails = async (req, res) => {
     }
 
     const shipment = order.shipments.find(
-      s => String(s.shipment_id) === String(shipment_id)
+      s => String(s._id) === String(shipment_id)
     );
 
     if (!shipment) {
@@ -970,7 +970,7 @@ export const getShipmentDetails = async (req, res) => {
     });
 
     const otherItems = order.shipments
-      .filter(s => s.shipment_id !== shipment_id)
+      .filter(s => String(s._id) !== String(shipment_id))
       .flatMap(s =>
         s.products.map(item => ({
           productId: item.productId?._id,
@@ -1055,13 +1055,13 @@ export const getShipmentDetails = async (req, res) => {
     return res.json({
       success: true,
 
-      shipmentId: shipment.shipment_id,
+      shipmentId: String(shipment._id),
       shipmentStatus: finalShipmentStatus,
       expectedDelivery: shipment.expected_delivery || null,
 
       courier: {
         name: shipment.courier_name || null,
-        awb: shipment.awb_code || null,
+        awb: shipment.waybill || null,
         trackingUrl: shipment.tracking_url || null
       },
 
@@ -1086,7 +1086,7 @@ export const getShipmentDetails = async (req, res) => {
           weekday: "long"
         }),
         deliveryPartner: shipment.courier_name || null,
-        awb: shipment.awb_code || null
+        awb: shipment.waybill || null
       }
     });
   } catch (err) {

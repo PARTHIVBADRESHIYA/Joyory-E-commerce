@@ -480,7 +480,7 @@ const ShipmentReturnSchema = new mongoose.Schema({
             status: String,
             action: String,
             performedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Admin" },
-            performedByModel: { type: String, enum: ["Admin", "System"] },
+            performedByModel: { type: String, enum: ["Admin", "System", "User"] },
             timestamp: { type: Date, default: Date.now },
             notes: String
         }

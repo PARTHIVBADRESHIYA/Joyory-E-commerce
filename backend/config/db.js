@@ -25,12 +25,13 @@ const connectDB = async () => {
     if (isConnected) return;
 
     try {
+        mongoose.set("strictQuery", false);
+
         await mongoose.connect(process.env.MONGO_URI, {
-            maxPoolSize: 10,                 // 🔥 VERY IMPORTANT
+            maxPoolSize: 10,
             serverSelectionTimeoutMS: 30000,
         });
 
-        mongoose.set("strictQuery", false);
         isConnected = true;
         console.log("✅ MongoDB Connected");
     } catch (error) {
@@ -38,5 +39,6 @@ const connectDB = async () => {
         process.exit(1);
     }
 };
+
 
 export default connectDB;
