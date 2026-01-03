@@ -14,7 +14,7 @@ import { getRedis } from "../../middlewares/utils/redis.js";
 import crypto from "crypto";
 import UserActivity from "../../models/UserActivity.js";
 
-async function invalidateCartCache(userId, sessionId) {
+export async function invalidateCartCache(userId, sessionId) {
   const redis = getRedis();
 
   try {
@@ -1294,30 +1294,26 @@ export const getCartSummary = async (req, res) => {
       const productIdStr = String(item.product?._id || item.product).trim();
       const productFromDB = productMap.get(productIdStr);
 
-      // product removed
       if (!productFromDB) {
         return {
           _id: item._id,
-          product: null,
+          product: productIdStr,          // 🔥 KEEP ID
+          isDeleted: true,                // 🔥 FLAG
           name: "Product unavailable",
           quantity: item.quantity || 1,
           stockStatus: "deleted",
-          stockMessage: "❌ This product was removed by admin.",
+          stockMessage: "This product is no longer available.",
           canCheckout: false,
           variant: {
             sku: item.selectedVariant?.sku || null,
-            shadeName: null,
-            hex: null,
-            image: null,
             stock: 0,
             originalPrice: 0,
             discountedPrice: 0,
             displayPrice: 0,
-            discountPercent: 0,
-            discountAmount: 0,
           },
         };
       }
+
 
       const enriched = productFromDB; // already enriched
       const enrichedVariant =

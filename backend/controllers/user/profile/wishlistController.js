@@ -6,6 +6,8 @@ import { enrichProductsUnified } from "../../../middlewares/services/productHelp
 import Promotion
     from "../../../models/Promotion.js";
 
+import {invalidateCartCache} from "../../../controllers/user/userCartController.js";
+
 
 // export const addToWishlist = async (req, res) => {
 //     try {
@@ -222,13 +224,17 @@ export const getWishlist = async (req, res) => {
             });
         }
 
-        // Map productId -> sku
-        const wishlistMap = new Map(
-            user.wishlist.map(item => [
-                item.productId.toString(),
-                item.sku
-            ])
-        );
+        const wishlistMap = new Map();
+
+        for (const item of user.wishlist) {
+            const pid = item.productId.toString();
+
+            if (!wishlistMap.has(pid)) {
+                wishlistMap.set(pid, []);
+            }
+
+            wishlistMap.get(pid).push(item.sku);
+        }
 
         const productIds = [...wishlistMap.keys()];
 
@@ -254,19 +260,20 @@ export const getWishlist = async (req, res) => {
         // --------------------------------
         const wishlistProducts = products
             .map(product => {
-                const sku = wishlistMap.get(product._id.toString());
+                const skus = wishlistMap.get(product._id.toString());
 
-                const selectedVariant = product.variants?.find(
-                    v => v.sku === sku
+                const selectedVariants = product.variants?.filter(v =>
+                    skus.includes(v.sku)
                 );
 
-                if (!selectedVariant) return null;
+                if (!selectedVariants.length) return null;
 
                 return {
                     ...product,
-                    variants: [selectedVariant], // 🔥 ONLY SELECTED SKU
-                    selectedSku: sku              // optional explicit flag
+                    variants: selectedVariants,
+                    selectedSkus: skus
                 };
+
             })
             .filter(Boolean);
 
@@ -307,31 +314,29 @@ export const getWishlist = async (req, res) => {
         // --------------------------------
         // 6. Shape FINAL wishlist response
         // --------------------------------
-        const compactWishlist = enrichedWishlist.map(product => {
-            const v = product.selectedVariant;
-
-            return {
+        const compactWishlist = enrichedWishlist.flatMap(product =>
+            product.variants.map(v => ({
                 productId: product._id,
                 name: product.name,
 
-                variant: v?.shadeName || null,
-                sku: v?.sku || null,
+                variant: v.shadeName || null,
+                sku: v.sku,
 
-
-                image: Array.isArray(v?.images) && v.images.length
+                image: Array.isArray(v.images) && v.images.length
                     ? v.images[0]
                     : null,
 
-                displayPrice: v?.displayPrice ?? null,
-                originalPrice: v?.originalPrice ?? null,
-                discountPercent: v?.discountPercent ?? 0,
+                displayPrice: v.displayPrice ?? null,
+                originalPrice: v.originalPrice ?? null,
+                discountPercent: v.discountPercent ?? 0,
 
-                status: v?.status || "outOfStock",
+                status: v.status || "outOfStock",
 
                 avgRating: product.avgRating || 0,
                 totalRatings: product.totalRatings || 0
-            };
-        });
+            }))
+        );
+
 
         // --------------------------------
         // 7. Response
@@ -354,23 +359,97 @@ export const getWishlist = async (req, res) => {
 
 
 // Move from wishlist to cart
+// export const moveToCart = async (req, res) => {
+//     try {
+//         const { productId } = req.params;
+//         const userId = req.user._id;
+
+//         // 1️⃣ Add product to cart
+//         await User.findByIdAndUpdate(userId, {
+//             $push: { cart: { product: productId, qty: 1 } }  // or use your cart logic
+//         });
+
+//         // 2️⃣ Remove product from wishlist
+//         await User.findByIdAndUpdate(userId, {
+//             $pull: { wishlist: productId }
+//         });
+
+//         res.status(200).json({ success: true, message: "Moved to cart" });
+//     } catch (err) {
+//         res.status(500).json({ success: false, message: err.message });
+//     }
+// };
+
+
 export const moveToCart = async (req, res) => {
     try {
         const { productId } = req.params;
+        const { sku } = req.body;
         const userId = req.user._id;
 
-        // 1️⃣ Add product to cart
-        await User.findByIdAndUpdate(userId, {
-            $push: { cart: { product: productId, qty: 1 } }  // or use your cart logic
+        if (!sku) {
+            return res.status(400).json({ message: "Variant SKU is required" });
+        }
+
+        // 1️⃣ Fetch product & variant (safety)
+        const product = await Product.findById(productId).select("variants");
+        if (!product) {
+            return res.status(404).json({ message: "Product not found" });
+        }
+
+        const variant = product.variants.find(v => v.sku === sku);
+        if (!variant) {
+            return res.status(404).json({ message: "Variant not found" });
+        }
+
+        // 2️⃣ Add to cart (variant-aware, deduplicated)
+        await User.updateOne(
+            {
+                _id: userId,
+                "cart.product": { $ne: productId } // prevent blind duplicates
+            },
+            {
+                $push: {
+                    cart: {
+                        product: productId,
+                        quantity: 1,
+                        selectedVariant: {
+                            sku: variant.sku,
+                            shadeName: variant.shadeName || null,
+                            hex: variant.hex || null,
+                            image: variant.images?.[0] || null
+                        }
+                    }
+                }
+            }
+        );
+
+        // 3️⃣ Remove ONLY that variant from wishlist
+        await User.updateOne(
+            { _id: userId },
+            {
+                $pull: {
+                    wishlist: {
+                        productId,
+                        sku
+                    }
+                }
+            }
+        );
+
+        // 4️⃣ Invalidate cart cache
+        await invalidateCartCache(userId, req.sessionID);
+
+        return res.status(200).json({
+            success: true,
+            message: "Moved to cart successfully"
         });
 
-        // 2️⃣ Remove product from wishlist
-        await User.findByIdAndUpdate(userId, {
-            $pull: { wishlist: productId }
-        });
-
-        res.status(200).json({ success: true, message: "Moved to cart" });
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        console.error("moveToCart error:", err);
+        return res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 };

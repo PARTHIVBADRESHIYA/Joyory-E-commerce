@@ -103,44 +103,6 @@ export const createDelhiveryShipment = async ({
     };
 };
 
-
-
-export const cancelDelhiveryShipment = async (waybill) => {
-    if (!waybill) throw new Error("Waybill required for Delhivery cancel");
-
-    const payload = {
-        waybill,
-        cancellation: "true"
-    };
-
-    const res = await axios.post(
-        `${DELHIVERY_BASE_URL}/api/p/edit`,
-        qs.stringify(payload),
-        {
-            headers: {
-                Authorization: `Token ${DELHIVERY_API_KEY}`,
-                "Content-Type": "application/x-www-form-urlencoded"
-            }
-        }
-    );
-
-    const data = res.data;
-
-    // ✅ SUCCESS CASES
-    if (
-        data?.status === true ||                      // boolean success
-        data?.status === "success" ||                 // string success
-        data?.remark?.toLowerCase().includes("cancelled")
-    ) {
-        return true;
-    }
-
-    // ❌ REAL FAILURE
-    throw new Error(`Delhivery cancel failed: ${JSON.stringify(data)}`);
-
-
-};
-
 export const createDelhiveryReturnShipment = async ({
     order,
     returnItems,
@@ -204,7 +166,7 @@ export const createDelhiveryReturnShipment = async ({
                 total_amount: 1,
 
                 quantity: returnItems.reduce((s, i) => s + i.quantity, 0),
-                weight: 0.5,
+                weight: 500,
                 shipping_mode: "Surface",
 
                 products_desc: "Customer Return",
@@ -284,7 +246,41 @@ export const createDelhiveryReturnShipment = async ({
 };
 
 
+export const cancelDelhiveryShipment = async (waybill) => {
+    if (!waybill) throw new Error("Waybill required for Delhivery cancel");
 
+    const payload = {
+        waybill,
+        cancellation: "true"
+    };
+
+    const res = await axios.post(
+        `${DELHIVERY_BASE_URL}/api/p/edit`,
+        qs.stringify(payload),
+        {
+            headers: {
+                Authorization: `Token ${DELHIVERY_API_KEY}`,
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
+        }
+    );
+
+    const data = res.data;
+
+    // ✅ SUCCESS CASES
+    if (
+        data?.status === true ||                      // boolean success
+        data?.status === "success" ||                 // string success
+        data?.remark?.toLowerCase().includes("cancelled")
+    ) {
+        return true;
+    }
+
+    // ❌ REAL FAILURE
+    throw new Error(`Delhivery cancel failed: ${JSON.stringify(data)}`);
+
+
+};
 
 export async function validatePincodeServiceabilityDelhivery(pincode, cod = true) {
     try {
