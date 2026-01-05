@@ -1806,6 +1806,237 @@ export const getProductsByCategory = async (req, res) => {
     }
 };
 
+// export const getSingleProduct = async (req, res) => {
+//     try {
+//         const { idOrSlug } = req.params;
+//         const variant = req.query.variant ?? "*";
+
+//         let query;
+//         let selectedVariantSlug = null;
+//         let selectedSku = req.query.variant;
+
+//         // 🔥 Redis
+//         const redis = getRedis();
+//         const redisKey = `prod:${PRODUCT_CACHE_VERSION}:${idOrSlug}:${variant}`;
+
+//         const cached = await redis.get(redisKey);
+//         if (cached) {
+//             return res.status(200).json(JSON.parse(cached));
+//         }
+
+//         // --------------------------------------------------
+//         // 🔥 Decide query (ID / Product slug / Variant slug)
+//         // --------------------------------------------------
+//         if (mongoose.Types.ObjectId.isValid(idOrSlug)) {
+//             query = { _id: idOrSlug };
+//         } else {
+//             query = {
+//                 $or: [
+//                     { "variants.slug": idOrSlug }, // 🔥 variant slug
+//                     { slugs: { $in: [idOrSlug] } } // product slug fallback
+//                 ]
+//             };
+//             selectedVariantSlug = idOrSlug;
+//         }
+
+//         const selectFields = [
+//             "_id", "name", "slugs", "mrp", "price", "discountPercent",
+//             "discountAmount", "images", "variants", "shadeOptions",
+//             "brand", "category", "categorySlug", "avgRating",
+//             "totalRatings", "inStock", "selectedVariant", "views",
+//             "commentsCount", "productTags", "formulation", "skinTypes",
+//             "createdAt", "discountedPrice", "description",
+//             "howToUse", "ingredients", "features"
+//         ].join(" ");
+
+//         // --------------------------------------------------
+//         // 🔥 Fetch product
+//         // --------------------------------------------------
+//         const product = await Product.findOneAndUpdate(
+//             { ...query, isPublished: true },
+//             { $inc: { views: 1 } },
+//             { new: true }
+//         )
+//             .select(selectFields)
+//             .lean();
+
+//         if (!product) {
+//             return res.status(404).json({
+//                 message: "❌ Product not found or may have been removed."
+//             });
+//         }
+
+//         // --------------------------------------------------
+//         // 🔥 Track PRODUCT VIEW Activity Log
+//         // --------------------------------------------------
+//         try {
+//             await UserActivity.create({
+//                 user: req.user?._id || null,
+//                 type: "product_view",
+//                 product: product._id
+//             });
+//         } catch (err) {
+//             console.error("Activity log failed:", err);
+//         }
+
+//         // --------------------------------------------------
+//         // 🔥 AUTO-DETECT SKU FROM VARIANT SLUG (CORRECT PLACE)
+//         // --------------------------------------------------
+//         if (!selectedSku && selectedVariantSlug && product.variants?.length) {
+//             const matchedVariant = product.variants.find(
+//                 v => v.slug === selectedVariantSlug
+//             );
+//             if (matchedVariant) {
+//                 selectedSku = matchedVariant.sku;
+//             }
+//         }
+
+//         // --------------------------------------------------
+//         // 🔥 Track recently viewed + USER funnel viewCount
+//         // --------------------------------------------------
+//         try {
+//             if (req.user?._id) {
+//                 await User.findByIdAndUpdate(
+//                     req.user._id,
+//                     [
+//                         {
+//                             $set: {
+//                                 recentlyViewed: {
+//                                     $slice: [
+//                                         {
+//                                             $concatArrays: [
+//                                                 [{
+//                                                     product: product._id,
+//                                                     viewedAt: new Date()
+//                                                 }],
+//                                                 {
+//                                                     $filter: {
+//                                                         input: "$recentlyViewed",
+//                                                         as: "item",
+//                                                         cond: {
+//                                                             $ne: ["$$item.product", product._id]
+//                                                         }
+//                                                     }
+//                                                 }
+//                                             ]
+//                                         },
+//                                         20
+//                                     ]
+//                                 }
+//                             }
+//                         },
+//                         {
+//                             // 🔥 Funnel tracking (ADMIN analytics)
+//                             $set: {
+//                                 "conversionStats.viewCount": {
+//                                     $add: [
+//                                         { $ifNull: ["$conversionStats.viewCount", 0] },
+//                                         1
+//                                     ]
+//                                 }
+
+//                             }
+//                         }
+//                     ],
+//                     { upsert: false }
+//                 );
+//             }
+//         } catch (err) {
+//             console.error("Recently viewed / funnel tracking failed:", err);
+//         }
+
+//         // --------------------------------------------------
+//         // 🔥 Brand
+//         // --------------------------------------------------
+//         let brandData = null;
+//         if (product.brand) {
+//             brandData = await Brand.findById(product.brand)
+//                 .select("_id name")
+//                 .lean();
+//         }
+
+//         // --------------------------------------------------
+//         // 🔥 Promotions cache
+//         // --------------------------------------------------
+//         const now = Date.now();
+//         if (!_promoCache.data || now - _promoCache.ts >= _promoCache.ttl) {
+//             const dbNow = new Date();
+//             const promos = await Promotion.find({
+//                 status: "active",
+//                 startDate: { $lte: dbNow },
+//                 endDate: { $gte: dbNow }
+//             }).lean();
+
+//             _promoCache = { ts: now, data: promos, ttl: 5000 };
+//         }
+
+//         const promotions = _promoCache.data || [];
+
+//         // --------------------------------------------------
+//         // 🔥 Enrich product
+//         // --------------------------------------------------
+//         const enrichedProduct = await enrichProductsUnified(product, promotions, {
+//             selectedSku
+//         });
+
+//         // --------------------------------------------------
+//         // 🔥 Stock messages
+//         // --------------------------------------------------
+//         enrichedProduct.variants?.forEach(v => {
+//             const stock = v.stock ?? 0;
+//             if (stock <= 0) v.stockMessage = "⛔ Out of stock";
+//             else if (stock === 1) v.stockMessage = "🔥 Only 1 left";
+//             else if (stock <= 3) v.stockMessage = `⚡ Only ${stock} left`;
+//         });
+
+//         // --------------------------------------------------
+//         // 🔥 Recommendations
+//         // --------------------------------------------------
+//         const rec = await getRecommendations({
+//             mode: "alsoViewed",
+//             productId: enrichedProduct._id,
+//             categorySlug: enrichedProduct.categorySlug,
+//             userId: req.user?._id,
+//             limit: 6
+//         });
+
+//         const response = {
+//             _id: enrichedProduct._id,
+//             name: enrichedProduct.name,
+//             slugs: enrichedProduct.slugs,
+//             brand: brandData,
+//             mrp: enrichedProduct.mrp,
+//             variants: enrichedProduct.variants,
+//             shadeOptions: enrichedProduct.shadeOptions || [],
+//             avgRating: enrichedProduct.avgRating,
+//             totalRatings: enrichedProduct.totalRatings,
+//             selectedVariant: enrichedProduct.selectedVariant,
+//             description: enrichedProduct.description,
+//             howToUse: enrichedProduct.howToUse,
+//             ingredients: enrichedProduct.ingredients,
+//             features: enrichedProduct.features,
+//             recommendations: {
+//                 alsoViewed: {
+//                     name: rec?.message || "alsoViewed",
+//                     products: rec?.success ? rec.products : []
+//                 }
+//             }
+//         };
+
+//         await redis.set(redisKey, JSON.stringify(response), "EX", 30);
+//         return res.status(200).json(response);
+
+//     } catch (err) {
+//         console.error("❌ getSingleProduct error:", err);
+//         return res.status(500).json({
+//             message: "🚫 Failed to fetch product",
+//             error: err.message
+//         });
+//     }
+// };
+
+//the above ---> getsingleproduct code is perfect working but slow so changed in bottom code ,. as on 05-01-2026
+
 export const getSingleProduct = async (req, res) => {
     try {
         const { idOrSlug } = req.params;
@@ -1815,7 +2046,9 @@ export const getSingleProduct = async (req, res) => {
         let selectedVariantSlug = null;
         let selectedSku = req.query.variant;
 
-        // 🔥 Redis
+        // --------------------------------------------------
+        // 🔥 Redis (FAST PATH)
+        // --------------------------------------------------
         const redis = getRedis();
         const redisKey = `prod:${PRODUCT_CACHE_VERSION}:${idOrSlug}:${variant}`;
 
@@ -1825,15 +2058,15 @@ export const getSingleProduct = async (req, res) => {
         }
 
         // --------------------------------------------------
-        // 🔥 Decide query (ID / Product slug / Variant slug)
+        // 🔥 Decide query (ID / slug / variant slug)
         // --------------------------------------------------
         if (mongoose.Types.ObjectId.isValid(idOrSlug)) {
             query = { _id: idOrSlug };
         } else {
             query = {
                 $or: [
-                    { "variants.slug": idOrSlug }, // 🔥 variant slug
-                    { slugs: { $in: [idOrSlug] } } // product slug fallback
+                    { "variants.slug": idOrSlug },
+                    { slugs: { $in: [idOrSlug] } }
                 ]
             };
             selectedVariantSlug = idOrSlug;
@@ -1850,13 +2083,12 @@ export const getSingleProduct = async (req, res) => {
         ].join(" ");
 
         // --------------------------------------------------
-        // 🔥 Fetch product
+        // 🔥 Fetch product (READ ONLY – FAST)
         // --------------------------------------------------
-        const product = await Product.findOneAndUpdate(
-            { ...query, isPublished: true },
-            { $inc: { views: 1 } },
-            { new: true }
-        )
+        const product = await Product.findOne({
+            ...query,
+            isPublished: true
+        })
             .select(selectFields)
             .lean();
 
@@ -1867,20 +2099,17 @@ export const getSingleProduct = async (req, res) => {
         }
 
         // --------------------------------------------------
-        // 🔥 Track PRODUCT VIEW Activity Log
+        // 🔥 Increment views ASYNC (NON-BLOCKING)
         // --------------------------------------------------
-        try {
-            await UserActivity.create({
-                user: req.user?._id || null,
-                type: "product_view",
-                product: product._id
-            });
-        } catch (err) {
-            console.error("Activity log failed:", err);
-        }
+        setImmediate(() => {
+            Product.updateOne(
+                { _id: product._id },
+                { $inc: { views: 1 } }
+            ).catch(() => { });
+        });
 
         // --------------------------------------------------
-        // 🔥 AUTO-DETECT SKU FROM VARIANT SLUG (CORRECT PLACE)
+        // 🔥 Auto-detect SKU from variant slug
         // --------------------------------------------------
         if (!selectedSku && selectedVariantSlug && product.variants?.length) {
             const matchedVariant = product.variants.find(
@@ -1892,11 +2121,17 @@ export const getSingleProduct = async (req, res) => {
         }
 
         // --------------------------------------------------
-        // 🔥 Track recently viewed + USER funnel viewCount
+        // 🔥 Async analytics (DO NOT BLOCK RESPONSE)
         // --------------------------------------------------
-        try {
-            if (req.user?._id) {
-                await User.findByIdAndUpdate(
+        if (req.user?._id) {
+            setImmediate(() => {
+                UserActivity.create({
+                    user: req.user._id,
+                    type: "product_view",
+                    product: product._id
+                }).catch(() => { });
+
+                User.findByIdAndUpdate(
                     req.user._id,
                     [
                         {
@@ -1926,7 +2161,6 @@ export const getSingleProduct = async (req, res) => {
                             }
                         },
                         {
-                            // 🔥 Funnel tracking (ADMIN analytics)
                             $set: {
                                 "conversionStats.viewCount": {
                                     $add: [
@@ -1934,46 +2168,42 @@ export const getSingleProduct = async (req, res) => {
                                         1
                                     ]
                                 }
-
                             }
                         }
-                    ],
-                    { upsert: false }
-                );
-            }
-        } catch (err) {
-            console.error("Recently viewed / funnel tracking failed:", err);
+                    ]
+                ).catch(() => { });
+            });
         }
 
         // --------------------------------------------------
-        // 🔥 Brand
+        // 🔥 Brand (parallel safe)
         // --------------------------------------------------
-        let brandData = null;
-        if (product.brand) {
-            brandData = await Brand.findById(product.brand)
-                .select("_id name")
-                .lean();
-        }
+        const brandPromise = product.brand
+            ? Brand.findById(product.brand).select("_id name").lean()
+            : Promise.resolve(null);
 
         // --------------------------------------------------
-        // 🔥 Promotions cache
+        // 🔥 Promotions (IN-MEMORY CACHE)
         // --------------------------------------------------
         const now = Date.now();
         if (!_promoCache.data || now - _promoCache.ts >= _promoCache.ttl) {
             const dbNow = new Date();
-            const promos = await Promotion.find({
+            Promotion.find({
                 status: "active",
                 startDate: { $lte: dbNow },
                 endDate: { $gte: dbNow }
-            }).lean();
-
-            _promoCache = { ts: now, data: promos, ttl: 5000 };
+            })
+                .lean()
+                .then(promos => {
+                    _promoCache = { data: promos, ts: Date.now(), ttl: 5000 };
+                })
+                .catch(() => { });
         }
 
         const promotions = _promoCache.data || [];
 
         // --------------------------------------------------
-        // 🔥 Enrich product
+        // 🔥 Enrich product (CRITICAL)
         // --------------------------------------------------
         const enrichedProduct = await enrichProductsUnified(product, promotions, {
             selectedSku
@@ -1990,16 +2220,22 @@ export const getSingleProduct = async (req, res) => {
         });
 
         // --------------------------------------------------
-        // 🔥 Recommendations
+        // 🔥 Recommendations (ASYNC – DO NOT BLOCK)
         // --------------------------------------------------
-        const rec = await getRecommendations({
+        const recommendationsPromise = getRecommendations({
             mode: "alsoViewed",
             productId: enrichedProduct._id,
             categorySlug: enrichedProduct.categorySlug,
             userId: req.user?._id,
             limit: 6
-        });
+        }).catch(() => null);
 
+        const brandData = await brandPromise;
+        const rec = await recommendationsPromise;
+
+        // --------------------------------------------------
+        // 🔥 Final response (UNCHANGED STRUCTURE)
+        // --------------------------------------------------
         const response = {
             _id: enrichedProduct._id,
             name: enrichedProduct.name,
@@ -2023,7 +2259,11 @@ export const getSingleProduct = async (req, res) => {
             }
         };
 
-        await redis.set(redisKey, JSON.stringify(response), "EX", 30);
+        // --------------------------------------------------
+        // 🔥 Redis cache (LONGER TTL)
+        // --------------------------------------------------
+        await redis.set(redisKey, JSON.stringify(response), "EX", 300);
+
         return res.status(200).json(response);
 
     } catch (err) {

@@ -1177,6 +1177,54 @@ export const cancelShipment = async (req, res) => {
         allowed: true
       };
 
+      /* --------------------------------
+   🔁 STOCK ROLLBACK (WAREHOUSE SAFE)
+-------------------------------- */
+      if (order.adminConfirmed) {
+        for (const item of shipment.products) {
+
+          const product = await Product.findById(item.productId)
+            .session(session);
+
+          if (!product) continue;
+
+          const variant = item.variant?.sku
+            ? product.variants.find(v => v.sku === item.variant.sku)
+            : null;
+
+          if (!variant) continue;
+
+          const qty = Number(item.quantity || 0);
+
+          // 🔁 Restore stock to correct warehouse
+          if (shipment.warehouseCode) {
+            const wh = variant.stockByWarehouse.find(
+              w => w.warehouseCode === shipment.warehouseCode
+            );
+
+            if (wh) {
+              wh.stock += qty;
+            } else {
+              variant.stockByWarehouse.push({
+                warehouseCode: shipment.warehouseCode,
+                stock: qty
+              });
+            }
+          }
+
+          // 🔁 Recalculate total stock
+          variant.stock = variant.stockByWarehouse.reduce(
+            (sum, w) => sum + w.stock,
+            0
+          );
+
+          // 🔁 Reverse sales
+          variant.sales = Math.max(0, (variant.sales || 0) - qty);
+
+          await product.save({ session });
+        }
+      }
+
       await order.save({ session });
     });
 

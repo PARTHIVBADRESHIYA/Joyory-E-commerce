@@ -331,6 +331,11 @@ export const getBrandCategoryProducts = async (req, res) => {
 
         const productsWithRelations = enrichedProducts.map((prod, i) => ({
             ...prod,
+            brand: {
+                _id: brand._id,
+                name: brand.name,
+                slug: brand.slug,
+            },
             category: products[i].category || null,
             formulation: products[i].formulation || null,
             skinTypes: products[i].skinTypes || []
@@ -440,6 +445,11 @@ export const getBrandLanding = async (req, res) => {
 
         const productsWithRelations = enrichedProducts.map((prod, i) => ({
             ...prod,
+            brand: {
+                _id: brand._id,
+                name: brand.name,
+                slug: brand.slug
+            },
             category: products[i].category || null,
             formulation: products[i].formulation || null,
             skinTypes: products[i].skinTypes || []
