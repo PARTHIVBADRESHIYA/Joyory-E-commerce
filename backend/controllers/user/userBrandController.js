@@ -297,7 +297,8 @@ export const getBrandCategoryProducts = async (req, res) => {
         const total = await Product.countDocuments(finalFilter);
 
         const products = await Product.find(finalFilter)
-            .populate("category", "name slug banner isActive")
+            .populate("brand", "name logo isActive")
+            .populate("category", "name slug isActive")
             .populate("formulation", "name slug isActive")
             .populate("skinTypes", "name slug isActive")
             .sort(sortOptions[sort] || { createdAt: -1 })
@@ -329,18 +330,6 @@ export const getBrandCategoryProducts = async (req, res) => {
 
         const enrichedProducts = await enrichProductsUnified(products, promotions);
 
-        const productsWithRelations = enrichedProducts.map((prod, i) => ({
-            ...prod,
-            brand: {
-                _id: brand._id,
-                name: brand.name,
-                slug: brand.slug,
-            },
-            category: products[i].category || null,
-            formulation: products[i].formulation || null,
-            skinTypes: products[i].skinTypes || []
-        }));
-
         const brandData = {
             _id: brand._id,
             name: brand.name,
@@ -352,7 +341,7 @@ export const getBrandCategoryProducts = async (req, res) => {
         const response = {
             brand: brandData,
             category,
-            products: productsWithRelations,
+            products: enrichedProducts,
             pagination: {
                 page,
                 limit,
@@ -426,6 +415,7 @@ export const getBrandLanding = async (req, res) => {
         const total = await Product.countDocuments(finalFilter);
 
         const products = await Product.find(finalFilter)
+            .populate("brand", "name slug isActive")
             .populate("category", "name slug banner isActive")
             .populate("formulation", "name slug isActive")
             .populate("skinTypes", "name slug isActive")
@@ -443,18 +433,6 @@ export const getBrandLanding = async (req, res) => {
 
         const enrichedProducts = await enrichProductsUnified(products, promotions);
 
-        const productsWithRelations = enrichedProducts.map((prod, i) => ({
-            ...prod,
-            brand: {
-                _id: brand._id,
-                name: brand.name,
-                slug: brand.slug
-            },
-            category: products[i].category || null,
-            formulation: products[i].formulation || null,
-            skinTypes: products[i].skinTypes || []
-        }));
-
         const uniqueCategoryIds = await Product.distinct("category", { brand: brand._id, isPublished: true });
         const categories = await Category.find({ _id: { $in: uniqueCategoryIds }, isActive: true })
             .select("name slug")
@@ -462,7 +440,7 @@ export const getBrandLanding = async (req, res) => {
 
         const response = {
             brand: { _id: brand._id, name: brand.name, logo: brand.logo, banner: brand.banner },
-            products: productsWithRelations,
+            products: enrichedProducts,
             categories,
             pagination: {
                 page,

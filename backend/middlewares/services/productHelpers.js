@@ -328,6 +328,29 @@ function getEligiblePromos(product, promotions) {
     return Array.from(map.values());
 }
 
+const normalizeRef = (ref) => {
+    if (!ref) return null;
+
+    // populated document
+    if (typeof ref === "object" && ref._id) {
+        return {
+            _id: ref._id,
+            name: ref.name || null,
+            slug: ref.slug || null,
+        };
+    }
+
+    // fallback ObjectId only
+    return {
+        _id: ref,
+        name: null,
+        slug: null,
+    };
+};
+
+const normalizeRefArray = (refs = []) =>
+    Array.isArray(refs) ? refs.map(normalizeRef) : [];
+
 
 function buildPromoMessages(promos) {
     return promos.map(promo => {
@@ -608,10 +631,19 @@ export const enrichProductsUnified = async (products, promotions = [], options =
                 _id: enriched._id,
                 name: enriched.name,
                 slugs: Array.isArray(enriched.slugs) ? enriched.slugs : [],
-                category: enriched.category,                   // ✅ REQUIRED
-                categoryHierarchy: enriched.categoryHierarchy, // ✅ REQUIRED
-                // ✅ FIXED BRAND FIELD
-                brand: normalizeBrand(enriched.brand),
+                // ✅ CATEGORY
+                category: normalizeRef(enriched.category),
+                categoryHierarchy: normalizeRefArray(enriched.categoryHierarchy),
+
+                // ✅ BRAND
+                brand: normalizeRef(enriched.brand),
+
+                // ✅ SKIN TYPES
+                skinTypes: normalizeRefArray(enriched.skinTypes),
+
+                // ✅ FORMULATION
+                formulation: normalizeRef(enriched.formulation),
+
                 price,
                 // 🔥 VTO FIELDS (THIS IS WHAT YOU WANT)
                 supportsVTO: Boolean(enriched.supportsVTO),

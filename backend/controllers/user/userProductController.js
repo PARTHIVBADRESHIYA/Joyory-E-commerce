@@ -1620,6 +1620,16 @@ export const getAllProducts = async (req, res) => {
         const finalFilter = await applyDynamicFilters(filters);
         finalFilter.isPublished = true;
 
+        const countKey = `products:total:${JSON.stringify(finalFilter)}`;
+        let totalProducts = await redis.get(countKey);
+
+        if (!totalProducts) {
+            totalProducts = await Product.countDocuments(finalFilter);
+            await redis.set(countKey, totalProducts, "EX", 300); // 5 min cache
+        }
+
+        totalProducts = Number(totalProducts);
+
         // 🔥 Cursor logic
         const { field, order } = sortConfig[sort] || sortConfig.recent;
 
@@ -1672,7 +1682,18 @@ export const getAllProducts = async (req, res) => {
             message = "No products found for the selected filters.";
         }
 
+        let titleMessage = null;
+
+        if (totalProducts > 0) {
+            titleMessage = `${totalProducts} products found`;
+        }
+
+        if (!totalProducts) {
+            titleMessage = "No products found for your selection";
+        }
+
         const response = {
+            titleMessage,
             products: enriched,
             pagination: {
                 hasMore,
@@ -1764,6 +1785,8 @@ export const getProductsByCategory = async (req, res) => {
             .select("name slugs  price discountedPrice minPrice maxPrice brand category variants avgRating")
             .populate("brand", "name slug")
             .populate("category", "name slug")
+            .populate("formulation", "name slug isActive")
+            .populate("skinTypes", "name slug isActive")
             .sort(sortMap[sort] || sortMap.recent)
             .skip((page - 1) * limit)
             .limit(limit)
