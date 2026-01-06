@@ -763,7 +763,7 @@ export const uploadProductWithVariants = multer({
       return cb(new Error("Invalid image file"), false);
     cb(null, true);
   },
-  limits: { fileSize: 10 * 1024 * 1024, files: 50 },
+  limits: { fileSize: 10 * 1024 * 1024, files: 250 },
 }).any();
 
 // -------------------- Universal Media Uploader --------------------
@@ -814,7 +814,7 @@ export const uploadMultipleToCloudinary = async (files, folder) => {
 };
 
 // -------------------- All Uploaders Export --------------------
-export const uploadProduct = makeImageUploader(25);
+export const uploadProduct = makeImageUploader(250);
 export const uploadCampaign = makeImageUploader(1);
 export const uploadBlogImage = makeImageUploader(1);
 export const uploadCommentImage = makeImageUploader(1);

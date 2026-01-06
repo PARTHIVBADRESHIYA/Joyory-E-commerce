@@ -20,7 +20,7 @@ router.delete('/products/:id', verifyAdminOrTeamMember,checkPermission("products
 router.patch(
     "/products/:id/variants/:sku/images",
     verifyAdminOrTeamMember,
-    uploadProduct.array("images", 15), // allow up to 5 images
+    uploadProduct.array("images", 250), // allow up to 5 images
     checkPermission("products:update"),
     updateVariantImages
 );
