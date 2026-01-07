@@ -1152,13 +1152,15 @@ export const getShipmentDetails = async (req, res) => {
 export const cancelShipment = async (req, res) => {
   const session = await mongoose.startSession();
 
+  let provider = null;
+  let waybill = null;
   let shiprocketOrderId = null;
   let orderIdForRetry = null;
   let shipmentIdForRetry = null;
 
   try {
-    const { orderId, shipment_id } = req.params;
-    const { reason } = req.body || {};
+    const { shipment_id } = req.params;
+    const { orderId, reason } = req.body;
     const userId = req.user._id;
 
     if (!reason || !reason.trim()) {
@@ -1169,10 +1171,15 @@ export const cancelShipment = async (req, res) => {
     }
 
     await session.withTransaction(async () => {
-      const order = await Order.findById(orderId).session(session);
-      if (!order) throw new Error("Order not found");
+      const order = await Order.findOne({
+        _id: orderId,
+        user: userId
+      }).session(session);
 
-      // ✅ OWNERSHIP CHECK (MANDATORY)
+      if (!order) {
+        throw new Error("Order not found or unauthorized");
+      }
+
       if (String(order.user) !== String(userId)) {
         throw new Error("Unauthorized cancellation attempt");
       }
@@ -1180,13 +1187,14 @@ export const cancelShipment = async (req, res) => {
       const shipment = order.shipments.id(shipment_id);
       if (!shipment) throw new Error("Shipment not found");
 
-      // ❌ Prevent double cancellation
+      // ❌ Prevent double cancel
       if (shipment.status === "Cancelled") {
         throw new Error("Shipment already cancelled");
       }
 
-      // ❌ Cannot cancel shipped shipments
+      // ❌ Strict cancellation gate (MATCH ADMIN LOGIC)
       const blockedStatuses = [
+        "Picked Up",
         "In Transit",
         "Out for Delivery",
         "Delivered"
@@ -1198,12 +1206,16 @@ export const cancelShipment = async (req, res) => {
         );
       }
 
-      // 🔒 Save Shiprocket ID for AFTER transaction
-      shiprocketOrderId = shipment.shiprocket_order_id;
+      // 🔒 Capture provider identifiers (for AFTER commit)
+      provider = shipment.provider;
+      waybill = shipment.waybill || null;
+      shiprocketOrderId = shipment.shiprocket_order_id || null;
       orderIdForRetry = order._id;
       shipmentIdForRetry = shipment._id;
 
-      // ✅ DB UPDATE ONLY (NO EXTERNAL API)
+      /* -------------------------------
+         DB UPDATE ONLY
+      -------------------------------- */
       shipment.status = "Cancelled";
       shipment.tracking_history.push({
         status: "Cancelled",
@@ -1211,7 +1223,7 @@ export const cancelShipment = async (req, res) => {
         description: "Shipment cancelled by user"
       });
 
-      // 🧮 Recalculate order status
+      // 🧮 Order status
       const statuses = order.shipments.map(s => s.status);
 
       if (statuses.every(s => s === "Cancelled")) {
@@ -1220,7 +1232,7 @@ export const cancelShipment = async (req, res) => {
         order.orderStatus = "Partially Cancelled";
       }
 
-      // ✅ KEEP HISTORY SAFE (NO OVERWRITE)
+      // 🧾 Cancellation metadata
       order.cancellation = {
         cancelledBy: userId,
         reason,
@@ -1228,12 +1240,11 @@ export const cancelShipment = async (req, res) => {
         allowed: true
       };
 
-      /* --------------------------------
-   🔁 STOCK ROLLBACK (WAREHOUSE SAFE)
--------------------------------- */
+      /* -------------------------------
+         🔁 STOCK ROLLBACK (WAREHOUSE SAFE)
+      -------------------------------- */
       if (order.adminConfirmed) {
         for (const item of shipment.products) {
-
           const product = await Product.findById(item.productId)
             .session(session);
 
@@ -1247,7 +1258,6 @@ export const cancelShipment = async (req, res) => {
 
           const qty = Number(item.quantity || 0);
 
-          // 🔁 Restore stock to correct warehouse
           if (shipment.warehouseCode) {
             const wh = variant.stockByWarehouse.find(
               w => w.warehouseCode === shipment.warehouseCode
@@ -1263,13 +1273,11 @@ export const cancelShipment = async (req, res) => {
             }
           }
 
-          // 🔁 Recalculate total stock
           variant.stock = variant.stockByWarehouse.reduce(
             (sum, w) => sum + w.stock,
             0
           );
 
-          // 🔁 Reverse sales
           variant.sales = Math.max(0, (variant.sales || 0) - qty);
 
           await product.save({ session });
@@ -1279,46 +1287,50 @@ export const cancelShipment = async (req, res) => {
       await order.save({ session });
     });
 
-    // 🚚 Shiprocket cancellation AFTER DB COMMIT
-    if (shiprocketOrderId) {
-      try {
-        await cancelShiprocketShipment(shiprocketOrderId);
-      } catch (err) {
-        console.error("⚠️ Shiprocket cancel failed:", err.message);
-
-        // 🔁 OPTIONAL: Mark as sync_failed (recommended)
-        await Order.updateOne(
-          {
-            _id: orderIdForRetry,
-            "shipments._id": shipmentIdForRetry
-          },
-          {
-            $set: {
-              "shipments.$.status": "Cancelled",
-              "shipments.$.sync_failed": true,
-              "shipments.$.sync_failed_at": new Date()
-            }
-
-          }
-        );
+    /* =================================================
+       🚚 PROVIDER CANCELLATION (AFTER COMMIT)
+    ================================================= */
+    try {
+      if (provider === "delhivery" && waybill) {
+        await cancelDelhiveryShipment(waybill);
       }
+
+      if (provider === "shiprocket" && shiprocketOrderId) {
+        await cancelShiprocketShipment(shiprocketOrderId);
+      }
+    } catch (err) {
+      console.error("⚠️ Provider cancellation failed:", err.message);
+
+      await Order.updateOne(
+        {
+          _id: orderIdForRetry,
+          "shipments._id": shipmentIdForRetry
+        },
+        {
+          $set: {
+            "shipments.$.sync_failed": true,
+            "shipments.$.sync_failed_at": new Date()
+          }
+        }
+      );
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: "Shipment cancelled successfully"
     });
 
   } catch (err) {
-    console.error(err);
-    res.status(400).json({
+    console.error("CANCEL SHIPMENT ERROR:", err);
+    return res.status(400).json({
       success: false,
       message: err.message
     });
   } finally {
-    session.endSession();
+    await session.endSession();
   }
 };
+
 
 // export const cancelOrder = async (req, res) => {
 //   const session = await mongoose.startSession();
