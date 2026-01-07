@@ -1130,6 +1130,7 @@ export const getShipmentDetails = async (req, res) => {
       trackingTimeline,
 
       orderInfo: {
+        _id: order._id,              // ✅ ADD THIS
         orderId: order.orderId,
         orderNumber: order.orderNumber || null,
         orderDate: order.createdAt,
