@@ -1445,6 +1445,7 @@ export const getCartSummary = async (req, res) => {
           discountPercent: enrichedVariant.discountPercent,
           discountAmount: enrichedVariant.discountAmount,
         },
+        itemTotal: round2(enrichedVariant.displayPrice * (item.quantity || 1)),
         freebies: item.freebies || [],   // 🔥 ADD THIS
 
       };

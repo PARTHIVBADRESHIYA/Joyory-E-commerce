@@ -1150,187 +1150,187 @@ export const getShipmentDetails = async (req, res) => {
   }
 };
 
-export const cancelShipment = async (req, res) => {
-  const session = await mongoose.startSession();
+// export const cancelShipment = async (req, res) => {
+//   const session = await mongoose.startSession();
 
-  let provider = null;
-  let waybill = null;
-  let shiprocketOrderId = null;
-  let orderIdForRetry = null;
-  let shipmentIdForRetry = null;
+//   let provider = null;
+//   let waybill = null;
+//   let shiprocketOrderId = null;
+//   let orderIdForRetry = null;
+//   let shipmentIdForRetry = null;
 
-  try {
-    const { shipment_id } = req.params;
-    const { orderId, reason } = req.body;
-    const userId = req.user._id;
+//   try {
+//     const { shipment_id } = req.params;
+//     const { orderId, reason } = req.body;
+//     const userId = req.user._id;
 
-    if (!reason || !reason.trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Cancellation reason is required"
-      });
-    }
+//     if (!reason || !reason.trim()) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Cancellation reason is required"
+//       });
+//     }
 
-    await session.withTransaction(async () => {
-      const order = await Order.findOne({
-        _id: orderId,
-        user: userId
-      }).session(session);
+//     await session.withTransaction(async () => {
+//       const order = await Order.findOne({
+//         _id: orderId,
+//         user: userId
+//       }).session(session);
 
-      if (!order) {
-        throw new Error("Order not found or unauthorized");
-      }
+//       if (!order) {
+//         throw new Error("Order not found or unauthorized");
+//       }
 
-      if (String(order.user) !== String(userId)) {
-        throw new Error("Unauthorized cancellation attempt");
-      }
+//       if (String(order.user) !== String(userId)) {
+//         throw new Error("Unauthorized cancellation attempt");
+//       }
 
-      const shipment = order.shipments.id(shipment_id);
-      if (!shipment) throw new Error("Shipment not found");
+//       const shipment = order.shipments.id(shipment_id);
+//       if (!shipment) throw new Error("Shipment not found");
 
-      // ❌ Prevent double cancel
-      if (shipment.status === "Cancelled") {
-        throw new Error("Shipment already cancelled");
-      }
+//       // ❌ Prevent double cancel
+//       if (shipment.status === "Cancelled") {
+//         throw new Error("Shipment already cancelled");
+//       }
 
-      // ❌ Strict cancellation gate (MATCH ADMIN LOGIC)
-      const blockedStatuses = [
-        "Picked Up",
-        "In Transit",
-        "Out for Delivery",
-        "Delivered"
-      ];
+//       // ❌ Strict cancellation gate (MATCH ADMIN LOGIC)
+//       const blockedStatuses = [
+//         "Picked Up",
+//         "In Transit",
+//         "Out for Delivery",
+//         "Delivered"
+//       ];
 
-      if (blockedStatuses.includes(shipment.status)) {
-        throw new Error(
-          `Shipment cannot be cancelled because it is already ${shipment.status}`
-        );
-      }
+//       if (blockedStatuses.includes(shipment.status)) {
+//         throw new Error(
+//           `Shipment cannot be cancelled because it is already ${shipment.status}`
+//         );
+//       }
 
-      // 🔒 Capture provider identifiers (for AFTER commit)
-      provider = shipment.provider;
-      waybill = shipment.waybill || null;
-      shiprocketOrderId = shipment.shiprocket_order_id || null;
-      orderIdForRetry = order._id;
-      shipmentIdForRetry = shipment._id;
+//       // 🔒 Capture provider identifiers (for AFTER commit)
+//       provider = shipment.provider;
+//       waybill = shipment.waybill || null;
+//       shiprocketOrderId = shipment.shiprocket_order_id || null;
+//       orderIdForRetry = order._id;
+//       shipmentIdForRetry = shipment._id;
 
-      /* -------------------------------
-         DB UPDATE ONLY
-      -------------------------------- */
-      shipment.status = "Cancelled";
-      shipment.tracking_history.push({
-        status: "Cancelled",
-        timestamp: new Date(),
-        description: "Shipment cancelled by user"
-      });
+//       /* -------------------------------
+//          DB UPDATE ONLY
+//       -------------------------------- */
+//       shipment.status = "Cancelled";
+//       shipment.tracking_history.push({
+//         status: "Cancelled",
+//         timestamp: new Date(),
+//         description: "Shipment cancelled by user"
+//       });
 
-      // 🧮 Order status
-      const statuses = order.shipments.map(s => s.status);
+//       // 🧮 Order status
+//       const statuses = order.shipments.map(s => s.status);
 
-      if (statuses.every(s => s === "Cancelled")) {
-        order.orderStatus = "Cancelled";
-      } else if (statuses.some(s => s === "Cancelled")) {
-        order.orderStatus = "Partially Cancelled";
-      }
+//       if (statuses.every(s => s === "Cancelled")) {
+//         order.orderStatus = "Cancelled";
+//       } else if (statuses.some(s => s === "Cancelled")) {
+//         order.orderStatus = "Partially Cancelled";
+//       }
 
-      // 🧾 Cancellation metadata
-      order.cancellation = {
-        cancelledBy: userId,
-        reason,
-        requestedAt: new Date(),
-        allowed: true
-      };
+//       // 🧾 Cancellation metadata
+//       order.cancellation = {
+//         cancelledBy: userId,
+//         reason,
+//         requestedAt: new Date(),
+//         allowed: true
+//       };
 
-      /* -------------------------------
-         🔁 STOCK ROLLBACK (WAREHOUSE SAFE)
-      -------------------------------- */
-      if (order.adminConfirmed) {
-        for (const item of shipment.products) {
-          const product = await Product.findById(item.productId)
-            .session(session);
+//       /* -------------------------------
+//          🔁 STOCK ROLLBACK (WAREHOUSE SAFE)
+//       -------------------------------- */
+//       if (order.adminConfirmed) {
+//         for (const item of shipment.products) {
+//           const product = await Product.findById(item.productId)
+//             .session(session);
 
-          if (!product) continue;
+//           if (!product) continue;
 
-          const variant = item.variant?.sku
-            ? product.variants.find(v => v.sku === item.variant.sku)
-            : null;
+//           const variant = item.variant?.sku
+//             ? product.variants.find(v => v.sku === item.variant.sku)
+//             : null;
 
-          if (!variant) continue;
+//           if (!variant) continue;
 
-          const qty = Number(item.quantity || 0);
+//           const qty = Number(item.quantity || 0);
 
-          if (shipment.warehouseCode) {
-            const wh = variant.stockByWarehouse.find(
-              w => w.warehouseCode === shipment.warehouseCode
-            );
+//           if (shipment.warehouseCode) {
+//             const wh = variant.stockByWarehouse.find(
+//               w => w.warehouseCode === shipment.warehouseCode
+//             );
 
-            if (wh) {
-              wh.stock += qty;
-            } else {
-              variant.stockByWarehouse.push({
-                warehouseCode: shipment.warehouseCode,
-                stock: qty
-              });
-            }
-          }
+//             if (wh) {
+//               wh.stock += qty;
+//             } else {
+//               variant.stockByWarehouse.push({
+//                 warehouseCode: shipment.warehouseCode,
+//                 stock: qty
+//               });
+//             }
+//           }
 
-          variant.stock = variant.stockByWarehouse.reduce(
-            (sum, w) => sum + w.stock,
-            0
-          );
+//           variant.stock = variant.stockByWarehouse.reduce(
+//             (sum, w) => sum + w.stock,
+//             0
+//           );
 
-          variant.sales = Math.max(0, (variant.sales || 0) - qty);
+//           variant.sales = Math.max(0, (variant.sales || 0) - qty);
 
-          await product.save({ session });
-        }
-      }
+//           await product.save({ session });
+//         }
+//       }
 
-      await order.save({ session });
-    });
+//       await order.save({ session });
+//     });
 
-    /* =================================================
-       🚚 PROVIDER CANCELLATION (AFTER COMMIT)
-    ================================================= */
-    try {
-      if (provider === "delhivery" && waybill) {
-        await cancelDelhiveryShipment(waybill);
-      }
+//     /* =================================================
+//        🚚 PROVIDER CANCELLATION (AFTER COMMIT)
+//     ================================================= */
+//     try {
+//       if (provider === "delhivery" && waybill) {
+//         await cancelDelhiveryShipment(waybill);
+//       }
 
-      if (provider === "shiprocket" && shiprocketOrderId) {
-        await cancelShiprocketShipment(shiprocketOrderId);
-      }
-    } catch (err) {
-      console.error("⚠️ Provider cancellation failed:", err.message);
+//       if (provider === "shiprocket" && shiprocketOrderId) {
+//         await cancelShiprocketShipment(shiprocketOrderId);
+//       }
+//     } catch (err) {
+//       console.error("⚠️ Provider cancellation failed:", err.message);
 
-      await Order.updateOne(
-        {
-          _id: orderIdForRetry,
-          "shipments._id": shipmentIdForRetry
-        },
-        {
-          $set: {
-            "shipments.$.sync_failed": true,
-            "shipments.$.sync_failed_at": new Date()
-          }
-        }
-      );
-    }
+//       await Order.updateOne(
+//         {
+//           _id: orderIdForRetry,
+//           "shipments._id": shipmentIdForRetry
+//         },
+//         {
+//           $set: {
+//             "shipments.$.sync_failed": true,
+//             "shipments.$.sync_failed_at": new Date()
+//           }
+//         }
+//       );
+//     }
 
-    return res.json({
-      success: true,
-      message: "Shipment cancelled successfully"
-    });
+//     return res.json({
+//       success: true,
+//       message: "Shipment cancelled successfully"
+//     });
 
-  } catch (err) {
-    console.error("CANCEL SHIPMENT ERROR:", err);
-    return res.status(400).json({
-      success: false,
-      message: err.message
-    });
-  } finally {
-    await session.endSession();
-  }
-};
+//   } catch (err) {
+//     console.error("CANCEL SHIPMENT ERROR:", err);
+//     return res.status(400).json({
+//       success: false,
+//       message: err.message
+//     });
+//   } finally {
+//     await session.endSession();
+//   }
+// };
 
 
 // export const cancelOrder = async (req, res) => {
@@ -1436,6 +1436,171 @@ export const cancelShipment = async (req, res) => {
 //   }
 // };
 
+export const cancelShipment = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  try {
+    const { shipment_id } = req.params;
+    const { orderId, reason } = req.body;
+    const userId = req.user._id;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Cancellation reason is required"
+      });
+    }
+
+    // =================================================
+    // 🔎 FETCH DATA (NO TRANSACTION YET)
+    // =================================================
+    const order = await Order.findOne({
+      _id: orderId,
+      user: userId
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found or unauthorized"
+      });
+    }
+
+    const shipment = order.shipments.id(shipment_id);
+    if (!shipment) {
+      return res.status(404).json({
+        success: false,
+        message: "Shipment not found"
+      });
+    }
+
+    if (shipment.status === "Cancelled") {
+      return res.status(400).json({
+        success: false,
+        message: "Shipment already cancelled"
+      });
+    }
+
+    const blockedStatuses = [
+      "Picked Up",
+      "In Transit",
+      "Out for Delivery",
+      "Delivered"
+    ];
+
+    if (blockedStatuses.includes(shipment.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Shipment cannot be cancelled because it is already ${shipment.status}`
+      });
+    }
+
+    // =================================================
+    // 🚚 PHASE 1: DELHIVERY CANCEL (CRITICAL)
+    // =================================================
+    const waybill =
+      shipment.waybill ||
+      shipment.awb ||
+      shipment.courier?.awb;
+
+    if (!waybill) {
+      return res.status(400).json({
+        success: false,
+        message: "Waybill not found. Cannot cancel shipment."
+      });
+    }
+
+    try {
+      await cancelDelhiveryShipment(waybill);
+    } catch (err) {
+      console.error("❌ Delhivery cancellation failed:", err.message);
+      return res.status(502).json({
+        success: false,
+        message: "Unable to cancel shipment with courier. Please try later."
+      });
+    }
+
+    // =================================================
+    // 🧾 PHASE 2: DB TRANSACTION (SAFE NOW)
+    // =================================================
+    await session.withTransaction(async () => {
+      const txOrder = await Order.findOne({
+        _id: orderId,
+        user: userId
+      }).session(session);
+
+      const txShipment = txOrder.shipments.id(shipment_id);
+
+      txShipment.status = "Cancelled";
+      txShipment.tracking_history.push({
+        status: "Cancelled",
+        timestamp: new Date(),
+        description: "Shipment cancelled by user"
+      });
+
+      const statuses = txOrder.shipments.map(s => s.status);
+
+      if (statuses.every(s => s === "Cancelled")) {
+        txOrder.orderStatus = "Cancelled";
+      } else if (statuses.some(s => s === "Cancelled")) {
+        txOrder.orderStatus = "Partially Cancelled";
+      }
+
+      txOrder.cancellation = {
+        cancelledBy: userId,
+        reason,
+        requestedAt: new Date(),
+        allowed: true
+      };
+
+      // 🔁 STOCK ROLLBACK
+      if (txOrder.adminConfirmed) {
+        for (const item of txShipment.products) {
+          const product = await Product.findById(item.productId).session(session);
+          if (!product) continue;
+
+          const variant = product.variants.find(
+            v => v.sku === item.variant?.sku
+          );
+          if (!variant) continue;
+
+          const qty = Number(item.quantity || 0);
+
+          const wh = variant.stockByWarehouse.find(
+            w => w.warehouseCode === txShipment.warehouseCode
+          );
+
+          if (wh) wh.stock += qty;
+
+          variant.stock = variant.stockByWarehouse.reduce(
+            (sum, w) => sum + w.stock,
+            0
+          );
+
+          variant.sales = Math.max(0, (variant.sales || 0) - qty);
+
+          await product.save({ session });
+        }
+      }
+
+      await txOrder.save({ session });
+    });
+
+    return res.json({
+      success: true,
+      message: "Shipment cancelled successfully"
+    });
+
+  } catch (err) {
+    console.error("CANCEL SHIPMENT ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong"
+    });
+  } finally {
+    await session.endSession();
+  }
+};
 
 
 export const cancelOrder = async (req, res) => {
