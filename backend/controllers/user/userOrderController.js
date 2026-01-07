@@ -14,29 +14,72 @@ import { cancelDelhiveryShipment } from "../../middlewares/services/delhiverySer
 import { computeOrderStatus } from "../../controllers/orderController.js";
 
 
+// export function mapShipmentToUIStatus(shipment) {
+//   if (!shipment) return "Confirmed";
+
+//   // 1️⃣ Delivered
+//   if (
+//     shipment.status === "Delivered" ||
+//     shipment.status === "RTO Delivered"
+//   ) {
+//     return "Delivered";
+//   }
+
+//   // 2️⃣ Shipped
+//   const shippedStatuses = [
+//     "AWB Assigned",
+//     "Pickup Scheduled",
+//     "Pickup Done",
+//     "In Transit",
+//     "Out for Delivery",
+//     "Shipped",
+//     "Awaiting Pickup"
+//   ];
+
+//   if (shippedStatuses.includes(shipment.status)) {
+//     return "Shipped";
+//   }
+
+//   // 3️⃣ Default
+//   return "Confirmed";
+// }
+
+
 export function mapShipmentToUIStatus(shipment) {
   if (!shipment) return "Confirmed";
 
+  const status = shipment.status?.toLowerCase?.() || "";
+
+  // 4️⃣ Cancelled (TOP PRIORITY)
+  if (
+    status === "cancelled" ||
+    status.includes("cancel") ||
+    status.includes("rto")
+  ) {
+    return "Cancelled";
+  }
+
   // 1️⃣ Delivered
   if (
-    shipment.status === "Delivered" ||
-    shipment.status === "RTO Delivered"
+    status === "delivered" ||
+    status === "rto delivered"
   ) {
     return "Delivered";
   }
 
   // 2️⃣ Shipped
   const shippedStatuses = [
-    "AWB Assigned",
-    "Pickup Scheduled",
-    "Pickup Done",
-    "In Transit",
-    "Out for Delivery",
-    "Shipped",
-    "Awaiting Pickup"
+    "awb assigned",
+    "pickup scheduled",
+    "picked up",
+    "pickup done",
+    "in transit",
+    "out for delivery",
+    "shipped",
+    "awaiting pickup"
   ];
 
-  if (shippedStatuses.includes(shipment.status)) {
+  if (shippedStatuses.includes(status)) {
     return "Shipped";
   }
 
@@ -105,6 +148,15 @@ export const initiateOrderFromCart = async (req, res) => {
       giftCardPin: req.body?.giftCardPin || req.query?.giftCardPin,
       giftCardAmount: req.body?.giftCardAmount || req.query?.giftCardAmount,
     });
+
+    // 🔥 STOP abandoned cart emails
+    await User.findByIdAndUpdate(user._id, {
+      $set: {
+        "abandonedCart.isActive": false,
+        "abandonedCart.checkoutStartedAt": new Date()
+      }
+    });
+
 
     const {
       cart,
@@ -439,8 +491,7 @@ export const getUserOrders = async (req, res) => {
         return {
           shipment_id: String(s._id),
           label: `Shipment ${idx + 1}`,
-          status: mapShipmentToUIStatus(s),
-
+          status: s.status,
           date: s.deliveredAt || s.expected_delivery || o.createdAt,
           products: [
             {
@@ -948,7 +999,7 @@ export const getShipmentDetails = async (req, res) => {
       return res.status(404).json({ success: false, message: "Shipment not found" });
     }
 
-    const finalShipmentStatus = mapShipmentToUIStatus(shipment);
+    const shipmentStatus = shipment.status;
 
     // --------------------------------------------------
     // SHIPMENT PRODUCTS (UNCHANGED)
@@ -1056,7 +1107,7 @@ export const getShipmentDetails = async (req, res) => {
       success: true,
 
       shipmentId: String(shipment._id),
-      shipmentStatus: finalShipmentStatus,
+      shipmentStatus,
       expectedDelivery: shipment.expected_delivery || null,
 
       courier: {

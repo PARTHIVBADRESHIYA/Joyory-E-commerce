@@ -2290,7 +2290,7 @@ export const getSingleProduct = async (req, res) => {
         return res.status(200).json(response);
 
     } catch (err) {
-        console.error("❌ getSingleProduct error:", err);
+        console.error("❌ getSingleProduct error:", err);   
         return res.status(500).json({
             message: "🚫 Failed to fetch product",
             error: err.message

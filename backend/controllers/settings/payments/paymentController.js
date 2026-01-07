@@ -1776,7 +1776,32 @@ const isCodAllowed = ({ pincode, amount, user }) => {
     return true;
 };
 
-export const clearUserCart = async (userId, session = null) => {
+// export const clearUserCart = async (userId, session = null) => {
+//     if (!userId) return;
+
+//     const update = {
+//         $set: {
+//             cart: [],
+//             cartSubtotal: 0,
+//             cartDiscount: 0,
+//             cartUpdatedAt: new Date()
+//         }
+//     };
+
+//     if (session) {
+//         await User.updateOne({ _id: userId }, update).session(session);
+//     } else {
+//         await User.updateOne({ _id: userId }, update);
+//     }
+// };
+
+export const clearUserCart = async (
+    userId,
+    {
+        session = null,
+        reason = "order_completed" // or "manual_clear", "payment_failed"
+    } = {}
+) => {
     if (!userId) return;
 
     const update = {
@@ -1784,17 +1809,23 @@ export const clearUserCart = async (userId, session = null) => {
             cart: [],
             cartSubtotal: 0,
             cartDiscount: 0,
-            cartUpdatedAt: new Date()
+            cartUpdatedAt: new Date(),
+
+            // 🛑 STOP abandoned cart funnel
+            "abandonedCart.isActive": false,
+            "abandonedCart.clearedAt": new Date(),
+            "abandonedCart.clearedReason": reason
         }
     };
 
+    const query = User.updateOne({ _id: userId }, update);
+
     if (session) {
-        await User.updateOne({ _id: userId }, update).session(session);
+        await query.session(session);
     } else {
-        await User.updateOne({ _id: userId }, update);
+        await query;
     }
 };
-
 
 export const isFraudulentCodOrder = async (order, user, shippingAddress) => {
     const { amount } = order || {};
@@ -3370,7 +3401,7 @@ export const createGiftCardPayment = async (req, res) => {
 
             await order.save({ session });
 
-            
+
             // 🔔 Notify Admin: New Gift Card Order
             await sendNotification({
                 type: "order_giftcard",

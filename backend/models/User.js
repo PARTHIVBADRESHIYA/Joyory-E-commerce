@@ -53,6 +53,19 @@ const userSchema = new mongoose.Schema({
             }
         }
     ],
+    abandonedCart: {
+        isActive: { type: Boolean, default: false },
+
+        lastUpdatedAt: { type: Date },   // updated on add/remove cart
+        checkoutStartedAt: { type: Date }, // ✅ FIX
+
+        emailStages: {
+            stage1SentAt: Date, // 1 hr
+            stage2SentAt: Date, // 24 hr
+            stage3SentAt: Date  // 72 hr
+        }
+    },
+
     loginAttempts: { type: Number, default: 0 },
     lockUntil: { type: Date },
     otp: {

@@ -51,21 +51,58 @@ export const getCart = async (req, res) => {
   res.status(200).json({ cart: user.cart });
 };
 
+// export const updateCartItem = async (req, res) => {
+//   const { productId, quantity, variantSku } = req.body;
+//   const user = await User.findById(req.user._id);
+
+//   const item = user.cart.find(
+//     p =>
+//       p.product.toString() === productId &&
+//       (!variantSku || p.selectedVariant?.sku === variantSku)
+//   );
+//   if (!item) return res.status(404).json({ message: "Product not in cart" });
+
+//   item.quantity = quantity;
+//   await user.save();
+
+//   res.status(200).json({ message: "✅ Cart updated", cart: user.cart });
+// };
+
+
 export const updateCartItem = async (req, res) => {
-  const { productId, quantity, variantSku } = req.body;
-  const user = await User.findById(req.user._id);
+  try {
+    const { productId, quantity, variantSku } = req.body;
+    const user = await User.findById(req.user._id);
 
-  const item = user.cart.find(
-    p =>
-      p.product.toString() === productId &&
-      (!variantSku || p.selectedVariant?.sku === variantSku)
-  );
-  if (!item) return res.status(404).json({ message: "Product not in cart" });
+    const item = user.cart.find(
+      p =>
+        p.product.toString() === productId &&
+        (!variantSku || p.selectedVariant?.sku === variantSku)
+    );
 
-  item.quantity = quantity;
-  await user.save();
+    if (!item)
+      return res.status(404).json({ message: "Product not in cart" });
 
-  res.status(200).json({ message: "✅ Cart updated", cart: user.cart });
+    // 🔥 Update quantity
+    item.quantity = quantity;
+
+    // 🔥 Update abandoned cart timestamp (important for funnel)
+    user.abandonedCart.lastUpdatedAt = new Date();
+
+    await user.save();
+
+    // 🔥 CRITICAL: invalidate cart snapshot
+    await invalidateCartCache(req.user._id, null);
+
+    res.status(200).json({
+      success: true,
+      message: "✅ Cart updated",
+      cart: user.cart,
+    });
+  } catch (err) {
+    console.error("❌ updateCartItem error", err);
+    res.status(500).json({ message: "Failed to update cart" });
+  }
 };
 
 export const removeFromCart = async (req, res) => {
@@ -140,6 +177,19 @@ export const addToCart = async (req, res) => {
 
         cart = await handleCart(user.cart, product, variants, qty);
         user.cart = cart;
+
+        user.abandonedCart.isActive = true;
+        user.abandonedCart.lastUpdatedAt = new Date();
+
+        // reset email stages ONLY if cart was inactive
+        if (!user.abandonedCart.emailStages) {
+          user.abandonedCart.emailStages = {};
+        }
+
+        user.abandonedCart.emailStages.stage1SentAt = null;
+        user.abandonedCart.emailStages.stage2SentAt = null;
+        user.abandonedCart.emailStages.stage3SentAt = null;
+
         await user.save();
 
         // 🔥 Track add-to-cart activity
@@ -856,6 +906,23 @@ async function handleCart(cart, product, variants, qty) {
 
 
 // --- CACHES / TTLs ---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 let _promoCache = { data: null, ts: 0, ttl: 5000 };   // existing (kept)
 let _couponCache = { data: null, ts: 0, ttl: 5000 };  // existing (kept)
 
@@ -863,7 +930,7 @@ const PRODUCT_CACHE_TTL = 300;        // 5 minutes for raw product doc
 const ENRICHED_PRODUCT_TTL = 20;      // 20 seconds for enriched product (max-speed)
 const PROMO_CACHE_TTL = 60;           // 20s promo cache in redis layer
 const COUPON_CACHE_TTL = 20;          // 20s coupon cache in redis layer
-const CART_CACHE_TTL = 60;            // 60s cart snapshot cache
+const CART_CACHE_TTL = 20;            // 60s cart snapshot cache
 
 // ---------- helper: get raw product from cache/db ----------
 async function getCachedProduct(productId) {
@@ -963,22 +1030,42 @@ function promoHashFromPromos(promos = []) {
 export const getCartSummary = async (req, res) => {
   try {
 
+
     const redis = getRedis();  // 🔥 REQUIRED FIX
+
+    const skipSnapshotCache = req.query.fast === "1";
 
     // -------------------- Redis snapshot cache --------------------
     const cartKeySnapshot = (() => {
       try {
-        const cartItemsSnapshot = (req.user && req.user._id && req.user.cart)
-          ? req.user.cart.map(i => ({
-            product: String(i.product?._id || i.product),
-            qty: i.quantity,
-            sku: i.selectedVariant?.sku || null,
-          }))
-          : (req.session?.guestCart || []).map(i => ({
+        // const cartItemsSnapshot = (req.user && req.user._id && req.user.cart)
+        //   ? req.user.cart.map(i => ({
+        //     product: String(i.product?._id || i.product),
+        //     qty: i.quantity,
+        //     sku: i.selectedVariant?.sku || null,
+        //   }))
+        //   : (req.session?.guestCart || []).map(i => ({
+        //     product: String(i.product),
+        //     qty: i.quantity,
+        //     sku: i.selectedVariant?.sku || null,
+        //   }));
+
+        const cartItemsSnapshot = (() => {
+          if (req.user && req.user._id) {
+            return cartSource.map(i => ({
+              product: String(i.product?._id || i.product),
+              qty: i.quantity,
+              sku: i.selectedVariant?.sku || null,
+            }));
+          }
+
+          return (req.session?.guestCart || []).map(i => ({
             product: String(i.product),
             qty: i.quantity,
             sku: i.selectedVariant?.sku || null,
           }));
+        })();
+
 
         return JSON.stringify({
           userId: req.user?._id ? String(req.user._id) : null,
@@ -1002,8 +1089,11 @@ export const getCartSummary = async (req, res) => {
 
     // Try fast path: return cached cart snapshot
     try {
-      const cached = await redis.get(redisKey);
-      if (cached) return res.status(200).json(JSON.parse(cached));
+      if (!skipSnapshotCache) {
+        const cached = await redis.get(redisKey);
+        if (cached) return res.status(200).json(JSON.parse(cached));
+      }
+
     } catch (err) {
       console.error("Redis get failed:", err);
       // degrade gracefully

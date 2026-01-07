@@ -32,7 +32,7 @@ const RETURN_STATUS_RANK = {
     cancelled: 99
 };
 
-const mapDelhiveryStatus = (status = "") => {
+export const mapDelhiveryStatus = (status = "") => {
     const s = status.toLowerCase();
 
     if (s.includes("cancel")) return "Cancelled";
@@ -48,7 +48,7 @@ const mapDelhiveryStatus = (status = "") => {
     return "In Transit";
 };
 
-const mapDelhiveryReturnStatus = (status = "") => {
+export const mapDelhiveryReturnStatus = (status = "") => {
     const s = status.toLowerCase();
 
     if (s.includes("cancel")) return "cancelled";
