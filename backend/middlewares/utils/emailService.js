@@ -819,143 +819,6 @@ export const sendVerificationEmail = async (user, otp) => {
 };
 
 
-
-
-/**
- * Send Abandoned Cart Email (Stage 1 / 2 / 3)
- */
-// export const sendAbandonedCartEmail = async (user, stage) => {
-//   try {
-//     const appUrl = process.env.APP_URL || "https://joyory.com";
-//     const cartUrl = `${appUrl}/cart`;
-
-//     const subjectMap = {
-//       1: "🛒 You left something in your cart",
-//       2: "⏰ Your cart is still waiting",
-//       3: "🔥 Last chance! Complete your purchase"
-//     };
-
-//     const headlineMap = {
-//       1: "You left something behind 👀",
-//       2: "Still thinking it over?",
-//       3: "Your cart is about to expire!"
-//     };
-
-//     const subTextMap = {
-//       1: "Complete your purchase before items sell out.",
-//       2: "Popular items don’t stay long. Grab them now.",
-//       3: "This is your final reminder before we clear your cart."
-//     };
-
-//     const subject = subjectMap[stage];
-//     const headline = headlineMap[stage];
-//     const subText = subTextMap[stage];
-
-//     // 🛒 Build cart items HTML
-//     const cartItemsHtml = user.cart.map(item => {
-//       const name =
-//         item.selectedVariant?.shadeName ||
-//         "Selected Item";
-
-//       return `
-//         <tr>
-//           <td style="padding:10px 0;border-bottom:1px solid #eee;">
-//             <strong>${name}</strong><br/>
-//             Quantity: ${item.quantity}
-//           </td>
-//         </tr>
-//       `;
-//     }).join("");
-
-//     const html = `
-// <!DOCTYPE html>
-// <html>
-// <head>
-//   <meta charset="UTF-8" />
-//   <title>Abandoned Cart</title>
-// </head>
-// <body style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;color:#333;">
-
-// <table width="100%" cellpadding="0" cellspacing="0" style="padding:20px 0;">
-//   <tr>
-//     <td align="center">
-
-//       <table width="600" cellpadding="0" cellspacing="0"
-//              style="background:#ffffff;border-radius:10px;overflow:hidden;">
-
-//         <!-- Header -->
-//         <tr>
-//           <td style="background:#6b5cf6;color:#ffffff;padding:30px;text-align:center;">
-//             <h1 style="margin:0;">${headline}</h1>
-//             <p style="margin-top:10px;">Hi ${user.name},</p>
-//           </td>
-//         </tr>
-
-//         <!-- Body -->
-//         <tr>
-//           <td style="padding:30px;">
-//             <p style="font-size:16px;">${subText}</p>
-
-//             <!-- Cart Items -->
-//             <table width="100%" cellpadding="0" cellspacing="0"
-//                    style="margin:20px 0;">
-//               ${cartItemsHtml}
-//             </table>
-
-//             <!-- CTA -->
-//             <div style="text-align:center;margin:30px 0;">
-//               <a href="${cartUrl}"
-//                  style="background:#6b5cf6;color:#ffffff;
-//                         text-decoration:none;padding:14px 30px;
-//                         border-radius:30px;font-size:16px;
-//                         font-weight:bold;display:inline-block;">
-//                 Complete Your Order
-//               </a>
-//             </div>
-
-//             ${stage === 3 ? `
-//             <p style="text-align:center;color:#d9534f;font-weight:bold;">
-//               ⚠️ Final reminder — your cart may expire soon!
-//             </p>
-//             ` : ""}
-//           </td>
-//         </tr>
-
-//         <!-- Footer -->
-//         <tr>
-//           <td style="background:#222;color:#aaa;text-align:center;
-//                      padding:20px;font-size:12px;">
-//             <p style="margin:0;">
-//               Need help? Email us at
-//               <a href="mailto:support@joyory.com" style="color:#aaa;">
-//                 support@joyory.com
-//               </a>
-//             </p>
-//             <p style="margin-top:10px;">
-//               © ${new Date().getFullYear()} Joyory
-//             </p>
-//           </td>
-//         </tr>
-
-//       </table>
-
-//     </td>
-//   </tr>
-// </table>
-
-// </body>
-// </html>
-// `;
-
-//     await sendEmail(user.email, subject, html);
-
-//     console.log(`✅ Abandoned cart email (stage ${stage}) sent to ${user.email}`);
-//     return true;
-//   } catch (error) {
-//     console.error("❌ Failed to send abandoned cart email:", error);
-//     throw error;
-//   }
-// };
 export const sendAbandonedCartEmail = async (user, stage) => {
   try {
     const appUrl = process.env.APP_URL || "https://joyory.com/";
@@ -983,41 +846,40 @@ export const sendAbandonedCartEmail = async (user, stage) => {
     const headline = headlineMap[stage];
     const subText = subTextMap[stage];
 
-    // Calculate total items and approximate total
+    // Calculate total items
     const totalItems = user.cart.reduce((sum, item) => sum + item.quantity, 0);
-    const approximateTotal = user.cart.length > 0 ? "₹1,299+" : "₹0"; // You can calculate actual price if available
 
     // Build cart items HTML with images
     const cartItemsHtml = user.cart.map(item => {
       const name = item.selectedVariant?.shadeName || "Selected Item";
-      const imageUrl = item.selectedVariant?.image ||
+      const imageUrl = item.selectedVariant?.images ||
         "https://images.unsplash.com/photo-1586495777744-4413f21062fa?w=300&h=300&fit=crop";
 
       return `
-        <tr>
-          <td width="80" style="padding: 20px 0; vertical-align: top;">
+        <tr class="cart-item">
+          <td width="80" style="padding: 15px 0 15px 15px; vertical-align: top;" class="mobile-image">
             <img src="${imageUrl}" 
                  alt="${name}" 
                  width="80" 
                  height="80" 
-                 style="border-radius: 8px; object-fit: cover; border: 1px solid #f0f0f0;" />
+                 style="border-radius: 10px; object-fit: cover; border: 1px solid #f0f0f0; display: block;" />
           </td>
-          <td style="padding: 20px 20px 20px 0; vertical-align: top;">
-            <h3 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 600; color: #333;">
+          <td style="padding: 15px 15px 15px 20px; vertical-align: top;" class="mobile-details">
+            <h3 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 600; color: #333; font-family: 'Poppins', sans-serif;">
               ${name}
             </h3>
-            <p style="margin: 0; font-size: 14px; color: #666;">
+            <p style="margin: 0 0 8px 0; font-size: 14px; color: #666;">
               Quantity: ${item.quantity}
             </p>
             ${item.selectedVariant?.hex ? `
-            <div style="display: inline-block; margin-top: 8px; padding: 4px 12px; 
-                        background-color: ${item.selectedVariant.hex}; 
-                        border-radius: 20px; font-size: 12px; color: #fff;">
+            <div style="display: inline-block; padding: 4px 12px; background-color: ${item.selectedVariant.hex}; 
+                        border-radius: 20px; font-size: 12px; color: ${getContrastColor(item.selectedVariant.hex)};">
               ${item.selectedVariant.shadeName}
             </div>
             ` : ''}
           </td>
         </tr>
+        <tr><td colspan="2" style="padding: 0 15px;"><hr style="border: none; border-top: 1px solid #eee; margin: 0;"></td></tr>
       `;
     }).join("");
 
@@ -1030,37 +892,163 @@ export const sendAbandonedCartEmail = async (user, stage) => {
   <title>Complete Your Order</title>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
-    @media only screen and (max-width: 600px) {
-      .container { width: 100% !important; }
-      .header-img { height: 200px !important; }
-      .cta-button { width: 100% !important; }
-      .cart-table { width: 100% !important; }
+    /* Reset Styles */
+    body {
+      margin: 0;
+      padding: 0;
+      min-width: 100%;
+      width: 100% !important;
+      -webkit-text-size-adjust: 100%;
+      -ms-text-size-adjust: 100%;
+    }
+    
+    /* Mobile Styles */
+    @media only screen and (max-width: 640px) {
+      /* Main Container */
+      table.email-container {
+        width: 100% !important;
+      }
+      
+      /* Header */
+      .header-section h2 {
+        font-size: 22px !important;
+        line-height: 1.3 !important;
+      }
+      
+      .header-section p {
+        font-size: 14px !important;
+        line-height: 1.4 !important;
+      }
+      
+      /* Body Content */
+      .body-content {
+        padding: 25px 15px !important;
+      }
+      
+      /* Cart Items */
+      .cart-item td {
+        display: block !important;
+        width: 100% !important;
+        padding: 10px 15px !important;
+        text-align: center !important;
+      }
+      
+      .mobile-image {
+        padding-bottom: 5px !important;
+      }
+      
+      .mobile-details {
+        padding-top: 0 !important;
+      }
+      
+      .mobile-image img {
+        margin: 0 auto !important;
+      }
+      
+      /* CTA Button */
+      .cta-button {
+        padding: 14px 30px !important;
+        font-size: 15px !important;
+        width: 90% !important;
+        text-align: center !important;
+      }
+      
+      /* Benefits */
+      .benefit-item {
+        display: block !important;
+        width: 100% !important;
+        padding: 15px 0 !important;
+        text-align: center !important;
+      }
+      
+      .benefit-item td {
+        display: block !important;
+        width: 100% !important;
+        padding: 10px 0 !important;
+      }
+      
+      /* Footer */
+      .footer-section {
+        padding: 20px 15px !important;
+      }
+      
+      .footer-links {
+        display: block !important;
+        text-align: center !important;
+        padding: 5px 0 !important;
+      }
+    }
+    
+    /* Tablet Styles */
+    @media only screen and (max-width: 480px) {
+      .header-section {
+        padding: 25px 15px !important;
+      }
+      
+      .body-content {
+        padding: 20px 10px !important;
+      }
+      
+      .cart-summary h3 {
+        font-size: 16px !important;
+      }
+      
+      .cart-summary div {
+        font-size: 16px !important;
+        padding: 10px 20px !important;
+      }
+      
+      /* Stack benefits on very small screens */
+      .benefits-container table tr {
+        display: block !important;
+        width: 100% !important;
+      }
+    }
+    
+    /* Dark Mode Support */
+    @media (prefers-color-scheme: dark) {
+      .email-body {
+        background-color: #1a1a1a !important;
+      }
+      
+      .email-card {
+        background-color: #2d2d2d !important;
+      }
+      
+      .email-card h1, 
+      .email-card h2, 
+      .email-card h3,
+      .email-card p,
+      .email-card td {
+        color: #ffffff !important;
+      }
     }
   </style>
 </head>
-<body style="margin: 0; padding: 0; background-color: #f8f8f8; font-family: 'Inter', Arial, sans-serif;">
+<body style="margin: 0; padding: 0; background-color: #f8f8f8; font-family: 'Inter', Arial, sans-serif; -webkit-font-smoothing: antialiased;">
 
 <!-- Main Container -->
-<table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f8f8f8" style="padding: 40px 0;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f8f8f8" style="padding: 20px 0; width: 100%;">
   <tr>
     <td align="center">
       
       <!-- Email Card -->
       <table width="600" cellpadding="0" cellspacing="0" border="0" 
-             style="background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+             style="background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08); max-width: 600px; width: 100%;" 
+             class="email-container">
         
-        <!-- Header with Decorative Image -->
+        <!-- Header -->
         <tr>
-          <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center;">
+          <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center;" class="header-section">
             <div style="max-width: 120px; margin: 0 auto 20px;">
               <h1 style="margin: 0; color: #ffffff; font-size: 32px; font-weight: 700; font-family: 'Poppins', sans-serif;">
                 JOYORY
               </h1>
             </div>
-            <h2 style="margin: 0 0 15px 0; color: #ffffff; font-size: 28px; font-weight: 600; font-family: 'Poppins', sans-serif;">
+            <h2 style="margin: 0 0 15px 0; color: #ffffff; font-size: 28px; font-weight: 600; font-family: 'Poppins', sans-serif; line-height: 1.2;">
               ${headline}
             </h2>
-            <p style="margin: 0; color: rgba(255,255,255,0.9); font-size: 16px; line-height: 1.5;">
+            <p style="margin: 0; color: rgba(255,255,255,0.9); font-size: 16px; line-height: 1.5; max-width: 500px; margin: 0 auto;">
               Hi ${user.name}, we noticed you left something special behind!
             </p>
           </td>
@@ -1068,20 +1056,20 @@ export const sendAbandonedCartEmail = async (user, stage) => {
 
         <!-- Body Content -->
         <tr>
-          <td style="padding: 40px 30px;">
+          <td style="padding: 40px 30px;" class="body-content">
             
             <!-- Main Message -->
-            <table width="100%" cellpadding="0" cellspacing="0">
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 25px;">
               <tr>
-                <td style="padding-bottom: 25px;">
+                <td style="padding-bottom: 20px;">
                   <p style="margin: 0 0 15px 0; font-size: 16px; color: #555; line-height: 1.6;">
                     ${subText}
                   </p>
                   
                   ${stage === 3 ? `
                   <div style="background: linear-gradient(to right, #ffeaa7, #fab1a0); 
-                              padding: 15px; border-radius: 12px; margin: 20px 0; text-align: center;">
-                    <p style="margin: 0; color: #d63031; font-weight: 600; font-size: 15px;">
+                              padding: 12px 15px; border-radius: 12px; margin: 20px 0; text-align: center;">
+                    <p style="margin: 0; color: #d63031; font-weight: 600; font-size: 14px;">
                       ⚠️ Final reminder — Your cart will expire in 24 hours!
                     </p>
                   </div>
@@ -1092,27 +1080,14 @@ export const sendAbandonedCartEmail = async (user, stage) => {
               <!-- Cart Summary -->
               <tr>
                 <td style="padding-bottom: 30px;">
-                  <div style="background: #f9f9ff; border-radius: 12px; padding: 20px;">
-                    <h3 style="margin: 0 0 20px 0; font-size: 18px; color: #333; font-weight: 600;">
+                  <div style="background: #f9f9ff; border-radius: 12px; padding: 20px; text-align: center;" class="cart-summary">
+                    <h3 style="margin: 0 0 15px 0; font-size: 18px; color: #333; font-weight: 600; font-family: 'Poppins', sans-serif;">
                       Your Cart Summary
                     </h3>
-                    
-                    <table width="100%" cellpadding="0" cellspacing="0" class="cart-table">
-                      <tr>
-                        <td width="50%" style="padding-bottom: 10px;">
-                          <span style="color: #666; font-size: 14px;">Total Items:</span>
-                          <span style="color: #333; font-weight: 600; font-size: 16px; margin-left: 10px;">
-                            ${totalItems}
-                          </span>
-                        </td>
-                        <td width="50%" style="padding-bottom: 10px; text-align: right;">
-                          <span style="color: #666; font-size: 14px;">Approx. Total:</span>
-                          <span style="color: #6b5cf6; font-weight: 700; font-size: 20px; margin-left: 10px;">
-                            ${approximateTotal}
-                          </span>
-                        </td>
-                      </tr>
-                    </table>
+                    <div style="display: inline-block; background: linear-gradient(135deg, #6b5cf6 0%, #8a7dff 100%); 
+                                 padding: 12px 25px; border-radius: 50px; color: white; font-weight: 600; font-size: 17px;">
+                      ${totalItems} ${totalItems === 1 ? 'Item' : 'Items'} in Cart
+                    </div>
                   </div>
                 </td>
               </tr>
@@ -1120,11 +1095,11 @@ export const sendAbandonedCartEmail = async (user, stage) => {
               <!-- Cart Items -->
               <tr>
                 <td style="padding-bottom: 30px;">
-                  <h3 style="margin: 0 0 20px 0; font-size: 18px; color: #333; font-weight: 600;">
+                  <h3 style="margin: 0 0 15px 0; font-size: 18px; color: #333; font-weight: 600; font-family: 'Poppins', sans-serif;">
                     Items in your cart:
                   </h3>
                   
-                  <table width="100%" cellpadding="0" cellspacing="0" style="background: #fafafa; border-radius: 12px; padding: 20px;">
+                  <table width="100%" cellpadding="0" cellspacing="0" style="background: #fafafa; border-radius: 12px; overflow: hidden;">
                     ${cartItemsHtml}
                   </table>
                 </td>
@@ -1139,44 +1114,68 @@ export const sendAbandonedCartEmail = async (user, stage) => {
                             color: #ffffff; text-decoration: none; padding: 16px 40px; 
                             border-radius: 30px; font-size: 16px; font-weight: 600; 
                             display: inline-block; box-shadow: 0 6px 20px rgba(107, 92, 246, 0.3);
-                            transition: all 0.3s ease;">
+                            transition: all 0.3s ease; max-width: 300px;">
                     Complete Your Order Now
                   </a>
                   
-                  <p style="margin: 15px 0 0 0; color: #888; font-size: 14px;">
+                  <p style="margin: 20px 0 0 0; color: #888; font-size: 14px;">
                     <a href="${appUrl}ShopProduct" 
-                       style="color: #6b5cf6; text-decoration: underline;">
-                      Continue Shopping
+                       style="color: #6b5cf6; text-decoration: none; font-weight: 500;">
+                      Continue Shopping →
                     </a>
                   </p>
                 </td>
               </tr>
 
-              <!-- Benefits -->
+              <!-- Benefits Section -->
               <tr>
                 <td>
-                  <table width="100%" cellpadding="0" cellspacing="0" style="border-top: 1px solid #eee; padding-top: 25px;">
-                    <tr>
-                      <td width="33%" align="center" style="padding: 10px;">
-                        <div style="color: #6b5cf6; font-size: 24px;">🚚</div>
-                        <p style="margin: 8px 0 0 0; font-size: 13px; color: #666;">
-                          Free Shipping<br><strong>Over ₹999</strong>
-                        </p>
-                      </td>
-                      <td width="33%" align="center" style="padding: 10px;">
-                        <div style="color: #6b5cf6; font-size: 24px;">↩️</div>
-                        <p style="margin: 8px 0 0 0; font-size: 13px; color: #666;">
-                          Easy Returns<br><strong>10 Days</strong>
-                        </p>
-                      </td>
-                      <td width="33%" align="center" style="padding: 10px;">
-                        <div style="color: #6b5cf6; font-size: 24px;">🔒</div>
-                        <p style="margin: 8px 0 0 0; font-size: 13px; color: #666;">
-                          Secure Payment<br><strong>100% Safe</strong>
-                        </p>
-                      </td>
-                    </tr>
-                  </table>
+                  <div style="background: linear-gradient(135deg, #f8f9ff 0%, #f0f2ff 100%); 
+                              border-radius: 12px; padding: 25px; margin-top: 20px;">
+                    <h3 style="margin: 0 0 20px 0; font-size: 18px; color: #333; text-align: center; font-weight: 600;">
+                      Why Shop With Us
+                    </h3>
+                    
+                    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse;" class="benefits-container">
+                      <tr>
+                        <td width="25%" align="center" style="padding: 10px; vertical-align: top;" class="benefit-item">
+                          <div style="width: 50px; height: 50px; background: linear-gradient(135deg, #6b5cf6 0%, #8a7dff 100%); 
+                                      border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px;">
+                            <span style="color: white; font-size: 22px;">🚚</span>
+                          </div>
+                          <p style="margin: 0; font-size: 14px; font-weight: 600; color: #333;">Free Shipping</p>
+                          <p style="margin: 5px 0 0 0; font-size: 13px; color: #666;">Over ₹499</p>
+                        </td>
+                        
+                        <td width="25%" align="center" style="padding: 10px; vertical-align: top;" class="benefit-item">
+                          <div style="width: 50px; height: 50px; background: linear-gradient(135deg, #6b5cf6 0%, #8a7dff 100%); 
+                                      border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px;">
+                            <span style="color: white; font-size: 22px;">↩️</span>
+                          </div>
+                          <p style="margin: 0; font-size: 14px; font-weight: 600; color: #333;">Easy Returns</p>
+                          <p style="margin: 5px 0 0 0; font-size: 13px; color: #666;">7 Days Policy</p>
+                        </td>
+                        
+                        <td width="25%" align="center" style="padding: 10px; vertical-align: top;" class="benefit-item">
+                          <div style="width: 50px; height: 50px; background: linear-gradient(135deg, #6b5cf6 0%, #8a7dff 100%); 
+                                      border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px;">
+                            <span style="color: white; font-size: 22px;">🔒</span>
+                          </div>
+                          <p style="margin: 0; font-size: 14px; font-weight: 600; color: #333;">Secure Payment</p>
+                          <p style="margin: 5px 0 0 0; font-size: 13px; color: #666;">100% Safe</p>
+                        </td>
+                        
+                        <td width="25%" align="center" style="padding: 10px; vertical-align: top;" class="benefit-item">
+                          <div style="width: 50px; height: 50px; background: linear-gradient(135deg, #6b5cf6 0%, #8a7dff 100%); 
+                                      border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px;">
+                            <span style="color: white; font-size: 22px;">⭐</span>
+                          </div>
+                          <p style="margin: 0; font-size: 14px; font-weight: 600; color: #333;">Premium Quality</p>
+                          <p style="margin: 5px 0 0 0; font-size: 13px; color: #666;">Authentic Products</p>
+                        </td>
+                      </tr>
+                    </table>
+                  </div>
                 </td>
               </tr>
             </table>
@@ -1186,13 +1185,13 @@ export const sendAbandonedCartEmail = async (user, stage) => {
 
         <!-- Footer -->
         <tr>
-          <td style="background: #1a1a2e; color: #aaa; padding: 30px; text-align: center;">
+          <td style="background: #1a1a2e; color: #aaa; padding: 30px; text-align: center;" class="footer-section">
             <p style="margin: 0 0 15px 0; font-size: 14px; color: #fff;">
               Need help with your order?
             </p>
-            <a href="mailto:support@joyory.com" 
+            <a href="mailto:joyory2025@gmail.com" 
                style="color: #8a7dff; text-decoration: none; font-weight: 500;">
-              support@joyory.com
+              joyory2025@gmail.com
             </a>
             
             <p style="margin: 20px 0 0 0; font-size: 12px; color: #888;">
@@ -1200,12 +1199,16 @@ export const sendAbandonedCartEmail = async (user, stage) => {
             </p>
             
             <p style="margin: 10px 0 0 0; font-size: 12px; color: #888;">
-              <a href="${appUrl}/unsubscribe" style="color: #888; text-decoration: underline;">
-                Unsubscribe
-              </a> | 
-              <a href="${appUrl}/privacy" style="color: #888; text-decoration: underline;">
-                Privacy Policy
-              </a>
+              <span class="footer-links">
+                <a href="${appUrl}/unsubscribe" style="color: #888; text-decoration: underline; padding: 0 5px;">
+                  Unsubscribe
+                </a> 
+              </span>
+              <span class="footer-links">
+                <a href="${appUrl}/privacy" style="color: #888; text-decoration: underline; padding: 0 5px;">
+                  Privacy Policy
+                </a>
+              </span>
             </p>
             
             <!-- Social Media -->
@@ -1236,11 +1239,14 @@ export const sendAbandonedCartEmail = async (user, stage) => {
       </table>
 
       <!-- Mobile Footer Note -->
-      <table width="600" cellpadding="0" cellspacing="0" style="margin-top: 20px;">
+      <table width="600" cellpadding="0" cellspacing="0" style="margin-top: 20px; max-width: 600px; width: 100%;">
         <tr>
           <td align="center">
             <p style="margin: 0; font-size: 12px; color: #999;">
               Can't see images? <a href="${cartUrl}" style="color: #6b5cf6;">View in browser</a>
+            </p>
+            <p style="margin: 5px 0 0 0; font-size: 11px; color: #999;">
+              This email is optimized for all devices.
             </p>
           </td>
         </tr>
@@ -1254,6 +1260,23 @@ export const sendAbandonedCartEmail = async (user, stage) => {
 </html>
 `;
 
+    // Helper function to determine contrast color for shade badges
+    function getContrastColor(hexcolor) {
+      // Remove the hash if present
+      hexcolor = hexcolor.replace('#', '');
+      
+      // Parse the hex color
+      const r = parseInt(hexcolor.substr(0, 2), 16);
+      const g = parseInt(hexcolor.substr(2, 2), 16);
+      const b = parseInt(hexcolor.substr(4, 2), 16);
+      
+      // Calculate brightness
+      const brightness = ((r * 299) + (g * 587) + (b * 114)) / 1000;
+      
+      // Return black for bright colors, white for dark colors
+      return brightness > 128 ? '#000000' : '#ffffff';
+    }
+
     await sendEmail(user.email, subject, html);
 
     console.log(`✅ Abandoned cart email (stage ${stage}) sent to ${user.email}`);
@@ -1263,3 +1286,312 @@ export const sendAbandonedCartEmail = async (user, stage) => {
     throw error;
   }
 };
+
+
+// export const sendAbandonedCartEmail = async (user, stage) => {
+//   try {
+//     const appUrl = process.env.APP_URL || "https://joyory.com/";
+//     const cartUrl = `${appUrl}cartpage`;
+
+//     const subjectMap = {
+//       1: "🛒 You left something in your cart",
+//       2: "⏰ Your cart is still waiting",
+//       3: "🔥 Last chance! Complete your purchase"
+//     };
+
+//     const headlineMap = {
+//       1: "You left something behind 👀",
+//       2: "Still thinking it over?",
+//       3: "Your cart is about to expire!"
+//     };
+
+//     const subTextMap = {
+//       1: "Complete your purchase before items sell out.",
+//       2: "Popular items don't stay long. Grab them now.",
+//       3: "This is your final reminder before we clear your cart."
+//     };
+
+//     const subject = subjectMap[stage];
+//     const headline = headlineMap[stage];
+//     const subText = subTextMap[stage];
+
+//     // Calculate total items and approximate total
+//     const totalItems = user.cart.reduce((sum, item) => sum + item.quantity, 0);
+//     const approximateTotal = user.cart.length > 0 ? "₹1,299+" : "₹0"; // You can calculate actual price if available
+
+//     // Build cart items HTML with images
+//     const cartItemsHtml = user.cart.map(item => {
+//       const name = item.selectedVariant?.shadeName || "Selected Item";
+//       const imageUrl = item.selectedVariant?.images ||
+//         "https://images.unsplash.com/photo-1586495777744-4413f21062fa?w=300&h=300&fit=crop";
+
+//       return `
+//         <tr>
+//           <td width="80" style="padding: 20px 0; vertical-align: top;">
+//             <img src="${imageUrl}" 
+//                  alt="${imageUrl}" 
+//                  width="80" 
+//                  height="80" 
+//                  style="border-radius: 8px; object-fit: cover; border: 1px solid #f0f0f0;" />
+//           </td>
+//           <td style="padding: 20px 20px 20px 0; vertical-align: top;">
+//             <h3 style="margin: 0 0 8px 0; font-size: 16px; font-weight: 600; color: #333;">
+//               ${name}
+//             </h3>
+//             <p style="margin: 0; font-size: 14px; color: #666;">
+//               Quantity: ${item.quantity}
+//             </p>
+//             ${item.selectedVariant?.hex ? `
+//             <div style="display: inline-block; margin-top: 8px; padding: 4px 12px; 
+//                         background-color: ${item.selectedVariant.hex}; 
+//                         border-radius: 20px; font-size: 12px; color: #fff;">
+//               ${item.selectedVariant.shadeName}
+//             </div>
+//             ` : ''}
+//           </td>
+//         </tr>
+//       `;
+//     }).join("");
+
+//     const html = `
+// <!DOCTYPE html>
+// <html>
+// <head>
+//   <meta charset="UTF-8" />
+//   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+//   <title>Complete Your Order</title>
+//   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+//   <style>
+//     @media only screen and (max-width: 600px) {
+//       .container { width: 100% !important; }
+//       .header-img { height: 200px !important; }
+//       .cta-button { width: 100% !important; }
+//       .cart-table { width: 100% !important; }
+//     }
+//   </style>
+// </head>
+// <body style="margin: 0; padding: 0; background-color: #f8f8f8; font-family: 'Inter', Arial, sans-serif;">
+
+// <!-- Main Container -->
+// <table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f8f8f8" style="padding: 40px 0;">
+//   <tr>
+//     <td align="center">
+      
+//       <!-- Email Card -->
+//       <table width="600" cellpadding="0" cellspacing="0" border="0" 
+//              style="background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+        
+//         <!-- Header with Decorative Image -->
+//         <tr>
+//           <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center;">
+//             <div style="max-width: 120px; margin: 0 auto 20px;">
+//               <h1 style="margin: 0; color: #ffffff; font-size: 32px; font-weight: 700; font-family: 'Poppins', sans-serif;">
+//                 JOYORY
+//               </h1>
+//             </div>
+//             <h2 style="margin: 0 0 15px 0; color: #ffffff; font-size: 28px; font-weight: 600; font-family: 'Poppins', sans-serif;">
+//               ${headline}
+//             </h2>
+//             <p style="margin: 0; color: rgba(255,255,255,0.9); font-size: 16px; line-height: 1.5;">
+//               Hi ${user.name}, we noticed you left something special behind!
+//             </p>
+//           </td>
+//         </tr>
+
+//         <!-- Body Content -->
+//         <tr>
+//           <td style="padding: 40px 30px;">
+            
+//             <!-- Main Message -->
+//             <table width="100%" cellpadding="0" cellspacing="0">
+//               <tr>
+//                 <td style="padding-bottom: 25px;">
+//                   <p style="margin: 0 0 15px 0; font-size: 16px; color: #555; line-height: 1.6;">
+//                     ${subText}
+//                   </p>
+                  
+//                   ${stage === 3 ? `
+//                   <div style="background: linear-gradient(to right, #ffeaa7, #fab1a0); 
+//                               padding: 15px; border-radius: 12px; margin: 20px 0; text-align: center;">
+//                     <p style="margin: 0; color: #d63031; font-weight: 600; font-size: 15px;">
+//                       ⚠️ Final reminder — Your cart will expire in 24 hours!
+//                     </p>
+//                   </div>
+//                   ` : ''}
+//                 </td>
+//               </tr>
+
+//               <!-- Cart Summary -->
+//               <tr>
+//                 <td style="padding-bottom: 30px;">
+//                   <div style="background: #f9f9ff; border-radius: 12px; padding: 20px;">
+//                     <h3 style="margin: 0 0 20px 0; font-size: 18px; color: #333; font-weight: 600;">
+//                       Your Cart Summary
+//                     </h3>
+                    
+//                     <table width="100%" cellpadding="0" cellspacing="0" class="cart-table">
+//                       <tr>
+//                         <td width="50%" style="padding-bottom: 10px;">
+//                           <span style="color: #666; font-size: 14px;">Total Items:</span>
+//                           <span style="color: #333; font-weight: 600; font-size: 16px; margin-left: 10px;">
+//                             ${totalItems}
+//                           </span>
+//                         </td>
+//                         <td width="50%" style="padding-bottom: 10px; text-align: right;">
+//                           <span style="color: #666; font-size: 14px;">Approx. Total:</span>
+//                           <span style="color: #6b5cf6; font-weight: 700; font-size: 20px; margin-left: 10px;">
+//                             ${approximateTotal}
+//                           </span>
+//                         </td>
+//                       </tr>
+//                     </table>
+//                   </div>
+//                 </td>
+//               </tr>
+
+//               <!-- Cart Items -->
+//               <tr>
+//                 <td style="padding-bottom: 30px;">
+//                   <h3 style="margin: 0 0 20px 0; font-size: 18px; color: #333; font-weight: 600;">
+//                     Items in your cart:
+//                   </h3>
+                  
+//                   <table width="100%" cellpadding="0" cellspacing="0" style="background: #fafafa; border-radius: 12px; padding: 20px;">
+//                     ${cartItemsHtml}
+//                   </table>
+//                 </td>
+//               </tr>
+
+//               <!-- CTA Button -->
+//               <tr>
+//                 <td style="padding-bottom: 30px; text-align: center;">
+//                   <a href="${cartUrl}" 
+//                      class="cta-button"
+//                      style="background: linear-gradient(135deg, #6b5cf6 0%, #8a7dff 100%); 
+//                             color: #ffffff; text-decoration: none; padding: 16px 40px; 
+//                             border-radius: 30px; font-size: 16px; font-weight: 600; 
+//                             display: inline-block; box-shadow: 0 6px 20px rgba(107, 92, 246, 0.3);
+//                             transition: all 0.3s ease;">
+//                     Complete Your Order Now
+//                   </a>
+                  
+//                   <p style="margin: 15px 0 0 0; color: #888; font-size: 14px;">
+//                     <a href="${appUrl}ShopProduct" 
+//                        style="color: #6b5cf6; text-decoration: underline;">
+//                       Continue Shopping
+//                     </a>
+//                   </p>
+//                 </td>
+//               </tr>
+
+//               <!-- Benefits -->
+//               <tr>
+//                 <td>
+//                   <table width="100%" cellpadding="0" cellspacing="0" style="border-top: 1px solid #eee; padding-top: 25px;">
+//                     <tr>
+//                       <td width="33%" align="center" style="padding: 10px;">
+//                         <div style="color: #6b5cf6; font-size: 24px;">🚚</div>
+//                         <p style="margin: 8px 0 0 0; font-size: 13px; color: #666;">
+//                           Free Shipping<br><strong>Over ₹499</strong>
+//                         </p>
+//                       </td>
+//                       <td width="33%" align="center" style="padding: 10px;">
+//                         <div style="color: #6b5cf6; font-size: 24px;">↩️</div>
+//                         <p style="margin: 8px 0 0 0; font-size: 13px; color: #666;">
+//                           Easy Returns<br><strong>7 Days</strong>
+//                         </p>
+//                       </td>
+//                       <td width="33%" align="center" style="padding: 10px;">
+//                         <div style="color: #6b5cf6; font-size: 24px;">🔒</div>
+//                         <p style="margin: 8px 0 0 0; font-size: 13px; color: #666;">
+//                           Secure Payment<br><strong>100% Safe</strong>
+//                         </p>
+//                       </td>
+//                     </tr>
+//                   </table>
+//                 </td>
+//               </tr>
+//             </table>
+
+//           </td>
+//         </tr>
+
+//         <!-- Footer -->
+//         <tr>
+//           <td style="background: #1a1a2e; color: #aaa; padding: 30px; text-align: center;">
+//             <p style="margin: 0 0 15px 0; font-size: 14px; color: #fff;">
+//               Need help with your order?
+//             </p>
+//             <a href="mailto:joyory2025@gmail.com" 
+//                style="color: #8a7dff; text-decoration: none; font-weight: 500;">
+//               joyory2025@gmail.com
+//             </a>
+            
+//             <p style="margin: 20px 0 0 0; font-size: 12px; color: #888;">
+//               © ${new Date().getFullYear()} Joyory. All rights reserved.
+//             </p>
+            
+//             <p style="margin: 10px 0 0 0; font-size: 12px; color: #888;">
+//               <a href="${appUrl}/unsubscribe" style="color: #888; text-decoration: underline;">
+//                 Unsubscribe
+//               </a> | 
+//               <a href="${appUrl}/privacy" style="color: #888; text-decoration: underline;">
+//                 Privacy Policy
+//               </a>
+//             </p>
+            
+//             <!-- Social Media -->
+//             <table width="100%" cellpadding="0" cellspacing="0" style="margin-top: 20px;">
+//               <tr>
+//                 <td align="center">
+//                   <a href="${appUrl}" style="text-decoration: none; margin: 0 8px;">
+//                     <img src="https://cdn-icons-png.flaticon.com/512/2111/2111463.png" 
+//                          alt="Instagram" width="24" height="24" 
+//                          style="opacity: 0.7; transition: opacity 0.3s;">
+//                   </a>
+//                   <a href="${appUrl}" style="text-decoration: none; margin: 0 8px;">
+//                     <img src="https://cdn-icons-png.flaticon.com/512/733/733547.png" 
+//                          alt="Facebook" width="24" height="24" 
+//                          style="opacity: 0.7; transition: opacity 0.3s;">
+//                   </a>
+//                   <a href="${appUrl}" style="text-decoration: none; margin: 0 8px;">
+//                     <img src="https://cdn-icons-png.flaticon.com/512/733/733579.png" 
+//                          alt="Twitter" width="24" height="24" 
+//                          style="opacity: 0.7; transition: opacity 0.3s;">
+//                   </a>
+//                 </td>
+//               </tr>
+//             </table>
+//           </td>
+//         </tr>
+
+//       </table>
+
+//       <!-- Mobile Footer Note -->
+//       <table width="600" cellpadding="0" cellspacing="0" style="margin-top: 20px;">
+//         <tr>
+//           <td align="center">
+//             <p style="margin: 0; font-size: 12px; color: #999;">
+//               Can't see images? <a href="${cartUrl}" style="color: #6b5cf6;">View in browser</a>
+//             </p>
+//           </td>
+//         </tr>
+//       </table>
+
+//     </td>
+//   </tr>
+// </table>
+
+// </body>
+// </html>
+// `;
+
+//     await sendEmail(user.email, subject, html);
+
+//     console.log(`✅ Abandoned cart email (stage ${stage}) sent to ${user.email}`);
+//     return true;
+//   } catch (error) {
+//     console.error("❌ Failed to send abandoned cart email:", error);
+//     throw error;
+//   }
+// };

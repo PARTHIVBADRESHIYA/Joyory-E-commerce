@@ -49,7 +49,7 @@ const userSchema = new mongoose.Schema({
                 sku: String,
                 shadeName: String,
                 hex: String,
-                image: String
+                images: [String],   // ✅ FIX
             }
         }
     ],

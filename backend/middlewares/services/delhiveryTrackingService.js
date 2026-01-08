@@ -292,7 +292,7 @@ export const syncDelhiveryShipments = async () => {
 };
 
 export const startDelhiveryCron = () => {
-    cron.schedule("*/5 * * * *", async () => {
+    cron.schedule("*/15 * * * *", async () => {
         console.log("🔄 Delhivery tracking sync running every 5 minutes");
         await syncDelhiveryShipments();
     });

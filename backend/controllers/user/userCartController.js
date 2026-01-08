@@ -331,7 +331,7 @@ async function handleCart(cart, product, variants, qty) {
         sku: variant.sku,
         shadeName: variant.shadeName || null,
         hex: variant.hex || null,
-        images: variant.images?.length ? variant.images : product.images || [],
+        images: variant.images?.[0] || product.images?.[0] || null,
         price: variant.price ?? product.price,
         discountedPrice: variant.discountedPrice ?? product.discountedPrice ?? product.price,
         stock,

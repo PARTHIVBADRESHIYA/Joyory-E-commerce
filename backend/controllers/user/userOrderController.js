@@ -1150,14 +1150,11 @@ export const getShipmentDetails = async (req, res) => {
   }
 };
 
+
+//perfect working bro till 08-01-2026
+
 // export const cancelShipment = async (req, res) => {
 //   const session = await mongoose.startSession();
-
-//   let provider = null;
-//   let waybill = null;
-//   let shiprocketOrderId = null;
-//   let orderIdForRetry = null;
-//   let shipmentIdForRetry = null;
 
 //   try {
 //     const { shipment_id } = req.params;
@@ -1171,108 +1168,126 @@ export const getShipmentDetails = async (req, res) => {
 //       });
 //     }
 
+//     // =================================================
+//     // 🔎 FETCH DATA (NO TRANSACTION YET)
+//     // =================================================
+//     const order = await Order.findOne({
+//       _id: orderId,
+//       user: userId
+//     });
+
+//     if (!order) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Order not found or unauthorized"
+//       });
+//     }
+
+//     const shipment = order.shipments.id(shipment_id);
+//     if (!shipment) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Shipment not found"
+//       });
+//     }
+
+//     if (shipment.status === "Cancelled") {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Shipment already cancelled"
+//       });
+//     }
+
+//     const blockedStatuses = [
+//       "Picked Up",
+//       "In Transit",
+//       "Out for Delivery",
+//       "Delivered"
+//     ];
+
+//     if (blockedStatuses.includes(shipment.status)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: `Shipment cannot be cancelled because it is already ${shipment.status}`
+//       });
+//     }
+
+//     // =================================================
+//     // 🚚 PHASE 1: DELHIVERY CANCEL (CRITICAL)
+//     // =================================================
+//     const waybill =
+//       shipment.waybill ||
+//       shipment.awb ||
+//       shipment.courier?.awb;
+
+//     if (!waybill) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Waybill not found. Cannot cancel shipment."
+//       });
+//     }
+
+//     try {
+//       await cancelDelhiveryShipment(waybill);
+//     } catch (err) { 
+//       console.error("❌ Delhivery cancellation failed:", err.message);
+//       return res.status(502).json({
+//         success: false,
+//         message: "Unable to cancel shipment with courier. Please try later."
+//       });
+//     }
+
+//     // =================================================
+//     // 🧾 PHASE 2: DB TRANSACTION (SAFE NOW)
+//     // =================================================
 //     await session.withTransaction(async () => {
-//       const order = await Order.findOne({
+//       const txOrder = await Order.findOne({
 //         _id: orderId,
 //         user: userId
 //       }).session(session);
 
-//       if (!order) {
-//         throw new Error("Order not found or unauthorized");
-//       }
+//       const txShipment = txOrder.shipments.id(shipment_id);
 
-//       if (String(order.user) !== String(userId)) {
-//         throw new Error("Unauthorized cancellation attempt");
-//       }
-
-//       const shipment = order.shipments.id(shipment_id);
-//       if (!shipment) throw new Error("Shipment not found");
-
-//       // ❌ Prevent double cancel
-//       if (shipment.status === "Cancelled") {
-//         throw new Error("Shipment already cancelled");
-//       }
-
-//       // ❌ Strict cancellation gate (MATCH ADMIN LOGIC)
-//       const blockedStatuses = [
-//         "Picked Up",
-//         "In Transit",
-//         "Out for Delivery",
-//         "Delivered"
-//       ];
-
-//       if (blockedStatuses.includes(shipment.status)) {
-//         throw new Error(
-//           `Shipment cannot be cancelled because it is already ${shipment.status}`
-//         );
-//       }
-
-//       // 🔒 Capture provider identifiers (for AFTER commit)
-//       provider = shipment.provider;
-//       waybill = shipment.waybill || null;
-//       shiprocketOrderId = shipment.shiprocket_order_id || null;
-//       orderIdForRetry = order._id;
-//       shipmentIdForRetry = shipment._id;
-
-//       /* -------------------------------
-//          DB UPDATE ONLY
-//       -------------------------------- */
-//       shipment.status = "Cancelled";
-//       shipment.tracking_history.push({
+//       txShipment.status = "Cancelled";
+//       txShipment.tracking_history.push({
 //         status: "Cancelled",
 //         timestamp: new Date(),
 //         description: "Shipment cancelled by user"
 //       });
 
-//       // 🧮 Order status
-//       const statuses = order.shipments.map(s => s.status);
+//       const statuses = txOrder.shipments.map(s => s.status);
 
 //       if (statuses.every(s => s === "Cancelled")) {
-//         order.orderStatus = "Cancelled";
+//         txOrder.orderStatus = "Cancelled";
 //       } else if (statuses.some(s => s === "Cancelled")) {
-//         order.orderStatus = "Partially Cancelled";
+//         txOrder.orderStatus = "Partially Cancelled";
 //       }
 
-//       // 🧾 Cancellation metadata
-//       order.cancellation = {
+//       txOrder.cancellation = {
 //         cancelledBy: userId,
 //         reason,
 //         requestedAt: new Date(),
 //         allowed: true
 //       };
 
-//       /* -------------------------------
-//          🔁 STOCK ROLLBACK (WAREHOUSE SAFE)
-//       -------------------------------- */
-//       if (order.adminConfirmed) {
-//         for (const item of shipment.products) {
-//           const product = await Product.findById(item.productId)
-//             .session(session);
-
+//       // 🔁 STOCK ROLLBACK
+//       if (txOrder.adminConfirmed) {
+//         for (const item of txShipment.products) {
+//           const product = await Product.findById(item.productId).session(session);
 //           if (!product) continue;
 
-//           const variant = item.variant?.sku
-//             ? product.variants.find(v => v.sku === item.variant.sku)
-//             : null;
-
+//           const variant = product.variants.find(
+//             v => v.sku === item.variant?.sku
+//           );
 //           if (!variant) continue;
 
 //           const qty = Number(item.quantity || 0);
 
-//           if (shipment.warehouseCode) {
-//             const wh = variant.stockByWarehouse.find(
-//               w => w.warehouseCode === shipment.warehouseCode
-//             );
+//           const wh = variant.stockByWarehouse.find(
+//             w => w.warehouseCode === txShipment.warehouseCode
+//           );
 
-//             if (wh) {
-//               wh.stock += qty;
-//             } else {
-//               variant.stockByWarehouse.push({
-//                 warehouseCode: shipment.warehouseCode,
-//                 stock: qty
-//               });
-//             }
-//           }
+//           if (wh) wh.stock += qty;
 
 //           variant.stock = variant.stockByWarehouse.reduce(
 //             (sum, w) => sum + w.stock,
@@ -1285,36 +1300,8 @@ export const getShipmentDetails = async (req, res) => {
 //         }
 //       }
 
-//       await order.save({ session });
+//       await txOrder.save({ session });
 //     });
-
-//     /* =================================================
-//        🚚 PROVIDER CANCELLATION (AFTER COMMIT)
-//     ================================================= */
-//     try {
-//       if (provider === "delhivery" && waybill) {
-//         await cancelDelhiveryShipment(waybill);
-//       }
-
-//       if (provider === "shiprocket" && shiprocketOrderId) {
-//         await cancelShiprocketShipment(shiprocketOrderId);
-//       }
-//     } catch (err) {
-//       console.error("⚠️ Provider cancellation failed:", err.message);
-
-//       await Order.updateOne(
-//         {
-//           _id: orderIdForRetry,
-//           "shipments._id": shipmentIdForRetry
-//         },
-//         {
-//           $set: {
-//             "shipments.$.sync_failed": true,
-//             "shipments.$.sync_failed_at": new Date()
-//           }
-//         }
-//       );
-//     }
 
 //     return res.json({
 //       success: true,
@@ -1323,113 +1310,9 @@ export const getShipmentDetails = async (req, res) => {
 
 //   } catch (err) {
 //     console.error("CANCEL SHIPMENT ERROR:", err);
-//     return res.status(400).json({
-//       success: false,
-//       message: err.message
-//     });
-//   } finally {
-//     await session.endSession();
-//   }
-// };
-
-
-// export const cancelOrder = async (req, res) => {
-//   const session = await mongoose.startSession();
-
-//   try {
-//     const { orderId } = req.params;
-//     const { reason } = req.body || {};
-//     const userId = req.user?._id;
-
-//     if (!reason || !reason.trim()) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Cancellation reason is required"
-//       });
-//     }
-
-
-//     if (!orderId)
-//       return res.status(400).json({ success: false, message: "orderId is required" });
-
-//     const order = await Order.findById(orderId)
-//       .populate("user")
-//       .session(session);
-
-//     if (!order)
-//       return res.status(404).json({ success: false, message: "Order not found" });
-
-//     // 🔐 Ownership check
-//     if (String(order.user._id) !== String(userId) && !req.user?.isAdmin)
-//       return res.status(403).json({ success: false, message: "This is not your order" });
-
-//     // ❌ Already cancelled
-//     if (order.orderStatus === "Cancelled")
-//       return res.status(400).json({ success: false, message: "Order already cancelled" });
-
-//     // 🚫 If shipments already created → block
-//     if (order.shipments && order.shipments.length > 0) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Order cannot be cancelled because shipment has already been created."
-//       });
-//     }
-
-//     await session.withTransaction(async () => {
-//       order.orderStatus = "Cancelled";
-//       order.paymentStatus = order.paid ? "refund_requested" : "cancelled";
-
-//       order.cancellation = {
-//         ...(order.cancellation?.toObject?.() || {}),
-//         cancelledBy: userId,
-//         reason,
-//         requestedAt: new Date(),
-//         allowed: true
-//       };
-
-
-//       order.tracking_history = order.tracking_history || [];
-//       order.tracking_history.push({
-//         status: "Order Cancelled",
-//         timestamp: new Date(),
-//         location: "Customer",
-//       });
-
-//       await order.save({ session });
-//     });
-
-//     // ✉️ EMAIL
-//     try {
-//       await sendEmail(
-//         order.user.email,
-//         "Your Joyory Order Has Been Cancelled",
-//         `
-//           <p>Hi ${order.user.name},</p>
-//           <p>Your order <strong>#${order._id}</strong> has been cancelled successfully.</p>
-//           <p><strong>Reason:</strong> ${reason || "Not specified"}</p>
-//           ${order.paid
-//           ? "<p>Your refund will be processed shortly.</p>"
-//           : ""
-//         }
-//           <p>Thank you,<br/>Team Joyory</p>
-//         `
-//       );
-//     } catch (err) {
-//       console.error("Email failed:", err.message);
-//     }
-
-//     return res.status(200).json({
-//       success: true,
-//       message: order.paid
-//         ? "Order cancelled. Refund will be processed."
-//         : "Order cancelled successfully",
-//     });
-
-//   } catch (err) {
-//     console.error("❌ Cancel order error:", err);
 //     return res.status(500).json({
 //       success: false,
-//       message: err.message || "Cancel order failed",
+//       message: "Something went wrong"
 //     });
 //   } finally {
 //     await session.endSession();
@@ -1586,6 +1469,166 @@ export const cancelShipment = async (req, res) => {
       await txOrder.save({ session });
     });
 
+    const freshOrder = await Order.findById(orderId).populate("user");
+
+    const derivedOrderStatus = (() => {
+      const statuses = freshOrder.shipments.map(s => s.status);
+
+      if (statuses.every(s => s === "Cancelled")) return "Cancelled";
+      if (statuses.some(s => s === "Cancelled")) return "Partially Cancelled";
+
+      return freshOrder.orderStatus || "Updated";
+    })();
+
+
+    // =================================================
+    // 📧 EMAIL NOTIFICATION (NON-BLOCKING)
+    // =================================================
+    if (order.user && order.user.email) {
+      try {
+        const waybillDisplay = waybill || shipment_id;
+        const orderLink = `${process.env.APP_URL || 'https://joyory.com/'}order-details/${shipment_id}`;
+        const shipmentItems = shipment.products.map(item =>
+          `• ${item.name || 'Product'} (Qty: ${item.quantity})`
+        ).join('\n');
+
+        const emailContent = {
+          to: order.user.email,
+          subject: `Shipment Cancelled - Order #${orderId.substring(0, 8)}`,
+          html: `
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <style>
+                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                .header { background: #f8f9fa; padding: 20px; border-radius: 8px; }
+                .content { margin: 20px 0; }
+                .info-box { background: #f1f8ff; border-left: 4px solid #007bff; padding: 15px; margin: 15px 0; }
+                .status-badge { 
+                  background: #dc3545; 
+                  color: white; 
+                  padding: 4px 12px; 
+                  border-radius: 20px; 
+                  display: inline-block; 
+                  font-size: 14px;
+                }
+                .footer { 
+                  margin-top: 30px; 
+                  padding-top: 20px; 
+                  border-top: 1px solid #eee; 
+                  color: #666; 
+                  font-size: 14px;
+                }
+                .button {
+                  display: inline-block;
+                  padding: 10px 20px;
+                  background: #007bff;
+                  color: white;
+                  text-decoration: none;
+                  border-radius: 5px;
+                  margin: 10px 0;
+                }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="header">
+                  <h2>Shipment Cancellation Confirmation</h2>
+                  <p>Hi ${order.user.name || 'Customer'},</p>
+                </div>
+                
+                <div class="content">
+                  <p>Your shipment has been successfully cancelled. Here are the details:</p>
+                  
+                  <div class="info-box">
+                    <p><strong>Order ID:</strong> ${orderId}</p>
+                    <p><strong>Shipment ID:</strong> ${shipment_id}</p>
+                    <p><strong>Waybill Number:</strong> ${waybillDisplay}</p>
+                    <p><strong>Status:</strong> <span class="status-badge">CANCELLED</span></p>
+                    <p><strong>Cancellation Reason:</strong> ${reason}</p>
+                    <p><strong>Cancelled On:</strong> ${new Date().toLocaleDateString('en-IN', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          })}</p>
+                  </div>
+                  
+                  <h3>📦 Cancelled Items</h3>
+                  <pre style="background: #f8f9fa; padding: 15px; border-radius: 5px; white-space: pre-wrap;">${shipmentItems}</pre>
+                  
+                  <h3>💰 Refund Information</h3>
+                  <p>If you've paid for this shipment, your refund will be processed within 5-7 business days. The amount will be credited to your original payment method.</p>
+                  
+                  <h3>📋 Next Steps</h3>
+                  <ul>
+                    <li>Your order status is now: <strong>${derivedOrderStatus}</strong></li>
+                    <li>Check your refund status in your account</li>
+                    <li>Contact support if you need to modify other shipments</li>
+                  </ul>
+                  
+                  <a href="${orderLink}" class="button">View Order Details</a>
+                </div>
+                
+                <div class="footer">
+                  <p>Need help? <a href="mailto:support@joyory.com">Contact our support team</a></p>
+                  <p>This is an automated email, please do not reply directly.</p>
+                  <p>Thank you for shopping with Joyory!</p>
+                  <p><strong>— Team Joyory</strong></p>
+                </div>
+              </div>
+            </body>
+            </html>
+          `,
+          // Optional text version for email clients that don't support HTML
+          text: `
+            SHIPMENT CANCELLATION CONFIRMATION
+            
+            Hi ${order.user.name || 'Customer'},
+            
+            Your shipment has been successfully cancelled.
+            
+            Order ID: ${orderId}
+            Shipment ID: ${shipment_id}
+            Waybill Number: ${waybillDisplay}
+            Status: CANCELLED
+            Cancellation Reason: ${reason}
+            Cancelled On: ${new Date().toLocaleDateString('en-IN')}
+            
+            Cancelled Items:
+            ${shipmentItems}
+            
+            Refund Information:
+            If you've paid for this shipment, your refund will be processed within 5-7 business days.
+            
+            Order Status: ${derivedOrderStatus}
+            
+            View your order: ${orderLink}
+            
+            Need help? Contact support@joyory.com
+            
+            Thank you for shopping with Joyory!
+            — Team Joyory
+          `
+        };
+
+        // Send email in background without blocking response
+        sendEmail(emailContent).catch(error => {
+          console.warn("📧 Email sending failed (non-critical):", error.message);
+          // Log to monitoring service if available
+          // e.g., logToSentry(error, { orderId, shipment_id, userId });
+        });
+
+      } catch (emailError) {
+        console.warn("📧 Email preparation failed:", emailError.message);
+        // Don't fail the whole request if email fails
+      }
+    }
+
+
     return res.json({
       success: true,
       message: "Shipment cancelled successfully"
@@ -1601,7 +1644,6 @@ export const cancelShipment = async (req, res) => {
     await session.endSession();
   }
 };
-
 
 export const cancelOrder = async (req, res) => {
   const session = await mongoose.startSession();
