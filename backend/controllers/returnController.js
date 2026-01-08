@@ -323,28 +323,44 @@ export const getMyShipmentReturns = async (req, res) => {
         return res.status(500).json({ success: false, message: err.message });
     }
 };
-
 export const getShipmentReturnDetails = async (req, res) => {
     try {
-        const { shipment_id, returnId } = req.params;
+        const { shipmentId, returnId } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(shipmentId)) {
+            return res.status(400).json({ success: false, message: "Invalid shipmentId" });
+        }
 
         if (!mongoose.Types.ObjectId.isValid(returnId)) {
             return res.status(400).json({ success: false, message: "Invalid returnId" });
         }
 
+        // ✅ Correct query
         const order = await Order.findOne({
-            "shipments.shipment_id": shipment_id
+            "shipments._id": shipmentId
         }).populate("user", "name email");
 
-        if (!order) return res.status(404).json({ success: false, message: "Shipment not found" });
+        if (!order) {
+            return res.status(404).json({ success: false, message: "Shipment not found" });
+        }
 
-        const shipment = order.shipments.find(s => s.shipment_id === shipment_id);
-        if (!shipment) return res.status(404).json({ success: false, message: "Shipment not found" });
+        // ✅ Correct shipment lookup
+        const shipment = order.shipments.find(
+            s => String(s._id) === String(shipmentId)
+        );
 
+        if (!shipment) {
+            return res.status(404).json({ success: false, message: "Shipment not found" });
+        }
+
+        // ✅ Correct return lookup
         const ret = shipment.returns.id(returnId);
-        if (!ret) return res.status(404).json({ success: false, message: "Return not found" });
 
-        // Access allowed for user or admin
+        if (!ret) {
+            return res.status(404).json({ success: false, message: "Return not found" });
+        }
+
+        // ✅ Authorization
         if (
             req.user &&
             order.user._id.toString() !== req.user._id.toString() &&
@@ -355,12 +371,19 @@ export const getShipmentReturnDetails = async (req, res) => {
 
         return res.json({
             success: true,
-            data: { shipmentCode: shipment.shipment_id, return: ret }
+            data: {
+                shipmentId: shipment._id,
+                returnId: ret._id,
+                return: ret
+            }
         });
 
     } catch (err) {
         console.error("getShipmentReturnDetails Error:", err);
-        return res.status(500).json({ success: false, message: err.message });
+        return res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 };
 
