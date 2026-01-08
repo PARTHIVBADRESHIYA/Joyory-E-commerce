@@ -308,8 +308,8 @@ export const getMyShipmentReturns = async (req, res) => {
 
                 for (const r of s.returns) {
                     flattened.push({
-                        shipmentId: s.shipment_id,
-                        shipmentCode: s.shipment_id,
+                        shipmentId: s._id,          // ✅ shipment mongo id
+                        returnId: r._id,            // ✅ return mongo id
                         return: r
                     });
                 }
@@ -323,6 +323,8 @@ export const getMyShipmentReturns = async (req, res) => {
         return res.status(500).json({ success: false, message: err.message });
     }
 };
+
+
 export const getShipmentReturnDetails = async (req, res) => {
     try {
         const { shipmentId, returnId } = req.params;

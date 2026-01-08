@@ -9,3 +9,20 @@ export const deleteDraftOrders = async () => {
         console.error("❌ Error in deleteDraftOrders:", error);
     }
 };
+
+/**
+ * Delete abandoned online / credit-card orders
+ */
+export const deleteAbandonedPaymentOrders = async () => {
+    try {
+        const result = await Order.deleteMany({
+            orderType: { $in: ["Online", "Credit card"] },
+            paymentStatus: "pending",
+            orderStatus: "Awaiting Payment"
+        });
+
+        console.log(`🧹 Deleted Abandoned Payment Orders: ${result.deletedCount}`);
+    } catch (error) {
+        console.error("❌ Error deleting abandoned payment orders:", error);
+    }
+};
