@@ -1011,7 +1011,14 @@ export const getShipmentDetails = async (req, res) => {
       return {
         productId: p._id,
         name: p.name,
-        variant: variant.shadeName || variant.sku || null,
+        // ✅ FULL VARIANT OBJECT
+        variant: variant
+          ? {
+            sku: variant.sku || null,
+            shadeName: variant.shadeName || null
+          }
+          : null,
+        // variant: variant.shadeName || variant.sku || null,
         image: variant.image || p.images?.[0] || null,
         qty: item.quantity,
         mrp: variant.originalPrice || 0,
