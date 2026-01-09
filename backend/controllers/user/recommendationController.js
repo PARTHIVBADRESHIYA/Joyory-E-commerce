@@ -7,7 +7,7 @@ import { enrichProductsUnified } from "../../middlewares/services/productHelpers
 import { getRedis } from "../../middlewares/utils/redis.js";
 import Promotion from "../../models/Promotion.js";
 
-export async function getEnrichedProductsByIds(productIds, cacheKey, ttl = 60) {
+export async function getEnrichedProductsByIds(productIds, cacheKey, ttl = 120) {
     const redis = getRedis();
 
     // 🔥 Redis hit

@@ -498,9 +498,27 @@ import userShadeFinderRoutes from "./routes/user/userShadeFinderRoutes.js";
 import userGiftCardRoutes from "./routes/user/userGiftCardRoutes.js";
 import userWalletRoutes from "./routes/user/userWalletRoutes.js";
 import userAnalyticsRoutes from "./routes/user/userAnalyticsRoutes.js";
-
+import { getRedis } from "./middlewares/utils/redis.js";
 // ================= CONNECT DB =================
 connectDB();
+
+
+// export const flushAllCache = async () => {
+//     try {
+//         const redis = getRedis();
+//         if (!redis) {
+//             console.error("❌ Redis instance not available");
+//             return;
+//         }
+
+//         await redis.flushall();
+//         console.log("🧹 Redis cache flushed (FLUSHALL)");
+//     } catch (error) {
+//         console.error("❌ Redis FLUSHALL failed:", error);
+//     }
+// };
+
+// await flushAllCache();
 
 // ================= START CRON JOBS =================
 startDelhiveryCron();

@@ -14,7 +14,7 @@ const VideoSchema = new mongoose.Schema(
             validate: {
                 validator: function (v) {
                     if (!v) return true;
-                    return /^https?:\/\/.+/.test(v);
+                    return /^https?:\/\/.+/.test(v);    
                 },
                 message: 'Invalid URL',
             },
