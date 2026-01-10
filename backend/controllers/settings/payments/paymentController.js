@@ -3463,7 +3463,7 @@ export const getOrderSuccessDetails = async (req, res) => {
             orderId: order._id,
             displayOrderId: order.orderId || order.orderNumber,
             orderDate: order.createdAt,
-            status: order.orderStatus,
+            status: order.orderStatus,  
 
             // 💳 Payment details (THIS is what you were missing)
             payment: {

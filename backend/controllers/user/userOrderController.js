@@ -12,7 +12,7 @@ import UserActivity from "../../models/UserActivity.js";
 
 import { cancelDelhiveryShipment } from "../../middlewares/services/delhiveryService.js";
 import { computeOrderStatus } from "../../controllers/orderController.js";
-
+import Invoice from "../../models/Invoice.js";
 
 // export function mapShipmentToUIStatus(shipment) {
 //   if (!shipment) return "Confirmed";
@@ -1690,6 +1690,15 @@ export const cancelOrder = async (req, res) => {
       });
     }
 
+    // ❌ Already cancelled check
+    if (order.cancellation?.allowed === true || order.orderStatus === "Cancelled") {
+      return res.status(409).json({
+        success: false,
+        message: "This order has already been cancelled. No further action is required."
+      });
+    }
+
+
     await session.withTransaction(async () => {
       const txOrder = await Order.findById(orderId)
         .session(session)
@@ -1777,7 +1786,7 @@ export const cancelOrder = async (req, res) => {
         allowed: true
       };
 
-      txOrder.orderStatus = computeOrderStatus(txOrder.shipments);
+      txOrder.orderStatus = computeOrderStatus(txOrder);
 
       await txOrder.save({ session });
     });
@@ -1813,3 +1822,35 @@ export const cancelOrder = async (req, res) => {
   }
 };
 
+export const downloadInvoice = async (req, res) => {
+  try {
+    const { invoiceId } = req.params;
+
+    const invoice = await Invoice.findById(invoiceId);
+    if (!invoice || !invoice.invoicePdfUrl) {
+      return res.status(404).json({
+        success: false,
+        message: "Invoice not available",
+      });
+    }
+
+    const response = await axios.get(invoice.invoicePdfUrl, {
+      responseType: "stream",
+    });
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${invoice.invoiceNumber}.pdf"`
+    );
+    res.setHeader("Cache-Control", "no-store");
+
+    response.data.pipe(res);
+  } catch (err) {
+    console.error("Invoice download error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to download invoice",
+    });
+  }
+};

@@ -364,21 +364,39 @@ const generateProfessionalInvoice = async (data) => {
     });
 };
 
+// const uploadToCloudinary = async (pdfBuffer, invoiceNumber) => {
+//     return new Promise((resolve, reject) => {
+//         cloudinary.uploader
+//             .upload_stream(
+//                 {
+//                     folder: "invoices",
+//                     public_id: invoiceNumber,
+//                     resource_type: "auto",
+//                     format: "pdf",
+//                 },
+//                 (err, result) => {
+//                     if (err) return reject(err);
+//                     resolve(result);
+//                 }
+//             )
+//             .end(pdfBuffer);
+//     });
+// };
+
 const uploadToCloudinary = async (pdfBuffer, invoiceNumber) => {
     return new Promise((resolve, reject) => {
-        cloudinary.uploader
-            .upload_stream(
-                {
-                    folder: "invoices",
-                    public_id: invoiceNumber,
-                    resource_type: "auto",
-                    format: "pdf",
-                },
-                (err, result) => {
-                    if (err) return reject(err);
-                    resolve(result);
-                }
-            )
-            .end(pdfBuffer);
+        cloudinary.uploader.upload_stream(
+            {
+                folder: "invoices",
+                public_id: invoiceNumber,
+                resource_type: "raw",       // REQUIRED
+                type: "upload",             // public
+                access_mode: "public"       // avoid ACL deny
+            },
+            (err, result) => {
+                if (err) return reject(err);
+                resolve(result);
+            }
+        ).end(pdfBuffer);
     });
 };

@@ -72,12 +72,122 @@ function buildShipmentsFromAllocation(txOrder, allocationMap) {
     return Object.values(shipmentMap);
 }
 
-export function computeOrderStatus(shipments = []) {
+// export function computeOrderStatus(shipments = []) {
+//     if (!Array.isArray(shipments) || shipments.length === 0) {
+//         return "Pending";
+//     }
+
+//     const normalize = (s = "") => s.toString().trim().toLowerCase();
+
+//     let delivered = 0;
+//     let cancelled = 0;
+//     let shipped = 0;
+//     let processing = 0;
+//     let returned = 0;
+//     let rto = 0;
+
+//     for (const shipment of shipments) {
+
+//         /** --------------------
+//          *  1️⃣ FORWARD STATUS
+//          * -------------------- */
+//         const forwardStatus = normalize(shipment.status);
+
+//         if (shipment.deliveredAt || forwardStatus === "delivered") {
+//             delivered++;
+//         }
+//         else if (forwardStatus === "cancelled") {
+//             cancelled++;
+//         }
+//         else if (forwardStatus.includes("rto")) {
+//             rto++;
+//         }
+
+//         else if (
+//             ["shipped", "in transit", "out for delivery"].includes(forwardStatus)
+//         ) {
+//             shipped++;
+//         }
+//         else {
+//             processing++;
+//         }
+
+//         /** --------------------
+//          *  2️⃣ RETURNS STATUS
+//          * -------------------- */
+//         if (Array.isArray(shipment.returns) && shipment.returns.length > 0) {
+//             for (const ret of shipment.returns) {
+//                 const rStatus = normalize(ret.status);
+
+//                 if (
+//                     ["refund_initiated", "refunded"].includes(rStatus)
+//                 ) {
+//                     returned++;
+//                 }
+//             }
+//         }
+//     }
+
+//     const total = shipments.length;
+
+//     /** --------------------
+//      *  3️⃣ FINAL ORDER STATUS
+//      * -------------------- */
+
+//     // ✅ Fully Delivered (no cancellation)
+//     if (delivered === total && cancelled === 0) {
+//         return "Delivered";
+//     }
+
+//     // ♻️ Fully Returned (all delivered + all returned)
+//     if (returned === total && delivered === total) {
+//         return "Returned";
+//     }
+
+
+//     // ❌ Fully Cancelled
+//     if (cancelled === total) {
+//         return "Cancelled";
+//     }
+
+//     // ⚠️ Partial cases
+//     if (delivered > 0 && cancelled > 0) {
+//         return "Partially Delivered / Cancelled";
+//     }
+
+//     if (delivered > 0 && delivered < total) {
+//         return "Partially Delivered";
+//     }
+
+//     if (cancelled > 0 && cancelled < total) {
+//         return "Partially Cancelled";
+//     }
+
+//     // 🚚 Shipping in progress
+//     if (shipped > 0) {
+//         return "Shipped";
+//     }
+
+//     // 🔄 Default
+//     return "Processing";
+// }
+export function computeOrderStatus(order) {
+    const shipments = order.shipments || [];
+
+    const normalize = (s = "") => s.toString().trim().toLowerCase();
+
+    /* -------------------------
+       0️⃣ HARD OVERRIDES
+    -------------------------- */
+
+    // If order is cancelled (even without shipments)
+    if (order.cancellation?.allowed === true) {
+        return "Cancelled";
+    }
+
     if (!Array.isArray(shipments) || shipments.length === 0) {
         return "Pending";
     }
-
-    const normalize = (s = "") => s.toString().trim().toLowerCase();
 
     let delivered = 0;
     let cancelled = 0;
@@ -88,9 +198,9 @@ export function computeOrderStatus(shipments = []) {
 
     for (const shipment of shipments) {
 
-        /** --------------------
-         *  1️⃣ FORWARD STATUS
-         * -------------------- */
+        /* --------------------
+           1️⃣ FORWARD STATUS
+        --------------------- */
         const forwardStatus = normalize(shipment.status);
 
         if (shipment.deliveredAt || forwardStatus === "delivered") {
@@ -102,7 +212,6 @@ export function computeOrderStatus(shipments = []) {
         else if (forwardStatus.includes("rto")) {
             rto++;
         }
-
         else if (
             ["shipped", "in transit", "out for delivery"].includes(forwardStatus)
         ) {
@@ -112,16 +221,14 @@ export function computeOrderStatus(shipments = []) {
             processing++;
         }
 
-        /** --------------------
-         *  2️⃣ RETURNS STATUS
-         * -------------------- */
+        /* --------------------
+           2️⃣ RETURNS STATUS
+        --------------------- */
         if (Array.isArray(shipment.returns) && shipment.returns.length > 0) {
             for (const ret of shipment.returns) {
                 const rStatus = normalize(ret.status);
 
-                if (
-                    ["refund_initiated", "refunded"].includes(rStatus)
-                ) {
+                if (["refund_initiated", "refunded"].includes(rStatus)) {
                     returned++;
                 }
             }
@@ -130,27 +237,22 @@ export function computeOrderStatus(shipments = []) {
 
     const total = shipments.length;
 
-    /** --------------------
-     *  3️⃣ FINAL ORDER STATUS
-     * -------------------- */
+    /* --------------------
+       3️⃣ FINAL ORDER STATUS
+    --------------------- */
 
-    // ✅ Fully Delivered (no cancellation)
     if (delivered === total && cancelled === 0) {
         return "Delivered";
     }
 
-    // ♻️ Fully Returned (all delivered + all returned)
     if (returned === total && delivered === total) {
         return "Returned";
     }
 
-
-    // ❌ Fully Cancelled
     if (cancelled === total) {
         return "Cancelled";
     }
 
-    // ⚠️ Partial cases
     if (delivered > 0 && cancelled > 0) {
         return "Partially Delivered / Cancelled";
     }
@@ -163,12 +265,10 @@ export function computeOrderStatus(shipments = []) {
         return "Partially Cancelled";
     }
 
-    // 🚚 Shipping in progress
     if (shipped > 0) {
         return "Shipped";
     }
 
-    // 🔄 Default
     return "Processing";
 }
 

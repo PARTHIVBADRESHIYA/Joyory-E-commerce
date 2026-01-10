@@ -13,7 +13,8 @@ import {
     getOrderTracking,
     getShipmentDetails,
     cancelShipment,
-    cancelOrder
+    cancelOrder,
+    downloadInvoice
 } from '../../controllers/user/userOrderController.js';
 
 import { getDiscountProducts } from '../../controllers/user/userDiscountController.js';
@@ -32,7 +33,7 @@ router.get('/summary', optionalAuth, guestSession, validateDiscount, getCartSumm
 router.delete('/remove/:productId', optionalAuth, guestSession, removeFromCart);
 
 // 📦 Order from Cart Route
-// NEW - Initiate Order from Cart
+// NEW - Initiate Order from Cart   
 router.post('/order/initiate', protect, validateDiscount, initiateOrderFromCart);
 
 // 📦 Order from Cart Route 
@@ -47,5 +48,7 @@ router.put("/shipment/cancel/:shipment_id", protect, cancelShipment);
 router.put("/cancel/:orderId", protect, cancelOrder);
 
 router.get("/discount/:discountId", protect, getDiscountProducts);
+
+router.get("/invoice/:invoiceId", protect, downloadInvoice);
 
 export default router;
