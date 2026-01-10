@@ -2157,8 +2157,6 @@ export const verifyRazorpayPayment = async (req, res) => {
             }
         }
 
-
-
         if (shippingAddress) order.shippingAddress = shippingAddress;
         order.tracking_history = order.tracking_history || [];
         order.tracking_history.push({ status: "Payment Captured", timestamp: new Date(), location: "Razorpay" });
@@ -2181,26 +2179,60 @@ export const verifyRazorpayPayment = async (req, res) => {
         }
 
         await order.save();
-        // 🔔 Notify Admin: New Prepaid Order
-        await sendNotification({
-            type: "order_paid",
-            message: `New prepaid order #${order.orderNumber || order._id} placed`,
-            priority: "high",
-            meta: {
-                orderId: order._id,
-                userId: order.user._id,
-                paymentId: razorpay_payment_id
-            }
-        });
+        const updatedOrder = order; // snapshot for async tasks
 
-        await clearUserCart(order.user._id);
+        // --- FIRE-AND-FORGET POST PAYMENT TASKS (NON BLOCKING) ---
+        (async () => {
+            try {
+                // 1. Funnel / conversion stats
+                await User.findByIdAndUpdate(
+                    updatedOrder.user._id,
+                    [
+                        {
+                            $set: {
+                                "conversionStats.orderCount": {
+                                    $add: [
+                                        { $ifNull: ["$conversionStats.orderCount", 0] },
+                                        1
+                                    ]
+                                }
+                            }
+                        }
+                    ]
+                );
 
+                // 2. User activity log
+                await UserActivity.create({
+                    user: updatedOrder.user._id,
+                    type: "order"
+                });
 
-        try {
-            await sendEmail(
-                order.user.email,
-                `Payment Successful! Order #${order.orderNumber || order._id} Confirmed`,
-                `
+                // 3. Admin notification
+                await sendNotification({
+                    type: "order_paid",
+                    message: `New prepaid order #${updatedOrder.orderNumber || updatedOrder._id} placed`,
+                    priority: "high",
+                    meta: {
+                        orderId: updatedOrder._id,
+                        userId: updatedOrder.user._id,
+                        paymentId: updatedOrder.transactionId
+                    }
+                });
+
+                // 4. Clear user cart
+                await clearUserCart(updatedOrder.user._id);
+
+                // 5. Generate invoice (same as Wallet)
+                const invoice = await generateAndSaveInvoice(updatedOrder);
+                if (invoice) {
+                    updatedOrder.invoice = invoice._id;
+                    await updatedOrder.save().catch(console.warn);
+                }
+
+                await sendEmail(
+                    updatedOrder.user.email,
+                    `Payment Successful! Order #${updatedOrder.orderNumber || updatedOrder._id} Confirmed`,
+                    `
         <!DOCTYPE html>
         <html>
         <head>
@@ -2223,14 +2255,14 @@ export const verifyRazorpayPayment = async (req, res) => {
                     <p>Thank you for your order with Joyory Beauty</p>
                 </div>
                 <div class="content">
-                    <h2>Hi ${order.user.name},</h2>
-                    <p>We've successfully received your payment of <strong>₹${order.amount}</strong> for your order.</p>
+                    <h2>Hi ${updatedOrder.user.name},</h2>
+                    <p>We've successfully received your payment of <strong>₹${updatedOrder.amount}</strong> for your order.</p>
                     
                     <div class="order-card">
                         <h3>📦 Order Details</h3>
-                        <p><strong>Order ID:</strong> #${order.orderNumber || order._id}</p>
-                        <p><strong>Payment Method:</strong> ${order.paymentMethod}</p>
-                        <p><strong>Transaction ID:</strong> ${order.transactionId}</p>
+                        <p><strong>Order ID:</strong> #${updatedOrder.orderNumber || updatedOrder._id}</p>
+                        <p><strong>Payment Method:</strong> ${updatedOrder.paymentMethod}</p>
+                        <p><strong>Transaction ID:</strong> ${updatedOrder.transactionId}</p>
                         <p><strong>Date:</strong> ${new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
                         
                         <div style="margin: 20px 0;">
@@ -2261,10 +2293,14 @@ export const verifyRazorpayPayment = async (req, res) => {
         </body>
         </html>
         `
-            );
-        } catch (e) { console.warn("Email failed:", e); }
+                );
 
-        return res.status(200).json({ step: "CAPTURED", success: true, message: "Payment captured. Awaiting admin confirmation.", order });
+            } catch (err) {
+                console.error("Post Razorpay async tasks failed:", err.message);
+            }
+        })();
+
+        return res.status(200).json({ step: "CAPTURED", success: true, message: "Payment captured. Awaiting admin confirmation.", order: updatedOrder });
     } catch (err) {
         console.error("🔥 verifyRazorpayPayment Error:", err);
         return res.status(500).json({ step: "FATAL", success: false, message: "Unexpected server error during payment verification", error: (err && err.message) || err });
@@ -2570,22 +2606,58 @@ export const confirmCodOrder = async (req, res) => {
         });
 
         await order.save();
-        // 🔔 Notify Admin: New COD Order
-        await sendNotification({
-            type: "order_cod",
-            message: `New COD order #${order.orderNumber || order._id} placed`,
-            priority: "high",
-            meta: {
-                orderId: order._id,
-                userId: order.user._id
-            }
-        });
-        await clearUserCart(order.user._id);
 
-        await sendEmail(
-            order.user.email,
-            `COD Order #${order.orderNumber || order._id} Received Successfully!`,
-            `
+        const updatedOrder = order;
+
+        // --- FIRE-AND-FORGET NON-TRANSACTION TASKS ---
+        (async () => {
+            try {
+
+                // 1. Funnel stats
+                await User.findByIdAndUpdate(
+                    updatedOrder.user._id,
+                    [
+                        {
+                            $set: {
+                                "conversionStats.orderCount": {
+                                    $add: [{ $ifNull: ["$conversionStats.orderCount", 0] }, 1]
+                                }
+                            }
+                        }
+                    ]
+                );
+
+                // 2. User activity
+                await UserActivity.create({
+                    user: updatedOrder.user._id,
+                    type: "order"
+                });
+
+                // 3. Admin notification
+                await sendNotification({
+                    type: "order_cod",
+                    message: `New COD order #${updatedOrder.orderNumber || updatedOrder._id} placed`,
+                    priority: "high",
+                    meta: {
+                        orderId: updatedOrder._id,
+                        userId: updatedOrder.user._id
+                    }
+                });
+
+                // 4. Clear cart
+                await clearUserCart(updatedOrder.user._id);
+
+                // 5. Generate invoice (same as wallet)
+                const invoice = await generateAndSaveInvoice(updatedOrder);
+                if (invoice) {
+                    updatedOrder.invoice = invoice._id;
+                    await updatedOrder.save().catch(console.warn);
+                }
+
+                await sendEmail(
+                    updatedOrder.user.email,
+                    `COD Order #${updatedOrder.orderNumber || updatedOrder._id} Received Successfully!`,
+                    `
     <!DOCTYPE html>
     <html>
     <head>
@@ -2609,23 +2681,23 @@ export const confirmCodOrder = async (req, res) => {
                 <p>Pay when your order arrives at your doorstep</p>
             </div>
             <div class="content">
-                <h2>Hi ${order.user.name},</h2>
+                <h2>Hi ${updatedOrder.user.name},</h2>
                 <p>Great news! Your Cash on Delivery order has been received successfully.</p>
                 
                 <div class="order-summary">
                     <h3>Order Summary</h3>
-                    <p><strong>Order ID:</strong> #${order.orderNumber || order._id}</p>
-                    <p><strong>Order Amount:</strong> ₹${order.amount} (Pay on Delivery)</p>
-                    <p><strong>Items:</strong> ${order.products?.length || 0} product(s)</p>
+                    <p><strong>Order ID:</strong> #${updatedOrder.orderNumber || updatedOrder._id}</p>
+                    <p><strong>Order Amount:</strong> ₹${updatedOrder.amount} (Pay on Delivery)</p>
+                    <p><strong>Items:</strong> ${updatedOrder.products?.length || 0} product(s)</p>
                     
                     <div style="margin: 20px 0;">
                         <span class="cod-badge">💰 Cash on Delivery</span>
                     </div>
                     
                     <p><strong>Delivery Address:</strong><br>
-                    ${order.shippingAddress?.name || ''}<br>
-                    ${order.shippingAddress?.addressLine1 || ''}<br>
-                    ${order.shippingAddress?.city || ''}, ${order.shippingAddress?.state || ''} - ${order.shippingAddress?.pincode || ''}
+                    ${updatedOrder.shippingAddress?.name || ''}<br>
+                    ${updatedOrder.shippingAddress?.addressLine1 || ''}<br>
+                    ${updatedOrder.shippingAddress?.city || ''}, ${updatedOrder.shippingAddress?.state || ''} - ${updatedOrder.shippingAddress?.pincode || ''}
                     </p>
                 </div>
                 
@@ -2659,7 +2731,7 @@ export const confirmCodOrder = async (req, res) => {
                 </div>
                 
                 <div style="text-align: center; margin-top: 30px;">
-                    <a href="${process.env.FRONTEND_URL}/orders/${order._id}" style="display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; text-decoration: none; border-radius: 5px;">Track Your Order</a>
+                    <a href="${process.env.FRONTEND_URL}/orders/${updatedOrder._id}" style="display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; text-decoration: none; border-radius: 5px;">Track Your Order</a>
                 </div>
             </div>
             <div class="footer">
@@ -2670,308 +2742,23 @@ export const confirmCodOrder = async (req, res) => {
     </body>
     </html>
     `
-        );
+                );
+
+            } catch (err) {
+                console.error("Post-COD async tasks failed:", err.message);
+            }
+        })();
 
         return res.status(200).json({
             success: true,
             message: "COD request received. Awaiting admin confirmation.",
-            order
+            order: updatedOrder
         });
 
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
     }
 };
-
-// export const createWalletPayment = async (req, res) => {
-//     const session = await mongoose.startSession();
-//     try {
-//         const { orderId, shippingAddress } = req.body;
-
-//         if (!orderId || !shippingAddress)
-//             return res.status(400).json({ success: false, message: "orderId and shippingAddress are required" });
-
-//         const required = ["name", "phone", "addressLine1", "city", "state", "pincode"];
-//         for (const field of required) {
-//             if (!shippingAddress[field]) {
-//                 return res.status(400).json({ success: false, message: `Shipping address missing: ${field}` });
-//             }
-//         }
-
-//         await session.withTransaction(async () => {
-//             const order = await Order.findById(orderId)
-//                 .session(session)
-//                 .populate("user")
-//                 .populate("products.productId");
-
-//             if (!order) throw new Error("Order not found");
-//             if (order.paid) throw new Error("Already paid");
-
-//             order.shippingAddress = shippingAddress;
-//             order.orderType = "Online";
-//             order.paymentMethod = "Wallet";
-
-//             const Wallet = mongoose.model("Wallet");
-//             let wallet = await Wallet.findOne({ user: order.user._id }).session(session);
-//             if (!wallet) {
-//                 wallet = await Wallet.create([{ user: order.user._id, joyoryCash: 0, rewardPoints: 0, transactions: [] }], { session }).then(d => d[0]);
-//             }
-
-//             const config = await WalletConfig.findOne().session(session);
-//             const pointsRate = config?.pointsToCurrencyRate ?? 0.1;
-
-//             const joyoryCash = Number(wallet.joyoryCash) || 0;
-//             const rewardPoints = Number(wallet.rewardPoints) || 0;
-//             const pointsValue = rewardPoints * pointsRate;
-
-//             const walletBalance = joyoryCash + pointsValue;
-//             const orderAmount = Number(order.amount);
-
-//             if (walletBalance < orderAmount) throw new Error("Not enough wallet balance");
-
-//             let remaining = orderAmount;
-
-//             if (joyoryCash >= remaining) {
-//                 wallet.joyoryCash = joyoryCash - remaining;
-//                 remaining = 0;
-//             } else {
-//                 remaining -= joyoryCash;
-//                 wallet.joyoryCash = 0;
-//             }
-
-//             if (remaining > 0) {
-//                 const pointsNeeded = remaining / pointsRate;
-//                 wallet.rewardPoints = rewardPoints - pointsNeeded;
-//                 remaining = 0;
-//             }
-
-//             const pointsUsed = rewardPoints - wallet.rewardPoints;
-//             const pointsDiscount = pointsUsed * pointsRate;
-
-//             wallet.transactions.push({
-//                 type: "PURCHASE",
-//                 amount: orderAmount,
-//                 mode: "ONLINE",
-//                 description: `Wallet payment for order ${order._id}`,
-//                 timestamp: new Date(),
-//             });
-
-//             order.pointsDiscount = pointsDiscount;
-//             order.pointsUsed = pointsUsed;
-
-//             await wallet.save({ session });
-
-//             order.paid = true;
-//             order.paymentStatus = "success";
-//             order.orderStatus = "Awaiting Admin Confirmation";
-//             order.isDraft = false;   // <-- ADD THIS
-//             order.adminConfirmed = false;
-
-//             /************************************
-//        *  AFFILIATE SYSTEM TRIGGER POINT  *
-//        ************************************/
-//             if (order.affiliate?.slug && !order.affiliate?.applied) {
-
-//                 // 1️⃣ Find affiliate link using slug
-//                 const affiliateLink = await AffiliateLink.findOne({ slug: order.affiliate.slug });
-
-//                 if (affiliateLink) {
-
-//                     // 2️⃣ Find affiliate user from affiliateLink
-//                     const affiliateUser = await AffiliateUser.findById(affiliateLink.affiliateUser);
-
-//                     if (affiliateUser) {
-
-//                         // 3️⃣ Commission calculation
-//                         const commissionRate = affiliateUser.commissionRate || 10; // default 10%
-//                         const commissionAmount = Math.round((order.amount * commissionRate) / 100);
-
-//                         // 4️⃣ Create earning record
-//                         await AffiliateEarning.create({
-//                             affiliateUser: affiliateUser._id,
-//                             affiliateLink: affiliateLink._id,
-
-//                             orderId: order._id,
-//                             orderNumber: order.orderNumber || order.orderId || "-",
-
-//                             orderAmount: order.amount,
-//                             commission: commissionAmount,
-//                             status: "pending"
-//                         });
-
-//                         // 4B️⃣ Create affiliate order (IMPORTANT)
-//                         await AffiliateOrder.create({
-//                             affiliateUser: affiliateUser._id,
-//                             affiliateLink: affiliateLink._id,
-
-//                             orderId: order._id,
-//                             commission: commissionAmount,
-//                             orderValue: order.amount,
-//                             status: "pending"
-//                         });
-
-//                         // 5️⃣ Update ORDER affiliate section
-//                         order.affiliate.applied = true;
-//                         order.affiliate.affiliateUser = affiliateUser._id;
-//                         order.affiliate.affiliateLink = affiliateLink._id;
-
-//                         // 6️⃣ Add pending commission to affiliate user
-//                         affiliateUser.pendingCommission =
-//                             (affiliateUser.pendingCommission || 0) + commissionAmount;
-
-//                         await affiliateUser.save();
-//                     }
-//                 }
-//             }
-
-
-//             order.transactionId = `WALLET-${Date.now()}`;
-
-//             order.tracking_history = order.tracking_history || [];
-//             order.tracking_history.push({
-//                 status: "Payment Successful",
-//                 timestamp: new Date(),
-//                 location: "Wallet"
-//             });
-//             order.tracking_history.push({
-//                 status: "Awaiting Admin Confirmation",
-//                 timestamp: new Date(),
-//                 location: "Store"
-//             });
-
-//             const [paymentDoc] = await Payment.create([{
-//                 order: order._id,
-//                 method: "Wallet",
-//                 status: "Completed",
-//                 transactionId: order.transactionId,
-//                 amount: order.amount,
-//                 isActive: true,
-//             }], { session });
-
-//             if (paymentDoc) order.paymentId = paymentDoc._id;
-
-//             await order.save({ session });
-
-//             // 🔔 Notify Admin: New Wallet Payment Order
-//             await sendNotification({
-//                 type: "order_wallet",
-//                 message: `New Wallet-paid order #${order.orderNumber || order._id} placed`,
-//                 priority: "high",
-//                 meta: {
-//                     orderId: order._id,
-//                     userId: order.user._id,
-//                     amount: order.amount,
-//                     transactionId: order.transactionId
-//                 }
-//             });
-
-
-//             await clearUserCart(order.user._id, session);
-
-//         });
-
-//         const updated = await Order.findById(orderId)
-//             .populate("user")
-//             .populate("products.productId");
-
-//         let invoice;
-//         try {
-//             invoice = await generateAndSaveInvoice(updated);
-
-//             // OPTIONAL: store invoiceId in order schema for linkage
-//             updated.invoice = invoice._id;
-//             await updated.save();
-//         } catch (e) {
-//             console.warn("Invoice generation failed:", e.message);
-//         }
-
-
-//     await sendEmail(
-//         updated.user.email,
-//         `🎯 Wallet Payment Successful! Order #${updated.orderNumber || updated._id}`,
-//         `
-// <!DOCTYPE html>
-// <html>
-// <head>
-//     <style>
-//         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; }
-//         .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-//         .header { background: linear-gradient(135deg, #9c27b0 0%, #673ab7 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
-//         .content { padding: 30px; background: #f9f9f9; }
-//         .wallet-card { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin: 20px 0; }
-//         .points-used { background: #e1bee7; color: #4a148c; padding: 10px 20px; border-radius: 10px; margin: 15px 0; }
-//         .benefits { background: #f3e5f5; padding: 20px; border-radius: 10px; margin: 20px 0; }
-//         .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
-//     </style>
-// </head>
-// <body>
-//     <div class="container">
-//         <div class="header">
-//             <h1>💳 Wallet Payment Complete!</h1>
-//             <p>You've successfully used your Joyory Beauty Wallet</p>
-//         </div>
-//         <div class="content">
-//             <h2>Hi ${updated.user.name},</h2>
-//             <p>Smart choice! Your wallet payment for order <strong>#${updated.orderNumber || updated._id}</strong> has been processed successfully.</p>
-
-//             <div class="wallet-card">
-//                 <h3>💰 Payment Summary</h3>
-//                 <p><strong>Total Order Value:</strong> ₹${updated.amount}</p>
-//                 <p><strong>Payment Method:</strong> Joyory Wallet</p>
-//                 <p><strong>Transaction ID:</strong> ${updated.transactionId}</p>
-
-//                 ${updated.pointsUsed > 0 ? `
-//                 <div class="points-used">
-//                     <p>🎁 <strong>Reward Points Used:</strong> ${updated.pointsUsed} points</p>
-//                     <p>💰 <strong>Points Value:</strong> ₹${updated.pointsDiscount || 0}</p>
-//                 </div>
-//                 ` : ''}
-
-//                 <p style="color: #4CAF50; font-weight: bold;">✅ Payment Status: Completed</p>
-//             </div>
-
-//             <div class="benefits">
-//                 <h4>🌟 Wallet Benefits You Enjoyed:</h4>
-//                 <ul>
-//                     <li>Instant payment processing</li>
-//                     <li>No additional payment charges</li>
-//                     <li>Secure transaction with rewards</li>
-//                     <li>Faster order processing</li>
-//                 </ul>
-//             </div>
-
-//             <div style="background: #e8f5e9; padding: 20px; border-radius: 10px; margin: 20px 0;">
-//                 <h4>📈 Your Wallet Status:</h4>
-//                 <p>Keep earning rewards on every purchase! Visit your wallet to check balance and rewards.</p>
-//                 <a href="${process.env.FRONTEND_URL}/account/wallet" style="color: #9c27b0; font-weight: bold;">View Wallet Balance →</a>
-//             </div>
-
-//             <div style="text-align: center;">
-//                 <a href="${process.env.FRONTEND_URL}/orders/${updated._id}" style="display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #9c27b0 0%, #673ab7 100%); color: white; text-decoration: none; border-radius: 5px;">View Order Details</a>
-//             </div>
-//         </div>
-//         <div class="footer">
-//             <p>Thank you for using Joyory Beauty Wallet!</p>
-//             <p>Earn 5% cashback on every prepaid order</p>
-//         </div>
-//     </div>
-// </body>
-// </html>
-// `
-//     );
-
-//         return res.json({
-//             success: true,
-//             message: "Wallet payment successful. Awaiting admin confirmation.",
-//             order: updated
-//         });
-
-//     } catch (err) {
-//         return res.status(500).json({ success: false, message: err.message });
-//     } finally {
-//         await session.endSession().catch(() => { });
-//     }
-// };
 
 export const createWalletPayment = async (req, res) => {
     const session = await mongoose.startSession();
@@ -3280,6 +3067,8 @@ export const createGiftCardPayment = async (req, res) => {
             }
         }
 
+        let updatedOrder;
+
         await session.withTransaction(async () => {
             const order = await Order.findById(orderId)
                 .session(session)
@@ -3401,34 +3190,60 @@ export const createGiftCardPayment = async (req, res) => {
 
             await order.save({ session });
 
-
-            // 🔔 Notify Admin: New Gift Card Order
-            await sendNotification({
-                type: "order_giftcard",
-                message: `New Gift Card-paid order #${order.orderNumber || order._id} placed`,
-                priority: "high",
-                meta: {
-                    orderId: order._id,
-                    userId: order.user._id,
-                    amount: order.amount,
-                    transactionId: order.transactionId,
-                    giftCard: order.giftCardApplied?.code
-                }
-            });
-
-            await clearUserCart(order.user._id, session);
-
-
+            updatedOrder = order;
         });
 
-        const updated = await Order.findById(orderId)
-            .populate("user")
-            .populate("products.productId");
 
-        await sendEmail(
-            updated.user.email,
-            `🎁 Gift Card Payment Successful! Order #${updated.orderNumber || updated._id}`,
-            `
+        // --- FIRE & FORGET NON-TRANSACTION TASKS ---
+        (async () => {
+            try {
+
+                // 📊 Funnel / Conversion Stats
+                await User.findByIdAndUpdate(
+                    updatedOrder.user._id,
+                    [{
+                        $set: {
+                            "conversionStats.orderCount": {
+                                $add: [{ $ifNull: ["$conversionStats.orderCount", 0] }, 1]
+                            }
+                        }
+                    }]
+                );
+
+                // 🧾 User Activity
+                await UserActivity.create({
+                    user: updatedOrder.user._id,
+                    type: "order"
+                });
+
+                // 🔔 Admin Notification
+                await sendNotification({
+                    type: "order_giftcard",
+                    message: `New Gift Card-paid order #${updatedOrder.orderNumber || updatedOrder._id} placed`,
+                    priority: "high",
+                    meta: {
+                        orderId: updatedOrder._id,
+                        userId: updatedOrder.user._id,
+                        amount: updatedOrder.amount,
+                        transactionId: updatedOrder.transactionId,
+                        giftCard: updatedOrder.giftCardApplied?.code
+                    }
+                });
+
+                // 🧹 Clear Cart
+                await clearUserCart(updatedOrder.user._id);
+
+                // 🧾 Invoice Generation (SAME as Wallet)
+                const invoice = await generateAndSaveInvoice(updatedOrder);
+                if (invoice) {
+                    updatedOrder.invoice = invoice._id;
+                    await updatedOrder.save().catch(console.warn);
+                }
+
+                await sendEmail(
+                    updatedOrder.user.email,
+                    `🎁 Gift Card Payment Successful! Order #${updatedOrder.orderNumber || updatedOrder._id}`,
+                    `
     <!DOCTYPE html>
     <html>
     <head>
@@ -3450,14 +3265,14 @@ export const createGiftCardPayment = async (req, res) => {
                 <p>The perfect way to treat yourself or share joy!</p>
             </div>
             <div class="content">
-                <h2>Hi ${updated.user.name},</h2>
+                <h2>Hi ${updatedOrder.user.name},</h2>
                 <p>You've successfully redeemed a Joyory Beauty Gift Card for your order. What a lovely way to shop!</p>
                 
                 <div class="gift-card-box">
                     <h3>💝 Gift Card Details</h3>
-                    <p><strong>Order ID:</strong> #${updated.orderNumber || updated._id}</p>
+                    <p><strong>Order ID:</strong> #${updatedOrder.orderNumber || updatedOrder._id}</p>
                     <p><strong>Gift Card Used:</strong> ${order.giftCardApplied?.code || 'Joyory Gift Card'}</p>
-                    <p><strong>Amount Redeemed:</strong> ₹${order.giftCardDiscount || updated.amount}</p>
+                    <p><strong>Amount Redeemed:</strong> ₹${order.giftCardDiscount || updatedOrder.amount}</p>
                     <p><strong>Payment Status:</strong> <span style="color: #4CAF50; font-weight: bold;">✅ Fully Paid with Gift Card</span></p>
                     
                     <div class="balance-info">
@@ -3484,7 +3299,7 @@ export const createGiftCardPayment = async (req, res) => {
                 </div>
                 
                 <div style="text-align: center;">
-                    <a href="${process.env.FRONTEND_URL}/orders/${updated._id}" style="display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #ff6b6b 0%, #ff8e53 100%); color: white; text-decoration: none; border-radius: 5px;">Track Your Order</a>
+                    <a href="${process.env.FRONTEND_URL}/orders/${updatedOrder._id}" style="display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #ff6b6b 0%, #ff8e53 100%); color: white; text-decoration: none; border-radius: 5px;">Track Your Order</a>
                 </div>
             </div>
             <div class="footer">
@@ -3495,12 +3310,17 @@ export const createGiftCardPayment = async (req, res) => {
     </body>
     </html>
     `
-        );
+                );
+
+            } catch (err) {
+                console.error("Post GiftCard async tasks failed:", err.message);
+            }
+        })();
 
         return res.json({
             success: true,
             message: "Gift card payment successful. Awaiting admin confirmation.",
-            order: updated
+            order: updatedOrder
         });
 
     } catch (err) {
@@ -3578,6 +3398,192 @@ export const setRefundMethod = async (req, res) => {
         message: "Refund method submitted. Waiting for admin approval."
     });
 };
+
+// controllers/orderController.js
+// controllers/orderController.js
+export const getOrderSuccessDetails = async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const userId = req.user._id;
+
+        if (!orderId) {
+            return res.status(400).json({
+                success: false,
+                message: "We couldn’t find your order. Please try again from your orders page.",
+            });
+        }
+
+        const order = await Order.findById(orderId)
+            .populate("products.productId", "name brand images")
+            .populate("user", "name email phone")
+            .populate("affiliate.affiliateUser", "name")
+            .populate("splitOrders.seller", "name")
+            .lean();
+
+        if (!order) {
+            return res.status(404).json({
+                success: false,
+                message: "This order does not exist or may have been removed.",
+            });
+        }
+
+        // 🔐 Ownership check
+        if (
+            order.user._id.toString() !== userId.toString() &&
+            req.user.role !== "admin"
+        ) {
+            return res.status(403).json({
+                success: false,
+                message: "This order does not belong to your account. Please log in with the correct account to view it.",
+            });
+        }
+
+        // ❌ Draft orders must never show success page
+        if (order.isDraft) {
+            return res.status(400).json({
+                success: false,
+                message: "Your order is not confirmed yet. Please complete the checkout process to place your order.",
+            });
+        }
+
+        // ❌ Online payment must be completed
+        if (order.paymentMethod !== "COD" && order.paymentStatus !== "success") {
+            return res.status(400).json({
+                success: false,
+                message: "Your payment is still pending. Please complete the payment to view your order confirmation.",
+            });
+        }
+
+        // 📦 Delivery estimate = createdAt + 7 days
+        const deliveryEstimate = new Date(order.createdAt);
+        deliveryEstimate.setDate(deliveryEstimate.getDate() + 7);
+
+        // 📋 Order summary
+        const orderSummary = {
+            orderId: order._id,
+            displayOrderId: order.orderId || order.orderNumber,
+            orderDate: order.createdAt,
+            status: order.orderStatus,
+
+            // 💳 Payment details (THIS is what you were missing)
+            payment: {
+                method: order.paymentMethod,              // Wallet / Razorpay / COD
+                status: order.paymentStatus,              // success / pending / failed
+                paid: order.paid,                          // true / false
+                transactionId: order.transactionId || null, // WALLET-xxxx / razorpay_payment_id
+                amount: order.amount,                     // final paid amount
+                currency: "INR",
+                note:
+                    order.paymentMethod === "COD"
+                        ? "You can pay in cash when your order is delivered."
+                        : "Your payment was completed successfully.",
+            },
+
+            // 💰 Amount breakup
+            amount: {
+                subtotal: order.subtotal,
+                shipping: order.shippingCharge,
+                discount: order.totalSavings,
+                gst: order.gst?.amount || 0,
+                grandTotal: order.amount,
+            },
+
+            // 🚚 Shipping
+            shipping: {
+                address: order.shippingAddress,
+                expectedDelivery: deliveryEstimate,
+                trackingAvailable: order.shipments?.length > 0,
+                shipments: order.shipments || [],
+            },
+
+            // 🛒 Products
+            products: order.products.map((item) => ({
+                id: item.productId?._id || item.productId,
+                name: item.name || item.productId?.name,
+                quantity: item.quantity,
+                price: item.price,
+                image: item.variant?.image || item.productId?.images?.[0],
+                variant: item.variant,
+            })),
+
+            // 📌 Next steps
+            nextSteps: getNextSteps(order),
+
+            // 📞 Support
+            support: {
+                email: process.env.ADMIN_EMAIL || "support@joyorybeauty.com",
+                phone: process.env.STORE_PHONE || "+91-XXXXXXXXXX",
+                hours: "9 AM - 6 PM, Monday to Saturday",
+            },
+        };
+
+        return res.status(200).json({
+            success: true,
+            message: "Your order has been placed successfully!",
+            order: orderSummary,
+            uiConfig: {
+                showCelebration:
+                    order.paymentMethod === "COD" || order.paymentStatus === "success",
+                showTrackingButton: order.shipments?.length > 0,
+                showContinueShopping: true,
+                showDownloadInvoice: !order.isDraft && order.paymentStatus === "success",
+            },
+        });
+    } catch (error) {
+        console.error("❌ getOrderSuccessDetails error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Something went wrong while loading your order. Please refresh the page or try again in a moment.",
+        });
+    }
+};
+
+
+// -------------------- Helper: Next Steps Logic --------------------
+
+const getNextSteps = (order) => {
+    const steps = [];
+
+    if (order.paymentMethod === "COD") {
+        steps.push(
+            "🕒 Awaiting admin confirmation – our team will verify your order",
+            "📦 Order will be processed within 24 hours",
+            "📞 You'll receive a confirmation call/SMS",
+            `💰 Pay ₹${order.amount} when your order arrives`
+        );
+    } else if (order.paymentStatus === "success") {
+        steps.push(
+            "✅ Payment received successfully",
+            "🕒 Awaiting admin confirmation & stock verification",
+            "🚚 Order will be dispatched within 24–48 hours",
+            "📲 You'll receive tracking details via email/SMS"
+        );
+    } else {
+        steps.push(
+            "❗ Complete your payment to confirm order",
+            "🕒 Awaiting payment confirmation",
+            "⏳ Order will be reserved for 2 hours"
+        );
+    }
+
+    return steps;
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 export const payForOrder = async (req, res) => {
     try {

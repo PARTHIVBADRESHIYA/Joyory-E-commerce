@@ -1475,7 +1475,7 @@ let _couponCache = { data: null, ts: 0, ttl: 5000 };  // existing (kept)
 
 const PRODUCT_CACHE_TTL = 300;        // 5 minutes for raw product doc
 const ENRICHED_PRODUCT_TTL = 20;      // 20 seconds for enriched product (max-speed)
-const PROMO_CACHE_TTL = 60;           // 20s promo cache in redis layer
+const PROMO_CACHE_TTL = 6;           // 20s promo cache in redis layer
 const COUPON_CACHE_TTL = 6;          // 20s coupon cache in redis layer
 const CART_CACHE_TTL = 6;            // 60s cart snapshot cache
 
@@ -1486,7 +1486,7 @@ async function getCachedProduct(productId) {
   const redis = getRedis();   // 🔥 REQUIRED
 
   const key = `prod:${String(productId).trim()}`;
-  try {
+  try { 
     const cached = await redis.get(key);
     if (cached) return JSON.parse(cached);
   } catch (e) {
