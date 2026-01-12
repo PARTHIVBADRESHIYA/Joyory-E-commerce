@@ -1690,8 +1690,7 @@ export const cancelOrder = async (req, res) => {
       });
     }
 
-    // ❌ Already cancelled check
-    if (order.cancellation?.allowed === true || order.orderStatus === "Cancelled") {
+    if (order.cancellation?.status === "cancelled") {
       return res.status(409).json({
         success: false,
         message: "This order has already been cancelled. No further action is required."
@@ -1783,6 +1782,7 @@ export const cancelOrder = async (req, res) => {
         cancelledBy: userId,
         reason,
         requestedAt: new Date(),
+        status: "cancelled",
         allowed: true
       };
 

@@ -171,6 +171,8 @@ function buildShipmentsFromAllocation(txOrder, allocationMap) {
 //     // 🔄 Default
 //     return "Processing";
 // }
+
+
 export function computeOrderStatus(order) {
     const shipments = order.shipments || [];
     const normalize = (s = "") => s.toString().trim().toLowerCase();
