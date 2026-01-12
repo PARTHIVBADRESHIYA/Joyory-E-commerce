@@ -568,6 +568,11 @@ const CancellationSchema = new mongoose.Schema({
     cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     reason: String,
     requestedAt: Date,
+    status: {
+        type: String,
+        enum: ["cancelled", "requested", "none"],
+        default: "none"
+    },
     allowed: { type: Boolean, default: true }
 }, { _id: false });
 

@@ -173,15 +173,10 @@ function buildShipmentsFromAllocation(txOrder, allocationMap) {
 // }
 export function computeOrderStatus(order) {
     const shipments = order.shipments || [];
-
     const normalize = (s = "") => s.toString().trim().toLowerCase();
 
-    /* -------------------------
-       0️⃣ HARD OVERRIDES
-    -------------------------- */
-
-    // If order is cancelled (even without shipments)
-    if (order.cancellation?.allowed === true) {
+    // 🔥 Only treat as cancelled if cancellation.status === "cancelled"
+    if (order.cancellation?.status === "cancelled") {
         return "Cancelled";
     }
 
@@ -192,42 +187,24 @@ export function computeOrderStatus(order) {
     let delivered = 0;
     let cancelled = 0;
     let shipped = 0;
-    let processing = 0;
     let returned = 0;
-    let rto = 0;
 
     for (const shipment of shipments) {
-
-        /* --------------------
-           1️⃣ FORWARD STATUS
-        --------------------- */
         const forwardStatus = normalize(shipment.status);
 
         if (shipment.deliveredAt || forwardStatus === "delivered") {
             delivered++;
-        }
-        else if (forwardStatus === "cancelled") {
+        } else if (forwardStatus === "cancelled") {
             cancelled++;
-        }
-        else if (forwardStatus.includes("rto")) {
-            rto++;
-        }
-        else if (
+        } else if (
             ["shipped", "in transit", "out for delivery"].includes(forwardStatus)
         ) {
             shipped++;
         }
-        else {
-            processing++;
-        }
 
-        /* --------------------
-           2️⃣ RETURNS STATUS
-        --------------------- */
-        if (Array.isArray(shipment.returns) && shipment.returns.length > 0) {
+        if (Array.isArray(shipment.returns)) {
             for (const ret of shipment.returns) {
                 const rStatus = normalize(ret.status);
-
                 if (["refund_initiated", "refunded"].includes(rStatus)) {
                     returned++;
                 }
@@ -237,37 +214,15 @@ export function computeOrderStatus(order) {
 
     const total = shipments.length;
 
-    /* --------------------
-       3️⃣ FINAL ORDER STATUS
-    --------------------- */
+    if (returned === total && delivered === total) return "Returned";
+    if (delivered === total && cancelled === 0) return "Delivered";
+    if (cancelled === total) return "Cancelled";
 
-    if (delivered === total && cancelled === 0) {
-        return "Delivered";
-    }
+    if (delivered > 0 && cancelled > 0) return "Partially Delivered / Cancelled";
+    if (delivered > 0 && delivered < total) return "Partially Delivered";
+    if (cancelled > 0 && cancelled < total) return "Partially Cancelled";
 
-    if (returned === total && delivered === total) {
-        return "Returned";
-    }
-
-    if (cancelled === total) {
-        return "Cancelled";
-    }
-
-    if (delivered > 0 && cancelled > 0) {
-        return "Partially Delivered / Cancelled";
-    }
-
-    if (delivered > 0 && delivered < total) {
-        return "Partially Delivered";
-    }
-
-    if (cancelled > 0 && cancelled < total) {
-        return "Partially Cancelled";
-    }
-
-    if (shipped > 0) {
-        return "Shipped";
-    }
+    if (shipped > 0) return "Shipped";
 
     return "Processing";
 }

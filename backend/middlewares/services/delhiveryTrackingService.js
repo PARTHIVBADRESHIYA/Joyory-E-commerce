@@ -282,8 +282,8 @@ export const syncDelhiveryShipments = async () => {
 
         /* ✅ Resolve order status */
         if (orderDirty) {
-            order.orderStatus =
-                computeOrderStatus(order.shipments);
+            order.orderStatus = computeOrderStatus(order);
+
 
 
             await order.save();
