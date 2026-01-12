@@ -1033,7 +1033,7 @@ export const getReturnsSummary = async (req, res) => {
                     customOrderId: 1,
                     customerName: 1,
 
-                    shipmentId: "$shipments.delhivery_pickup_id",
+                    shipmentId: "$shipments._id",
                     awb: "$shipments.waybill",
 
                     totalItems: { $size: "$shipments.returns.items" }
