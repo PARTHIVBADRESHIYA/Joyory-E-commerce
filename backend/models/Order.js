@@ -490,10 +490,18 @@ const ShipmentReturnSchema = new mongoose.Schema({
         amount: Number,
         status: {
             type: String,
-            enum: ["pending", "initiated", "processing", "completed", "failed"],
+            enum: ["pending", "locked","processing", "completed", "retrying",
+                "failed"],
             default: "pending"
         },
+        idempotencyKey: String,
         gatewayRefundId: String,
+        attempts: { type: Number, default: 0 },
+        lastAttemptAt: Date,
+        nextRetryAt: Date,
+
+        failureReason: String,
+        lockedAt: Date,
         refundedAt: Date
     }
 

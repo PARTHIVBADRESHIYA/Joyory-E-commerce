@@ -300,13 +300,6 @@ export const razorpayWebhook = async (req, res) => {
             if (event === "refund.failed") {
                 matchedReturn.refund.status = "failed";
                 await order.save();
-
-                await refundQueue.add(
-                    "refund",
-                    { orderId: order._id, returnId: matchedReturn._id },
-                    { jobId: `return-refund-${matchedReturn._id}` }
-                );
-
             }
         }
 

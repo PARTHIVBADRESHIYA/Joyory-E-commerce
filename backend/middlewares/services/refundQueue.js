@@ -40,8 +40,6 @@ export const addRefundJob = async (orderId, returnId) => {
         orderId,
         returnId,
         refundType: "return"
-    }, {
-        jobId: `return-refund-${returnId}` // 🔥 prevents duplicates
     });
 };
 

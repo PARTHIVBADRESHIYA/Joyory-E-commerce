@@ -502,6 +502,9 @@ import { getRedis } from "./middlewares/utils/redis.js";
 // ================= CONNECT DB =================
 connectDB();
 
+// 🔥 START REFUND WORKER ONLY AFTER DB IS READY
+import "./middlewares/services/refundWorker.js";
+console.log("💸 Refund Worker Loaded");
 
 // export const flushAllCache = async () => {
 //     try {
