@@ -1,9 +1,8 @@
 
 // middlewares/services/refundQueue.js
-import { Queue, Worker } from "bullmq";
+import { Queue } from "bullmq";
 import { createRedisConnection } from "./redisConnection.js";
 import axios from "axios";
-import Order from "../../models/Order.js";
 
 const connection = createRedisConnection();
 

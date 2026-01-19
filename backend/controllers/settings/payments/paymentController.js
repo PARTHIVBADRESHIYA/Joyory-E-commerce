@@ -3334,60 +3334,80 @@ export const setRefundMethod = async (req, res) => {
     const { orderId, method } = req.body;
     const userId = req.user?._id;
 
+    if (!["razorpay", "wallet"].includes(method)) {
+        return res.status(400).json({
+            success: false,
+            message: "Invalid refund method"
+        });
+    }
+
     const order = await Order.findById(orderId).populate("user");
-    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+    if (!order) {
+        return res.status(404).json({ success: false, message: "Order not found" });
+    }
 
-    order.refund.method = method;
-    order.refund.status = "requested";
+    if (!order.paid) {
+        return res.status(400).json({
+            success: false,
+            message: "Order is not paid. Refund not applicable."
+        });
+    }
 
-    order.refund.refundAudit.push({
+    // ✅ USE NEW orderRefund (NOT order.refund)
+    order.orderRefund = {
+        amount: order.amount,
+        method,
         status: "requested",
-        changedBy: userId,
-        changedByModel: "User",
-        note: `User selected refund method: ${method}`
-    });
-    // Notify Admin (You can replace with your admin email or from DB)
-    await sendEmail(
-        process.env.ADMIN_EMAIL || "admin@joyorybeauty.com",
-        "⚠️ New Refund Request Received",
-        `
-  <p>Hello Admin,</p>
-  <p>A new refund request has been received.</p>
-
-  <ul>
-    <li><strong>Order ID:</strong> ${order._id}</li>
-    <li><strong>User:</strong> ${order.user.name} (${order.user.email})</li>
-    <li><strong>Amount:</strong> ₹${order.amount}</li>
-    <li><strong>Requested Method:</strong> ${method || "Not selected yet"}</li>
-    <li><strong>Reason:</strong> ${order.refund.reason || "No reason provided"}</li>
-  </ul>
-
-  <p>Please review this request in your Admin Dashboard.</p>
-  <p>— Joyory Refund System</p>
-  `
-    );
-
-
-    order.refund.requestedBy = userId;
+        idempotencyKey: `cancel_${order._id}`,
+        attempts: 0,
+        audit_trail: [
+            {
+                status: "requested",
+                action: "user_selected_refund_method",
+                performedByModel: "User",
+                notes: `User selected refund method: ${method}`
+            }
+        ]
+    };
 
     await order.save();
 
-    // ✅ Send email to user
+    // 📧 Notify Admin
+    await sendEmail(
+        process.env.ADMIN_EMAIL || "admin@joyorybeauty.com",
+        "⚠️ New Cancellation Refund Request",
+        `
+        <p>Hello Admin,</p>
+        <p>A new <strong>order cancellation refund</strong> request has been received.</p>
+
+        <ul>
+            <li><strong>Order ID:</strong> ${order._id}</li>
+            <li><strong>User:</strong> ${order.user.name} (${order.user.email})</li>
+            <li><strong>Amount:</strong> ₹${order.amount}</li>
+            <li><strong>Refund Method:</strong> ${method}</li>
+        </ul>
+
+        <p>Please review this request in the Admin Dashboard.</p>
+        <p>— Joyory Refund System</p>
+        `
+    );
+
+    // 📧 Notify User
     await sendEmail(
         order.user.email,
         "📩 Refund Request Received",
         `
         <p>Hi ${order.user.name},</p>
-        <p>We have received your refund request for Order <strong>#${order._id}</strong>.</p>
-        
+
+        <p>We have received your refund request for Order 
+        <strong>#${order._id}</strong>.</p>
+
         <p><strong>Selected Refund Method:</strong> ${method === "razorpay"
             ? "Original Payment Method (Razorpay)"
-            : method === "wallet"
-                ? "Joyory Wallet"
-                : "Manual UPI"
+            : "Joyory Wallet"
         }</p>
 
-        <p>Our team will review your request soon. You will receive another update once an admin approves it.</p>
+        <p>Our team will review your request and process the refund shortly.</p>
 
         <p>Regards,<br/>Team Joyory Beauty</p>
         `
@@ -3395,9 +3415,10 @@ export const setRefundMethod = async (req, res) => {
 
     res.status(200).json({
         success: true,
-        message: "Refund method submitted. Waiting for admin approval."
+        message: "Refund method submitted successfully."
     });
 };
+
 
 // controllers/orderController.js
 // controllers/orderController.js
@@ -3463,7 +3484,7 @@ export const getOrderSuccessDetails = async (req, res) => {
             orderId: order._id,
             displayOrderId: order.orderId || order.orderNumber,
             orderDate: order.createdAt,
-            status: order.orderStatus,  
+            status: order.orderStatus,
 
             // 💳 Payment details (THIS is what you were missing)
             payment: {

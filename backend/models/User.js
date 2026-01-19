@@ -147,6 +147,13 @@ const userSchema = new mongoose.Schema({
     rewardPoints: { type: Number, default: 0 }, // points user has
     joyoryCash: { type: Number, default: 0 }, // cash added to wallet
 
+    // ADD inside schema
+    wallet: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Wallet",
+        default: null
+    }
+    ,
     createdBy: {
         type: String,
         enum: ['admin', 'self'],
@@ -163,6 +170,16 @@ userSchema.pre("save", function (next) {
     next();
 });
 
+// ADD after schema
+userSchema.virtual("walletDetails", {
+    ref: "Wallet",
+    localField: "_id",
+    foreignField: "user",
+    justOne: true
+});
+
+userSchema.set("toJSON", { virtuals: true });
+userSchema.set("toObject", { virtuals: true });
 
 userSchema.methods.matchPassword = async function (enteredPassword) {
     return await bcrypt.compare(enteredPassword, this.password);

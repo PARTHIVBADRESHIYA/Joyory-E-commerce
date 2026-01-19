@@ -1580,13 +1580,13 @@ export const getAllProducts = async (req, res) => {
         const redis = getRedis();
 
         let {
-            limit = 12,
+            limit = 9,
             sort = "recent",
             cursor,
             ...queryFilters
         } = req.query;
 
-        limit = Math.min(Number(limit) || 12, 50);
+        limit = Math.min(Number(limit) || 9, 50);
 
         ["skinTypes", "brandIds", "formulations", "finishes"].forEach(key => {
             if (typeof queryFilters[key] === "string") {

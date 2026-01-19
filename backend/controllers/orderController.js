@@ -4,7 +4,7 @@ import Order from '../models/Order.js';
 import Product from '../models/Product.js';
 import Payment from '../models/settings/payments/Payment.js';
 import User from '../models/User.js';
-import { refundQueue } from "../middlewares/services/refundQueue.js";
+import { addOrderRefundJob } from "../middlewares/services/orderRefundQueue.js";
 import { splitOrderForPersistence } from "../middlewares/services/orderSplit.js"; // ensure this exists and supports session (see notes)
 // import { createShiprocketOrder, cancelShiprocketShipment } from "../middlewares/services/shiprocket.js";
 import { sendEmail } from "../middlewares/utils/emailService.js"; // ✅ assume you already have an email service
@@ -1413,53 +1413,273 @@ export const retryFailedShipments = async (req, res) => {
     }
 }
 
+
+// export const adminApproveRefund = async (req, res) => {
+//     const { orderId } = req.body;
+//     const adminId = req.user?._id;
+
+//     const order = await Order.findById(orderId).populate("user");
+//     if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+//     order.refund.status = "approved";
+//     order.refund.approvedBy = adminId;
+//     order.paymentStatus = "refund_initiated";
+
+//     order.refund.refundAudit.push({
+//         status: "approved",
+//         changedBy: adminId,
+//         changedByModel: "Admin",
+//         note: "Admin approved refund request"
+//     });
+
+//     await order.save();
+
+//     await refundQueue.add("refund", { orderId });
+
+//     // ✅ Send approval email
+//     await sendEmail(
+//         order.user.email,
+//         "✅ Your Refund Has Been Approved",
+//         `
+//         <p>Hi ${order.user.name},</p>
+//         <p>Your refund request for Order <strong>#${order._id}</strong> has been approved by our team.</p>
+
+//         <p><strong>Refund Method:</strong> ${order.refund.method === "razorpay"
+//             ? "Original Payment Method (Razorpay)"
+//             : order.refund.method === "wallet"
+//                 ? "Joyory Wallet"
+//                 : "Manual UPI"
+//         }</p>
+
+//         <p>Refund processing has begun. You will receive another update once the refund is completed.</p>
+
+//         <p>Regards,<br/>Team Joyory Beauty</p>
+//         `
+//     );
+
+//     res.status(200).json({
+//         success: true,
+//         message: "Refund approved and added to queue."
+//     });
+// };
+
+// export const adminRejectRefund = async (req, res) => {
+//     try {
+//         const { orderId, rejectionReason } = req.body;
+//         const adminId = req.user?._id;
+
+//         const order = await Order.findById(orderId).populate("user");
+//         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+//         if (order.refund.status === "completed")
+//             return res.status(400).json({ success: false, message: "Refund already completed" });
+
+//         order.refund.status = "rejected";
+//         order.refund.approvedBy = adminId;
+//         order.paymentStatus = "refund_failed";
+//         order.refund.rejectionReason = rejectionReason || "Refund rejected by admin";
+
+//         order.refund.refundAudit.push({
+//             status: "rejected",
+//             changedBy: adminId,
+//             changedByModel: "Admin",
+//             note: `Refund rejected: ${rejectionReason || "Not specified"}`
+//         });
+
+
+//         await order.save();
+
+//         // ✅ Send rejection email to user
+//         await sendEmail(
+//             order.user.email,
+//             "❌ Refund Request Rejected",
+//             `
+//       <p>Hi ${order.user.name},</p>
+//       <p>Your refund request for Order <strong>#${order._id}</strong> has been reviewed and unfortunately <strong>rejected</strong>.</p>
+//       <p><strong>Reason:</strong> ${rejectionReason || "Not specified"}</p>
+
+//       <p>If you believe this was a mistake, please contact our support team with your order details.</p>
+
+//       <p>Regards,<br/>Team Joyory Beauty</p>
+//       `
+//         );
+
+//         res.status(200).json({
+//             success: true,
+//             message: "Refund rejected successfully and user notified.",
+//         });
+
+//     } catch (err) {
+//         console.error("adminRejectRefund error:", err);
+//         res.status(500).json({ success: false, message: "Refund rejection failed" });
+//     }
+// };
+
 export const adminApproveRefund = async (req, res) => {
     const { orderId } = req.body;
     const adminId = req.user?._id;
 
     const order = await Order.findById(orderId).populate("user");
-    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+    if (!order) {
+        return res.status(404).json({ success: false, message: "Order not found" });
+    }
 
-    order.refund.status = "approved";
-    order.refund.approvedBy = adminId;
-    order.paymentStatus = "refund_initiated";
+    const refund = order.orderRefund;
+    if (!refund || refund.status !== "requested") {
+        return res.status(400).json({
+            success: false,
+            message: "Refund not in requested state"
+        });
+    }
 
-    order.refund.refundAudit.push({
+    // 🔐 COMMON ADMIN APPROVAL FIELDS
+    refund.approvedBy = adminId;
+    refund.approvedAt = new Date();
+
+    refund.audit_trail.push({
         status: "approved",
-        changedBy: adminId,
-        changedByModel: "Admin",
-        note: "Admin approved refund request"
+        action: "admin_approved_refund",
+        performedBy: adminId,
+        performedByModel: "Admin",
+        notes: `Approved refund via ${refund.method}`
     });
 
-    await order.save();
+    /* --------------------------------
+       🅰️ WALLET REFUND (INSTANT)
+    -------------------------------- */
+    if (refund.method === "wallet") {
 
-    await refundQueue.add("refund", { orderId });
+        // ✅ CREDIT USER WALLET
+        order.user.wallet.balance += refund.amount;
+        await order.user.save();
 
-    // ✅ Send approval email
-    await sendEmail(
-        order.user.email,
-        "✅ Your Refund Has Been Approved",
-        `
-        <p>Hi ${order.user.name},</p>
-        <p>Your refund request for Order <strong>#${order._id}</strong> has been approved by our team.</p>
+        refund.status = "completed";
+        refund.refundedAt = new Date();
+        order.paymentStatus = "refunded";
+        order.orderStatus = "Cancelled";
 
-        <p><strong>Refund Method:</strong> ${order.refund.method === "razorpay"
-            ? "Original Payment Method (Razorpay)"
-            : order.refund.method === "wallet"
-                ? "Joyory Wallet"
-                : "Manual UPI"
-        }</p>
+        refund.audit_trail.push({
+            status: "completed",
+            action: "wallet_refund_completed",
+            performedByModel: "System",
+            notes: `₹${refund.amount} credited to wallet`
+        });
 
-        <p>Refund processing has begun. You will receive another update once the refund is completed.</p>
+        await order.save();
 
-        <p>Regards,<br/>Team Joyory Beauty</p>
-        `
-    );
+        // 📧 USER EMAIL
+        await sendEmail(
+            order.user.email,
+            "✅ Refund Completed – Wallet Credit",
+            `
+            <p>Hi ${order.user.name},</p>
+            <p>Your refund for Order <strong>#${order._id}</strong> has been successfully credited to your Joyory Wallet.</p>
+            <p><strong>Amount:</strong> ₹${refund.amount}</p>
+            <p>You can use this balance on your next purchase.</p>
+            <p>Regards,<br/>Team Joyory Beauty</p>
+            `
+        );
 
-    res.status(200).json({
-        success: true,
-        message: "Refund approved and added to queue."
+        return res.status(200).json({
+            success: true,
+            message: "Wallet refund completed successfully."
+        });
+    }
+
+    /* --------------------------------
+       🅱️ RAZORPAY REFUND (ASYNC)
+    -------------------------------- */
+    if (refund.method === "razorpay") {
+
+        refund.status = "pending"; // 👈 let scanner/worker control it
+        refund.lockedAt = null;
+        refund.idempotencyKey =
+            refund.idempotencyKey || `order_refund_${order._id}`;
+
+        order.paymentStatus = "refund_initiated";
+        order.orderStatus = "Cancelled";
+
+        refund.audit_trail.push({
+            status: "approved",
+            action: "razorpay_refund_approved",
+            performedBy: adminId,
+            performedByModel: "Admin"
+        });
+
+        await order.save();
+
+        // ✅ QUEUE SAFELY
+        await addOrderRefundJob(order._id);
+
+        return res.status(200).json({
+            success: true,
+            message: "Order refund approved and queued"
+        });
+    }
+
+    return res.status(400).json({
+        success: false,
+        message: "Invalid refund method"
     });
+};
+
+
+export const adminRejectRefund = async (req, res) => {
+    try {
+        const { orderId, rejectionReason } = req.body;
+        const adminId = req.user?._id;
+
+        const order = await Order.findById(orderId).populate("user");
+        if (!order) {
+            return res.status(404).json({ success: false, message: "Order not found" });
+        }
+
+        const refund = order.orderRefund;
+        if (!refund || refund.status === "completed") {
+            return res.status(400).json({
+                success: false,
+                message: "Refund already completed or invalid"
+            });
+        }
+
+        refund.status = "rejected";
+        refund.rejectedAt = new Date();
+        refund.rejectionReason = rejectionReason || "Rejected by admin";
+
+        refund.audit_trail.push({
+            status: "rejected",
+            action: "admin_rejected_refund",
+            performedBy: adminId,
+            performedByModel: "Admin",
+            notes: refund.rejectionReason
+        });
+
+        order.paymentStatus = "refund_failed";
+        await order.save();
+
+        await sendEmail(
+            order.user.email,
+            "❌ Refund Request Rejected",
+            `
+            <p>Hi ${order.user.name},</p>
+            <p>Your refund request for Order <strong>#${order._id}</strong> was rejected.</p>
+            <p><strong>Reason:</strong> ${refund.rejectionReason}</p>
+            <p>Regards,<br/>Team Joyory Beauty</p>
+            `
+        );
+
+        res.status(200).json({
+            success: true,
+            message: "Refund rejected successfully."
+        });
+
+    } catch (err) {
+        console.error("adminRejectRefund error:", err);
+        res.status(500).json({
+            success: false,
+            message: "Refund rejection failed"
+        });
+    }
 };
 
 export const getAllRefundRequests = async (req, res) => {
@@ -1527,54 +1747,3 @@ export const getAllRefundRequests = async (req, res) => {
     }
 };
 
-export const adminRejectRefund = async (req, res) => {
-    try {
-        const { orderId, rejectionReason } = req.body;
-        const adminId = req.user?._id;
-
-        const order = await Order.findById(orderId).populate("user");
-        if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-
-        if (order.refund.status === "completed")
-            return res.status(400).json({ success: false, message: "Refund already completed" });
-
-        order.refund.status = "rejected";
-        order.refund.approvedBy = adminId;
-        order.paymentStatus = "refund_failed";
-        order.refund.rejectionReason = rejectionReason || "Refund rejected by admin";
-
-        order.refund.refundAudit.push({
-            status: "rejected",
-            changedBy: adminId,
-            changedByModel: "Admin",
-            note: `Refund rejected: ${rejectionReason || "Not specified"}`
-        });
-
-
-        await order.save();
-
-        // ✅ Send rejection email to user
-        await sendEmail(
-            order.user.email,
-            "❌ Refund Request Rejected",
-            `
-      <p>Hi ${order.user.name},</p>
-      <p>Your refund request for Order <strong>#${order._id}</strong> has been reviewed and unfortunately <strong>rejected</strong>.</p>
-      <p><strong>Reason:</strong> ${rejectionReason || "Not specified"}</p>
-
-      <p>If you believe this was a mistake, please contact our support team with your order details.</p>
-
-      <p>Regards,<br/>Team Joyory Beauty</p>
-      `
-        );
-
-        res.status(200).json({
-            success: true,
-            message: "Refund rejected successfully and user notified.",
-        });
-
-    } catch (err) {
-        console.error("adminRejectRefund error:", err);
-        res.status(500).json({ success: false, message: "Refund rejection failed" });
-    }
-};

@@ -490,7 +490,7 @@ const ShipmentReturnSchema = new mongoose.Schema({
         amount: Number,
         status: {
             type: String,
-            enum: ["pending", "locked","processing", "completed", "retrying",
+            enum: ["pending", "locked", "processing", "completed", "retrying",
                 "failed"],
             default: "pending"
         },
@@ -753,6 +753,50 @@ const orderSchema = new mongoose.Schema({
     shipments: [ShipmentSchema],
     primary_shipment: { type: mongoose.Schema.Types.ObjectId },// reference to main shipment,
 
+    orderRefund: {
+        amount: {
+            type: Number
+        },
+
+        method: {
+            type: String,
+            enum: ["razorpay", "wallet"]
+        },
+
+        status: {
+            type: String,
+            enum: [
+                "requested",
+                "pending",
+                "locked",
+                "processing",
+                "completed",
+                "retrying",
+                "failed"
+            ],
+            default: "requested"
+        },
+
+        idempotencyKey: String,
+        gatewayRefundId: String,
+
+        audit_trail: [
+            {
+                status: String,
+                action: String,
+                performedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Admin" },
+                performedByModel: { type: String, enum: ["Admin", "System"] },
+                timestamp: { type: Date, default: Date.now },
+                notes: String
+            }
+        ],
+
+        attempts: { type: Number, default: 0 },
+        lockedAt: Date,
+        refundedAt: Date,
+
+        failureReason: String
+    },
 
     returnPolicy: {
         applicable: { type: Boolean, default: true },

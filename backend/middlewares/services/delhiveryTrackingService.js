@@ -327,6 +327,7 @@ import Order from "../../models/Order.js";
 import cron from "node-cron";
 import { computeOrderStatus } from "../../controllers/orderController.js";
 import { addRefundJob } from "../../middlewares/services/refundQueue.js";
+import { addOrderRefundJob } from "../../middlewares/services/orderRefundQueue.js";
 import { calculateReturnRefundAmount } from "../../middlewares/services/refundWorker.js";
 
 const DELHIVERY_TRACK_URL =
@@ -583,6 +584,55 @@ export const syncDelhiveryShipments = async () => {
     }
 };
 
+//for order refund
+export const scanPendingOrderRefunds = async () => {
+    const orders = await Order.find({
+        paid: true,
+        "orderRefund.status": { $in: ["pending", "locked", "retrying"] }
+    });
+
+    for (const order of orders) {
+        const refund = order.orderRefund;
+        if (!refund) continue;
+
+        // ⛔ retry window check
+        if (
+            refund.status === "retrying" &&
+            refund.nextRetryAt &&
+            refund.nextRetryAt > new Date()
+        ) {
+            continue;
+        }
+
+        // ⛔ already initiated
+        if (refund.gatewayRefundId) continue;
+
+        // 🔒 first time lock
+        if (refund.status === "pending") {
+            refund.status = "locked";
+            refund.lockedAt = new Date();
+            refund.attempts = 0;
+            refund.failureReason = null;
+            refund.idempotencyKey =
+                refund.idempotencyKey || `order_refund_${order._id}`;
+
+            refund.audit_trail.push({
+                status: "locked",
+                action: "order_refund_locked",
+                performedByModel: "System"
+            });
+
+            await order.save();
+        }
+
+        if (["locked", "retrying"].includes(refund.status)) {
+            console.log(`💸 Enqueuing ORDER refund | Order ${order._id}`);
+            await addOrderRefundJob(order._id);
+        }
+    }
+};
+
+//for shipment refund
 export const scanPendingRefunds = async () => {
     const orders = await Order.find({
         "shipments.returns.status": "qc_passed",
@@ -728,5 +778,11 @@ export const startDelhiveryCron = () => {
     cron.schedule("* * * * *", async () => {
         console.log("🔁 Refund scan running (every 2 min)");
         await scanPendingRefunds();
+    });
+
+
+    cron.schedule("*/5 * * * *", async () => {
+        console.log("🔁 Refund scan running (every 5 min)");
+        await scanPendingOrderRefunds();
     });
 };
