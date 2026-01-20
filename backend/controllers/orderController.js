@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import Order from '../models/Order.js';
 import Product from '../models/Product.js';
 import Payment from '../models/settings/payments/Payment.js';
+import Wallet from '../models/Wallet.js';
 import User from '../models/User.js';
 import { addOrderRefundJob } from "../middlewares/services/orderRefundQueue.js";
 import { splitOrderForPersistence } from "../middlewares/services/orderSplit.js"; // ensure this exists and supports session (see notes)
@@ -1413,108 +1414,6 @@ export const retryFailedShipments = async (req, res) => {
     }
 }
 
-
-// export const adminApproveRefund = async (req, res) => {
-//     const { orderId } = req.body;
-//     const adminId = req.user?._id;
-
-//     const order = await Order.findById(orderId).populate("user");
-//     if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-
-//     order.refund.status = "approved";
-//     order.refund.approvedBy = adminId;
-//     order.paymentStatus = "refund_initiated";
-
-//     order.refund.refundAudit.push({
-//         status: "approved",
-//         changedBy: adminId,
-//         changedByModel: "Admin",
-//         note: "Admin approved refund request"
-//     });
-
-//     await order.save();
-
-//     await refundQueue.add("refund", { orderId });
-
-//     // ✅ Send approval email
-//     await sendEmail(
-//         order.user.email,
-//         "✅ Your Refund Has Been Approved",
-//         `
-//         <p>Hi ${order.user.name},</p>
-//         <p>Your refund request for Order <strong>#${order._id}</strong> has been approved by our team.</p>
-
-//         <p><strong>Refund Method:</strong> ${order.refund.method === "razorpay"
-//             ? "Original Payment Method (Razorpay)"
-//             : order.refund.method === "wallet"
-//                 ? "Joyory Wallet"
-//                 : "Manual UPI"
-//         }</p>
-
-//         <p>Refund processing has begun. You will receive another update once the refund is completed.</p>
-
-//         <p>Regards,<br/>Team Joyory Beauty</p>
-//         `
-//     );
-
-//     res.status(200).json({
-//         success: true,
-//         message: "Refund approved and added to queue."
-//     });
-// };
-
-// export const adminRejectRefund = async (req, res) => {
-//     try {
-//         const { orderId, rejectionReason } = req.body;
-//         const adminId = req.user?._id;
-
-//         const order = await Order.findById(orderId).populate("user");
-//         if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-
-//         if (order.refund.status === "completed")
-//             return res.status(400).json({ success: false, message: "Refund already completed" });
-
-//         order.refund.status = "rejected";
-//         order.refund.approvedBy = adminId;
-//         order.paymentStatus = "refund_failed";
-//         order.refund.rejectionReason = rejectionReason || "Refund rejected by admin";
-
-//         order.refund.refundAudit.push({
-//             status: "rejected",
-//             changedBy: adminId,
-//             changedByModel: "Admin",
-//             note: `Refund rejected: ${rejectionReason || "Not specified"}`
-//         });
-
-
-//         await order.save();
-
-//         // ✅ Send rejection email to user
-//         await sendEmail(
-//             order.user.email,
-//             "❌ Refund Request Rejected",
-//             `
-//       <p>Hi ${order.user.name},</p>
-//       <p>Your refund request for Order <strong>#${order._id}</strong> has been reviewed and unfortunately <strong>rejected</strong>.</p>
-//       <p><strong>Reason:</strong> ${rejectionReason || "Not specified"}</p>
-
-//       <p>If you believe this was a mistake, please contact our support team with your order details.</p>
-
-//       <p>Regards,<br/>Team Joyory Beauty</p>
-//       `
-//         );
-
-//         res.status(200).json({
-//             success: true,
-//             message: "Refund rejected successfully and user notified.",
-//         });
-
-//     } catch (err) {
-//         console.error("adminRejectRefund error:", err);
-//         res.status(500).json({ success: false, message: "Refund rejection failed" });
-//     }
-// };
-
 export const adminApproveRefund = async (req, res) => {
     const { orderId } = req.body;
     const adminId = req.user?._id;
@@ -1549,10 +1448,28 @@ export const adminApproveRefund = async (req, res) => {
     -------------------------------- */
     if (refund.method === "wallet") {
 
-        // ✅ CREDIT USER WALLET
-        order.user.wallet.balance += refund.amount;
-        await order.user.save();
+        const wallet = await Wallet.findOne({ user: order.user._id });
 
+        if (!wallet) {
+            return res.status(400).json({
+                success: false,
+                message: "User wallet not found"
+            });
+        }
+
+        // 💰 CREDIT WALLET
+        wallet.joyoryCash += refund.amount;
+
+        wallet.transactions.push({
+            type: "REFUND",
+            amount: refund.amount,
+            mode: "ONLINE",
+            description: `Refund for Order ${order.orderNumber || order._id}`
+        });
+
+        await wallet.save();
+
+        // ✅ ORDER + REFUND UPDATE
         refund.status = "completed";
         refund.refundedAt = new Date();
         order.paymentStatus = "refunded";
@@ -1566,6 +1483,7 @@ export const adminApproveRefund = async (req, res) => {
         });
 
         await order.save();
+
 
         // 📧 USER EMAIL
         await sendEmail(
@@ -1590,6 +1508,11 @@ export const adminApproveRefund = async (req, res) => {
        🅱️ RAZORPAY REFUND (ASYNC)
     -------------------------------- */
     if (refund.method === "razorpay") {
+
+        if (!order.transactionId?.startsWith("pay_")) {
+            throw new Error("Not a Razorpay payment, refund skipped");
+        }
+
 
         refund.status = "pending"; // 👈 let scanner/worker control it
         refund.lockedAt = null;

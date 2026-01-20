@@ -9,6 +9,7 @@ import { getCache, setCache, clearCache } from '../../middlewares/utils/simpleCa
 import { getRedis } from '../../middlewares/utils/redis.js';
 import { enrichProductsUnified } from "../../middlewares/services/productHelpers.js";
 import Promotion from '../../models/Promotion.js';
+import { normalizeFilters, applyDynamicFilters } from '../../controllers/user/userProductController.js';
 /* ------------------------- Constants ------------------------- */
 const ELIGIBLE_CACHE_TTL_MS = 30 * 1000; // 30 seconds
 
@@ -409,6 +410,7 @@ export const getDiscountProducts = async (req, res) => {
         // -------------------------------
         const discountCacheKey = `disc_obj:${discountId}`;
         let discount = await redis.get(discountCacheKey);
+
         if (!discount) {
             discount = await Discount.findById(discountId).lean();
             if (!discount) {
@@ -427,14 +429,14 @@ export const getDiscountProducts = async (req, res) => {
                 products: [],
                 totalCount: 0,
                 totalPages: 0,
-                currentPage: 1,
+                currentPage: 1
             });
         }
 
         // -------------------------------
-        // 2️⃣ QUERY + CACHE KEY
+        // 2️⃣ QUERY + CACHE
         // -------------------------------
-        const redisKey = `disc:v3:${discountId}:${JSON.stringify(req.query)}`;
+        const redisKey = `disc:v4:${discountId}:${JSON.stringify(req.query)}`;
         const cached = await redis.get(redisKey);
         if (cached) return res.json(JSON.parse(cached));
 
@@ -446,16 +448,15 @@ export const getDiscountProducts = async (req, res) => {
             priceMax,
             rating,
             inStock,
-            ...extraFilters
+            ...queryFilters
         } = req.query;
 
         page = Number(page);
-        limit = Number(limit);
+        limit = Math.min(Number(limit) || 12, 50);
 
         // -------------------------------
-        // 3️⃣ PRECOMPUTED SCOPE (on discount)
+        // 3️⃣ DISCOUNT SCOPE (cached)
         // -------------------------------
-        // Cache this expensive block for 5 minutes
         const scopeCacheKey = `disc_scope:${discountId}`;
         let scopeFilter = await redis.get(scopeCacheKey);
 
@@ -466,12 +467,16 @@ export const getDiscountProducts = async (req, res) => {
 
             if (applies === "Product") {
                 scopeFilter._id = {
-                    $in: (discount.appliesTo.productIds || []).map(id => new mongoose.Types.ObjectId(id))
+                    $in: (discount.appliesTo.productIds || []).map(
+                        id => new mongoose.Types.ObjectId(id)
+                    )
                 };
             }
+
             if (applies === "Category") {
                 scopeFilter.category = { $in: discount.appliesTo.categoryIds || [] };
             }
+
             if (applies === "Brand") {
                 scopeFilter.brand = { $in: discount.appliesTo.brandIds || [] };
             }
@@ -482,19 +487,57 @@ export const getDiscountProducts = async (req, res) => {
         }
 
         // -------------------------------
-        // 4️⃣ APPLY EXTRA FILTERS (fast)
+        // 4️⃣ SAME FILTER PIPELINE AS getAllProducts
         // -------------------------------
-        if (priceMin) scopeFilter.price = { ...scopeFilter.price, $gte: Number(priceMin) };
-        if (priceMax) scopeFilter.price = { ...scopeFilter.price, $lte: Number(priceMax) };
-        if (rating) scopeFilter.rating = { $gte: Number(rating) };
-        if (inStock === "true") scopeFilter.stock = { $gt: 0 };
+        ["skinTypes", "brandIds", "formulations", "finishes"].forEach(key => {
+            if (typeof queryFilters[key] === "string") {
+                queryFilters[key] = [queryFilters[key]];
+            }
+        });
 
-        for (const [k, v] of Object.entries(extraFilters)) {
-            if (v) scopeFilter[`attributes.${k}`] = v;
+        const filters = normalizeFilters({
+            ...queryFilters,
+            priceMin,
+            priceMax,
+            rating,
+            inStock
+        });
+
+        // Resolve brand (id or slug)
+        if (filters.brandIds?.length) {
+            const brandDocs = await Brand.find({
+                $or: [
+                    { _id: { $in: filters.brandIds.filter(mongoose.Types.ObjectId.isValid) } },
+                    { slug: { $in: filters.brandIds.filter(v => !mongoose.Types.ObjectId.isValid(v)) } }
+                ],
+                isActive: true
+            }).select("_id");
+
+            filters.brandIds = brandDocs.map(b => b._id);
         }
 
+        // Resolve skin types
+        if (filters.skinTypes?.length) {
+            const skinDocs = await SkinType.find({
+                name: { $in: filters.skinTypes.map(v => new RegExp(`^${v}$`, "i")) }
+            }).select("_id");
+
+            filters.skinTypes = skinDocs.map(s => s._id);
+        }
+
+        const dynamicFilter = await applyDynamicFilters(filters);
+
         // -------------------------------
-        // 5️⃣ SORTING (very lightweight)
+        // 5️⃣ FINAL FILTER (scope + filters)
+        // -------------------------------
+        const finalFilter = {
+            ...scopeFilter,
+            ...dynamicFilter,
+            isPublished: true
+        };
+
+        // -------------------------------
+        // 6️⃣ SORT
         // -------------------------------
         const sortStage = {
             "low-high": { price: 1 },
@@ -504,34 +547,25 @@ export const getDiscountProducts = async (req, res) => {
             "recent": { createdAt: -1 }
         }[sort] || { createdAt: -1 };
 
-        // -------------------------------------------------
-        // 6️⃣ ULTRA-FAST COUNT (use estimatedDocumentCount if no filters)
-        // -------------------------------------------------
-        let totalCount = 0;
-
-        const hasFilters = Object.keys(scopeFilter).length > 0;
-        if (hasFilters) {
-            // Normal precise count
-            totalCount = await Product.countDocuments(scopeFilter);
-        } else {
-            // Much faster O(1) count
-            totalCount = await Product.estimatedDocumentCount();
-        }
+        // -------------------------------
+        // 7️⃣ COUNT
+        // -------------------------------
+        const totalCount = await Product.countDocuments(finalFilter);
 
         // -------------------------------
-        // 7️⃣ GET PRODUCTS (lean + low select)
+        // 8️⃣ FETCH PRODUCTS
         // -------------------------------
-        const products = await Product.find(scopeFilter)
+        const products = await Product.find(finalFilter)
             .select("name slugs price discountedPrice minPrice maxPrice brand category variants avgRating images stock shortDescription")
             .populate("brand", "name slug")
             .populate("category", "name slug")
             .sort(sortStage)
             .skip((page - 1) * limit)
             .limit(limit)
-            .lean({ getters: false, virtuals: false });
+            .lean();
 
         // -------------------------------
-        // 8️⃣ PROMOTION CACHE (120s)
+        // 9️⃣ PROMOTIONS
         // -------------------------------
         let promotions = await redis.get("active_promotions");
 
@@ -539,7 +573,7 @@ export const getDiscountProducts = async (req, res) => {
             promotions = await Promotion.find({
                 status: "active",
                 startDate: { $lte: new Date() },
-                endDate: { $gte: new Date() },
+                endDate: { $gte: new Date() }
             }).lean();
 
             await redis.set("active_promotions", JSON.stringify(promotions), "EX", 120);
@@ -548,7 +582,7 @@ export const getDiscountProducts = async (req, res) => {
         }
 
         // -------------------------------
-        // 9️⃣ MERGE OVERRIDE DISCOUNT
+        // 🔟 DISCOUNT OVERRIDE
         // -------------------------------
         const discountOverride = {
             type: discount.type,
@@ -557,10 +591,14 @@ export const getDiscountProducts = async (req, res) => {
             priority: 9999
         };
 
-        const enriched = await enrichProductsUnified(products, promotions, discountOverride);
+        const enriched = await enrichProductsUnified(
+            products,
+            promotions,
+            discountOverride
+        );
 
         // -------------------------------
-        // 🔟 RESPONSE BUILD
+        // 1️⃣1️⃣ RESPONSE
         // -------------------------------
         const response = {
             success: true,
@@ -575,7 +613,7 @@ export const getDiscountProducts = async (req, res) => {
         return res.json(response);
 
     } catch (err) {
-        console.error("getDiscountProducts error:", err);
+        console.error("❌ getDiscountProducts error:", err);
         return res.status(500).json({
             success: false,
             message: "Failed to load discount products"

@@ -669,7 +669,9 @@ const orderSchema = new mongoose.Schema({
             "pending",
             "success",
             "failed",
-            "cancelled"
+            "cancelled",
+            "refund_initiated",
+            "refunded"
         ],
         default: 'pending'
     },
@@ -785,13 +787,14 @@ const orderSchema = new mongoose.Schema({
                 status: String,
                 action: String,
                 performedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Admin" },
-                performedByModel: { type: String, enum: ["Admin", "System"] },
+                performedByModel: { type: String, enum: ["Admin", "System","User"] },
                 timestamp: { type: Date, default: Date.now },
                 notes: String
             }
         ],
 
         attempts: { type: Number, default: 0 },
+        nextRetryAt: Date,   // ✅ ADD THIS
         lockedAt: Date,
         refundedAt: Date,
 

@@ -584,8 +584,9 @@ export const syncDelhiveryShipments = async () => {
     }
 };
 
-//for order refund
 export const scanPendingOrderRefunds = async () => {
+    const now = new Date();
+
     const orders = await Order.find({
         paid: true,
         "orderRefund.status": { $in: ["pending", "locked", "retrying"] }
@@ -595,34 +596,45 @@ export const scanPendingOrderRefunds = async () => {
         const refund = order.orderRefund;
         if (!refund) continue;
 
-        // ⛔ retry window check
+        // ⛔ retry window
         if (
             refund.status === "retrying" &&
             refund.nextRetryAt &&
-            refund.nextRetryAt > new Date()
-        ) {
-            continue;
-        }
+            refund.nextRetryAt > now
+        ) continue;
 
-        // ⛔ already initiated
-        if (refund.gatewayRefundId) continue;
+        // ⛔ already initiated or in-flight
+        if (refund.gatewayRefundId || refund.status === "processing") continue;
 
-        // 🔒 first time lock
+        // 🔒 ATOMIC LOCK (IMPORTANT)
         if (refund.status === "pending") {
-            refund.status = "locked";
-            refund.lockedAt = new Date();
-            refund.attempts = 0;
-            refund.failureReason = null;
-            refund.idempotencyKey =
-                refund.idempotencyKey || `order_refund_${order._id}`;
+            const locked = await Order.findOneAndUpdate(
+                {
+                    _id: order._id,
+                    "orderRefund.status": "pending"
+                },
+                {
+                    $set: {
+                        "orderRefund.status": "locked",
+                        "orderRefund.lockedAt": now,
+                        "orderRefund.attempts": 0,
+                        "orderRefund.failureReason": null,
+                        "orderRefund.idempotencyKey":
+                            refund.idempotencyKey || `order_refund_${order._id}`
+                    },
+                    $push: {
+                        "orderRefund.audit_trail": {
+                            status: "locked",
+                            action: "order_refund_locked",
+                            performedByModel: "System",
+                            timestamp: now
+                        }
+                    }
+                },
+                { new: true }
+            );
 
-            refund.audit_trail.push({
-                status: "locked",
-                action: "order_refund_locked",
-                performedByModel: "System"
-            });
-
-            await order.save();
+            if (!locked) continue; // another worker won
         }
 
         if (["locked", "retrying"].includes(refund.status)) {
@@ -631,6 +643,7 @@ export const scanPendingOrderRefunds = async () => {
         }
     }
 };
+
 
 //for shipment refund
 export const scanPendingRefunds = async () => {
