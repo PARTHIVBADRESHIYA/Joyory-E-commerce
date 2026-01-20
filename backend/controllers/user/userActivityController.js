@@ -124,100 +124,6 @@ export const getUserActivitiesByUser = async (req, res) => {
     }
 };
 
-
-// export const getAllUserActivities = async (req, res) => {
-//     try {
-//         const { from, to, type, limit = 12, cursor } = req.query;
-//         const pageLimit = Math.min(Number(limit), 50);
-
-//         // ─────────────── MATCH FILTER ───────────────
-//         const match = {};
-//         if (type) match.type = type;
-//         if (from || to) {
-//             match.createdAt = {};
-//             if (from) match.createdAt.$gte = new Date(from);
-//             if (to) match.createdAt.$lte = new Date(to);
-//         }
-//         if (cursor) {
-//             // Cursor pagination: get items created before the cursor
-//             match._id = { $lt: mongoose.Types.ObjectId(cursor) };
-//         }
-
-//         // ─────────────── AGGREGATION ───────────────
-//         const activities = await UserActivity.aggregate([
-//             { $match: match },
-//             { $sort: { _id: -1 } }, // newest first
-//             { $limit: pageLimit },
-
-//             // Lookups
-//             {
-//                 $lookup: {
-//                     from: "products",
-//                     localField: "product",
-//                     foreignField: "_id",
-//                     as: "productDetails"
-//                 }
-//             },
-//             {
-//                 $lookup: {
-//                     from: "categories",
-//                     localField: "category",
-//                     foreignField: "_id",
-//                     as: "categoryDetails"
-//                 }
-//             },
-//             { $unwind: { path: "$productDetails", preserveNullAndEmptyArrays: true } },
-//             { $unwind: { path: "$categoryDetails", preserveNullAndEmptyArrays: true } },
-//         ]);
-
-//         // ─────────────── FORMAT RESPONSE ───────────────
-//         const items = activities.map(a => ({
-//             _id: a._id,
-//             user: a.user,
-//             type: a.type,
-//             product: a.product,
-//             productName: a.productDetails?.name || null,
-//             category: a.category,
-//             categoryName: a.categoryDetails?.name || null,
-//             createdAt: a.createdAt
-//         }));
-
-//         // Next cursor for frontend infinite scroll
-//         const nextCursor = items.length > 0 ? items[items.length - 1]._id : null;
-
-//         // Summary (compute separately, lightweight)
-//         const summaryAgg = await UserActivity.aggregate([
-//             { $match: match },
-//             {
-//                 $group: {
-//                     _id: "$type",
-//                     count: { $sum: 1 }
-//                 }
-//             }
-//         ]);
-//         let totalActivities = 0;
-//         const summaryObj = {};
-//         summaryAgg.forEach(s => {
-//             summaryObj[s._id] = s.count;
-//             totalActivities += s.count;
-//         });
-
-//         return res.status(200).json({
-//             success: true,
-//             summary: { totalActivities, ...summaryObj },
-//             filtersApplied: { from: from || null, to: to || null, type: type || null },
-//             activities: items,
-//             nextCursor
-//         });
-
-//     } catch (error) {
-//         console.error("All user activities fetch error:", error);
-//         return res.status(500).json({
-//             success: false,
-//             message: "Failed to fetch all user activities"
-//         });
-//     }
-// };
 export const getAllUserActivities = async (req, res) => {
     try {
         const { from, to } = req.query;
@@ -305,22 +211,27 @@ export const getAllUserActivities = async (req, res) => {
             summary: { totalActivities, ...summary },
             activities: {
                 product_view: {
+                    type: "product_view",
                     count: summary.product_view || 0,
                     items: result.product_view
                 },
                 category_view: {
+                    type: "category_view",
                     count: summary.category_view || 0,
                     items: result.category_view
                 },
                 add_to_cart: {
+                    type: "add_to_cart",
                     count: summary.add_to_cart || 0,
                     items: result.add_to_cart
                 },
                 order: {
+                    type: "order",
                     count: summary.order || 0,
                     items: result.order
                 },
                 checkout: {
+                    type: "checkout",
                     count: summary.checkout || 0,
                     items: result.checkout
                 }
