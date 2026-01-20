@@ -24,6 +24,16 @@ export const VARIANT_SALES_EXPR = {
     }
 };
 
+export const hydrateProducts = async (products) => {
+    const ids = products.map(p => p._id);
+
+    return await Product.find({ _id: { $in: ids } })
+        .populate("brand", "name slug")
+        .populate("category", "name slug")
+        .populate("formulation", "name slug")
+        .populate("skinTypes", "name slug")
+        .lean();
+};
 
 /**
  * Pseudo variant helper
@@ -153,7 +163,7 @@ export const getTrendingProducts = async (limit) => {
         { $limit: 50 }
     ]);
 
-    await redis.set(redisKey, JSON.stringify(products), "EX", 300);
+    await redis.set(redisKey, JSON.stringify(products), "EX", 120);
     return products.slice(0, limit);
 };
 
@@ -516,6 +526,8 @@ export const getRecommendations = async ({ mode, productId, categorySlug, skinTy
             }
         }
 
+        products = await hydrateProducts(products);
+
         const enrichedProducts = await enrichProductsUnified(products, promotions);
         return { success: true, products: enrichedProducts, message };
 
@@ -533,55 +545,3 @@ export const getRecommendations = async ({ mode, productId, categorySlug, skinTy
 
 
 
-
-
-
-
-
-
-/**
- * Skin type products batch query
- */
-// const getSkinTypeProducts = async (skinTypeId, categoryIds = [], limit) => {
-//     const filter = { skinTypes: skinTypeId, isDeleted: { $ne: true }, isPublished: true };
-//     if (categoryIds.length) filter.category = { $in: categoryIds };
-//     return await Product.find(filter).sort({ sales: -1 }).limit(limit).lean();
-// };
-
-
-// const getFallbackProducts = async (categoryId, limit) => {
-//     const chain = await getCategoryFallbackChain(await Category.findById(categoryId).lean());
-//     for (const cat of chain) {
-//         const prods = await Product.find({
-//             category: cat._id,
-//             isDeleted: { $ne: true },
-//             isPublished: true
-//         }).sort({ sales: -1 }).limit(limit).lean();
-//         if (prods.length) return { products: prods, fallbackFrom: cat.name };
-//     }
-//     return { products: [], fallbackFrom: null };
-// };
-
-
-/**
- * Trending products ⚡ cache top 50
- */
-// const getTrendingProducts = async (limit) => {
-//     const redis = getRedis();
-//     const redisKey = `trendingProducts:top50`;
-//     const cached = await redis.get(redisKey);
-//     let trending = [];
-
-//     if (cached) trending = JSON.parse(cached);
-//     else {
-//         trending = await Product.find({
-//             sales: { $gt: 0 },
-//             isDeleted: { $ne: true },
-//             isPublished: true
-//         }).sort({ sales: -1 }).limit(50).lean();
-
-//         await redis.set(redisKey, JSON.stringify(trending), "EX", 300);
-//     }
-
-//     return trending.slice(0, limit);
-// };

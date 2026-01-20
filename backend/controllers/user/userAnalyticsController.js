@@ -5,6 +5,7 @@ import Review from "../../models/Review.js";
 import Brand from "../../models/Brand.js";
 import Category from "../../models/Category.js";
 import Product from "../../models/Product.js";
+import Wallet from "../../models/Wallet.js";
 import mongoose from "mongoose";
 
 
@@ -91,7 +92,6 @@ export const getCustomerOrderStats = async (userId) => {
         lastOrderAt: stats.lastOrderAt || null
     };
 };
-
 
 export const getCustomerReturnStats = async (userId) => {
     const data = await Order.aggregate([
@@ -350,6 +350,70 @@ export const deriveCustomerSegment = (orders, spent, lastOrderAt) => {
     return segment;
 };
 
+export const getCustomerWalletStats = async (userId) => {
+    const wallet = await Wallet.findOne({ user: userId }).lean();
+
+    if (!wallet) {
+        return {
+            balance: {
+                joyoryCash: 0,
+                rewardPoints: 0
+            },
+            credits: {
+                addedMoney: 0,
+                refunds: 0,
+                rewardsEarned: 0
+            }
+        };
+    }
+
+    let addedMoney = 0;
+    let refunds = 0;
+    let rewardsEarned = 0;
+
+    for (const tx of wallet.transactions || []) {
+        if (tx.type === "ADD_MONEY") addedMoney += tx.amount;
+        if (tx.type === "REFUND") refunds += tx.amount;
+        if (tx.type === "REWARD") rewardsEarned += tx.amount;
+    }
+
+    return {
+        balance: {
+            joyoryCash: wallet.joyoryCash,
+            rewardPoints: wallet.rewardPoints
+        },
+        credits: {
+            addedMoney,
+            refunds,
+            rewardsEarned
+        }
+    };
+};
+
+export const getCustomerWalletUsageFromOrders = async (userId) => {
+    const data = await Order.aggregate([
+        {
+            $match: {
+                user: userId,
+                paid: true,
+                paymentMethod: "Wallet"   // 🔥 key condition
+            }
+        },
+        {
+            $group: {
+                _id: "$user",
+                totalWalletOrders: { $sum: 1 },
+                totalSpentFromWallet: { $sum: "$amount" }
+            }
+        }
+    ]);
+
+    return {
+        totalWalletOrders: data[0]?.totalWalletOrders || 0,
+        totalSpentFromWallet: data[0]?.totalSpentFromWallet || 0
+    };
+};
+
 
 export const getCustomerAnalytics = async (req, res) => {
     try {
@@ -367,6 +431,8 @@ export const getCustomerAnalytics = async (req, res) => {
         const preferences = await getCustomerPreferences(uid);
         const reviews = await getCustomerReviewStats(uid);
         const funnel = await getCustomerFunnel(uid);
+        const walletStats = await getCustomerWalletStats(uid);
+        const walletUsage = await getCustomerWalletUsageFromOrders(uid);
 
         const returnRate =
             orders.totalOrders > 0
@@ -389,7 +455,9 @@ export const getCustomerAnalytics = async (req, res) => {
             preferences,
             reviews,
             funnel,
-            segment
+            segment,
+            walletStats,
+            walletUsage
         });
     } catch (err) {
         res.status(500).json({
@@ -399,96 +467,7 @@ export const getCustomerAnalytics = async (req, res) => {
     }
 };
 
-
-
-
-
-
 //all over users analytics
-
-
-// export const getGlobalOverview = async () => {
-//     const totalCustomers = await User.countDocuments();
-
-//     // new customers (last 30 days)
-//     const newCustomers = await User.countDocuments({
-//         createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
-//     });
-
-//     // active = recently viewed OR purchased recently
-//     const activeCustomers = await User.countDocuments({
-//         "recentlyViewed.0": { $exists: true }
-//     });
-
-//     // returning = users with >= 2 paid orders
-//     const returning = await Order.aggregate([
-//         { $match: { paid: true } },
-//         {
-//             $group: {
-//                 _id: "$user",
-//                 count: { $sum: 1 }
-//             }
-//         },
-//         { $match: { count: { $gte: 2 } } },
-//         { $count: "returningCustomers" }
-//     ]);
-
-//     const returningCustomers = returning[0]?.returningCustomers || 0;
-
-//     // order stats
-//     const orderStats = await Order.aggregate([
-//         { $match: { paid: true } },
-//         {
-//             $group: {
-//                 _id: null,
-//                 totalOrders: { $sum: 1 },
-//                 totalSpent: { $sum: "$amount" },
-//                 avgOrderValue: { $avg: "$amount" }
-//             }
-//         }
-//     ]);
-
-//     const totalOrders = orderStats[0]?.totalOrders || 0;
-//     const totalSpent = orderStats[0]?.totalSpent || 0;
-//     const averageOrderValue = orderStats[0]?.avgOrderValue || 0;
-
-//     // REAL CLV
-//     const customerLifetimeValue = totalCustomers > 0
-//         ? totalSpent / totalCustomers
-//         : 0;
-
-//     // Repeat Purchase Rate
-//     const repeatPurchaseRate = totalCustomers > 0
-//         ? (returningCustomers / totalCustomers) * 100
-//         : 0;
-
-//     // REAL CHURN CALCULATION (last 90 days no orders)
-//     const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-
-//     const activeOrderUsers = await Order.distinct("user", {
-//         paid: true,
-//         createdAt: { $gte: cutoff }
-//     });
-
-//     const inactiveCustomers = totalCustomers - activeOrderUsers.length;
-
-//     const churnRate = totalCustomers > 0
-//         ? (inactiveCustomers / totalCustomers) * 100
-//         : 0;
-
-//     return {
-//         totalCustomers,
-//         newCustomers,
-//         activeCustomers,
-//         returningCustomers,
-//         totalOrders,
-//         totalSpent,
-//         averageOrderValue,
-//         customerLifetimeValue,
-//         repeatPurchaseRate,
-//         churnRate: Number(churnRate.toFixed(2))
-//     };
-// };
 
 export const getGlobalOverview = async () => {
     const totalCustomers = await User.countDocuments();
@@ -675,8 +654,6 @@ export const getCustomerSegmentation = async () => {
         regions: byCity
     };
 };
-
-
 
 export const getPurchaseBehavior = async () => {
 

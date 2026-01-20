@@ -504,7 +504,14 @@ connectDB();
 
 // 🔥 START REFUND WORKER ONLY AFTER DB IS READY
 import "./middlewares/services/refundWorker.js";
+// import { flushRedisOnBoot } from "./middlewares/CacheRemoves.js";
 console.log("💸 Refund Worker Loaded");
+
+// if (process.env.FLUSH_REDIS_ON_BOOT === "true") {
+//     flushRedisOnBoot();
+// }
+
+
 
 // export const flushAllCache = async () => {
 //     try {
