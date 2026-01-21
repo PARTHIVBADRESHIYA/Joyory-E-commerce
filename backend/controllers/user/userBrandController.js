@@ -45,211 +45,18 @@ export const getAllBrands = async (req, res) => {
     }
 };
 
-// export const getBrandCategoryProducts = async (req, res) => {
-//     try {
-//         const { brandSlug, categorySlug } = req.params;
-//         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
-//         page = Number(page) || 1;
-//         limit = Number(limit) || 12;
-
-//         const brand = await Brand.findOne({ slug: brandSlug, isActive: true }).lean();
-//         if (!brand) return res.status(404).json({ message: "Brand not found" });
-
-//         const category = await Category.findOne({ slug: categorySlug, isActive: true }).lean();
-//         if (!category) return res.status(404).json({ message: "Category not found" });
-
-//         if (req.user?.id) {
-//             await User.findByIdAndUpdate(req.user.id, { $pull: { recentBrands: brand._id } });
-//             await User.findByIdAndUpdate(req.user.id, {
-//                 $push: { recentBrands: { $each: [brand._id], $position: 0, $slice: 20 } }
-//             });
-//         }
-
-//         const filters = normalizeFilters(queryFilters);
-//         if (filters.skinTypes?.length) {
-//             const skinDocs = await SkinType.find({
-//                 name: { $in: filters.skinTypes.map(s => new RegExp(`^${s}$`, "i")) }
-//             }).select("_id").lean();
-//             filters.skinTypes = skinDocs.map(s => s._id.toString());
-//         }
-
-//         filters.brandIds = [brand._id.toString()];
-//         filters.categoryIds = [category._id.toString()];
-
-//         const finalFilter = await applyDynamicFilters(filters);
-//         finalFilter.isPublished = true;
-
-//         const sortOptions = {
-//             recent: { createdAt: -1 },
-//             priceLowToHigh: { price: 1 },
-//             priceHighToLow: { price: -1 },
-//             rating: { avgRating: -1 }
-//         };
-
-//         const total = await Product.countDocuments(finalFilter);
-
-//         const products = await Product.find(finalFilter)
-//             .populate("category", "name slug banner isActive")
-//             .populate("formulation", "name slug isActive")
-//             .populate("skinTypes", "name slug isActive")
-//             .sort(sortOptions[sort] || { createdAt: -1 })
-//             .skip((page - 1) * limit)
-//             .limit(limit)
-//             .lean();
-
-//         if (!products.length) {
-//             return res.status(200).json({
-//                 brand,
-//                 category,
-//                 products: [],
-//                 pagination: { page, limit, total: 0, totalPages: 0, hasMore: false },
-//                 message: "No products available for this brand and category at the moment."
-//             });
-//         }
-
-//         const now = new Date();
-//         const promotions = await Promotion.find({
-//             status: "active",
-//             startDate: { $lte: now },
-//             endDate: { $gte: now }
-//         }).lean();
-
-//         const enrichedProducts = await enrichProductsUnified(products, promotions);
-
-//         // ✅ Reattach category, skinTypes & formulation to each enriched product
-//         const productsWithRelations = enrichedProducts.map((prod, i) => ({
-//             ...prod,
-//             category: products[i].category || null,
-//             formulation: products[i].formulation || null,
-//             skinTypes: products[i].skinTypes || []
-//         }));
-
-//         const brandData = {
-//             _id: brand._id,
-//             name: brand.name,
-//             slug: brand.slug,
-//             logo: brand.logo || null,
-//             banner: brand.banner || null
-//         };
-
-//         return res.status(200).json({
-//             brand: brandData,
-//             category,
-//             products: productsWithRelations,
-//             pagination: {
-//                 page,
-//                 limit,
-//                 total,
-//                 totalPages: Math.ceil(total / limit),
-//                 hasMore: page < Math.ceil(total / limit)
-//             },
-//             message: null
-//         });
-
-//     } catch (err) {
-//         console.error("🔥 Error in getBrandCategoryProducts:", err);
-//         res.status(500).json({ message: "Failed to fetch category products", error: err.message });
-//     }
-// };
-
-// export const getBrandLanding = async (req, res) => {
-//     try {
-//         const { brandSlug } = req.params;
-//         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
-//         page = Number(page) || 1;
-//         limit = Number(limit) || 12;
-
-//         const brand = await Brand.findOne({ slug: brandSlug, isActive: true })
-//             .select("banner name logo slug")
-//             .lean();
-//         if (!brand) return res.status(404).json({ message: "Brand not found" });
-
-//         const filters = normalizeFilters(queryFilters);
-//         if (filters.skinTypes?.length) {
-//             const skinDocs = await SkinType.find({
-//                 name: { $in: filters.skinTypes.map(s => new RegExp(`^${s}$`, "i")) }
-//             }).select("_id").lean();
-//             filters.skinTypes = skinDocs.map(s => s._id.toString());
-//         }
-
-//         filters.brandIds = [brand._id.toString()];
-
-//         const finalFilter = await applyDynamicFilters(filters);
-//         finalFilter.isPublished = true;
-
-//         const sortOptions = {
-//             recent: { createdAt: -1 },
-//             priceLowToHigh: { price: 1 },
-//             priceHighToLow: { price: -1 },
-//             rating: { avgRating: -1 }
-//         };
-
-//         const total = await Product.countDocuments(finalFilter);
-
-//         const products = await Product.find(finalFilter)
-//             .populate("category", "name slug banner isActive")
-//             .populate("formulation", "name slug isActive")
-//             .populate("skinTypes", "name slug isActive")
-//             .sort(sortOptions[sort] || { createdAt: -1 })
-//             .skip((page - 1) * limit)
-//             .limit(limit)
-//             .lean();
-
-//         const now = new Date();
-//         const promotions = await Promotion.find({
-//             status: "active",
-//             startDate: { $lte: now },
-//             endDate: { $gte: now }
-//         }).lean();
-
-//         const enrichedProducts = await enrichProductsUnified(products, promotions);
-
-//         // ✅ Reattach category, skinTypes & formulation again
-//         const productsWithRelations = enrichedProducts.map((prod, i) => ({
-//             ...prod,
-//             category: products[i].category || null,
-//             formulation: products[i].formulation || null,
-//             skinTypes: products[i].skinTypes || []
-//         }));
-
-//         const uniqueCategoryIds = await Product.distinct("category", { brand: brand._id, isPublished: true });
-//         const categories = await Category.find({ _id: { $in: uniqueCategoryIds }, isActive: true })
-//             .select("name slug")
-//             .lean();
-
-//         return res.status(200).json({
-//             brand: { _id: brand._id, name: brand.name, logo: brand.logo , banner: brand.banner},
-//             products: productsWithRelations,
-//             categories,
-//             pagination: {
-//                 page,
-//                 limit,
-//                 total,
-//                 totalPages: Math.ceil(total / limit),
-//                 hasMore: page < Math.ceil(total / limit)
-//             },
-//             message: products.length ? `Showing products for ${brand.name}.` : `No products available for ${brand.name}.`
-//         });
-
-//     } catch (err) {
-//         console.error("🔥 Error in getBrandLanding:", err);
-//         res.status(500).json({ message: "Failed to fetch brand details", error: err.message });
-//     }
-// };
-
-
 export const getBrandCategoryProducts = async (req, res) => {
     try {
         const { brandSlug, categorySlug } = req.params;
-        let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
-
+        let { limit = 9, sort = "recent", cursor, ...queryFilters } = req.query;
+        limit = Math.min(Number(limit) || 9, 50);
 
         // ---------------------------------------------
         // 🔥 CACHED VERSION — EXACTLY LIKE CATEGORY API
         // ---------------------------------------------
         const redis = getRedis();   // <-- 🔥 IMPORTANT
 
-        const redisKey = `brandCat:${brandSlug}:${categorySlug}:${page}:${limit}:${sort}:${JSON.stringify(queryFilters)}`;
+        const redisKey = `brandCat:v2:${brandSlug}:${categorySlug}:${JSON.stringify(req.query)}`;
 
         const cached = await redis.get(redisKey);
         if (cached) {
@@ -257,8 +64,6 @@ export const getBrandCategoryProducts = async (req, res) => {
         }
         // ---------------------------------------------
 
-        page = Number(page) || 1;
-        limit = Number(limit) || 12;
 
         const brand = await Brand.findOne({ slug: brandSlug, isActive: true }).lean();
         if (!brand) return res.status(404).json({ message: "Brand not found" });
@@ -286,14 +91,20 @@ export const getBrandCategoryProducts = async (req, res) => {
 
         const finalFilter = await applyDynamicFilters(filters);
         finalFilter.isPublished = true;
-
-        const sortOptions = {
-            recent: { createdAt: -1 },
-            priceLowToHigh: { price: 1 },
-            priceHighToLow: { price: -1 },
-            rating: { avgRating: -1 }
+        const sortConfig = {
+            recent: { field: "_id", order: -1 },
+            priceLowToHigh: { field: "minPrice", order: 1 },
+            priceHighToLow: { field: "maxPrice", order: -1 },
+            rating: { field: "avgRating", order: -1 }
         };
 
+        const { field, order } = sortConfig[sort] || sortConfig.recent;
+
+        if (cursor) {
+            finalFilter[field] = order === -1
+                ? { $lt: cursor }
+                : { $gt: cursor };
+        }
         const total = await Product.countDocuments(finalFilter);
 
         const products = await Product.find(finalFilter)
@@ -301,10 +112,10 @@ export const getBrandCategoryProducts = async (req, res) => {
             .populate("category", "name slug isActive")
             .populate("formulation", "name slug isActive")
             .populate("skinTypes", "name slug isActive")
-            .sort(sortOptions[sort] || { createdAt: -1 })
-            .skip((page - 1) * limit)
-            .limit(limit)
+            .sort({ [field]: order })
+            .limit(limit + 1)
             .lean();
+
 
         if (!products.length) {
             const response = {
@@ -328,7 +139,20 @@ export const getBrandCategoryProducts = async (req, res) => {
             endDate: { $gte: now }
         }).lean();
 
+        const hasMore = products.length > limit;
+        if (hasMore) products.pop();
+
         const enrichedProducts = await enrichProductsUnified(products, promotions);
+
+        const nextCursor =
+            products.length > 0 ? products[products.length - 1][field] : null;
+
+        let message = null;
+        if (!enrichedProducts.length && cursor)
+            message = "🎉 You’ve reached the end! No more products to show.";
+
+        if (!enrichedProducts.length && !cursor)
+            message = "No products found for this brand and category.";
 
         const brandData = {
             _id: brand._id,
@@ -343,13 +167,10 @@ export const getBrandCategoryProducts = async (req, res) => {
             category,
             products: enrichedProducts,
             pagination: {
-                page,
-                limit,
-                total,
-                totalPages: Math.ceil(total / limit),
-                hasMore: page < Math.ceil(total / limit)
+                hasMore,
+                nextCursor
             },
-            message: null
+            message
         };
 
         // ---------------------------------------------
@@ -365,27 +186,23 @@ export const getBrandCategoryProducts = async (req, res) => {
     }
 };
 
-
-
 export const getBrandLanding = async (req, res) => {
     try {
         const { brandSlug } = req.params;
-        let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
 
+        let { limit = 9, sort = "recent", cursor, ...queryFilters } = req.query;
+        limit = Math.min(Number(limit) || 9, 50);
         // ---------------------------------------------
         // 🔥 CACHED VERSION
         // ---------------------------------------------
         const redis = getRedis();   // <-- 🔥 IMPORTANT
-        const redisKey = `brandLanding:${brandSlug}:${page}:${limit}:${sort}:${JSON.stringify(queryFilters)}`;
+        const redisKey = `brandLanding:v2:${brandSlug}:${JSON.stringify(req.query)}`;
 
         const cached = await redis.get(redisKey);
         if (cached) {
             return res.status(200).json(JSON.parse(cached));
         }
-        // ---------------------------------------------
 
-        page = Number(page) || 1;
-        limit = Number(limit) || 12;
 
         const brand = await Brand.findOne({ slug: brandSlug, isActive: true })
             .select("banner name logo slug")
@@ -405,12 +222,20 @@ export const getBrandLanding = async (req, res) => {
         const finalFilter = await applyDynamicFilters(filters);
         finalFilter.isPublished = true;
 
-        const sortOptions = {
-            recent: { createdAt: -1 },
-            priceLowToHigh: { price: 1 },
-            priceHighToLow: { price: -1 },
-            rating: { avgRating: -1 }
+        const sortConfig = {
+            recent: { field: "_id", order: -1 },
+            priceLowToHigh: { field: "minPrice", order: 1 },
+            priceHighToLow: { field: "maxPrice", order: -1 },
+            rating: { field: "avgRating", order: -1 }
         };
+
+        const { field, order } = sortConfig[sort] || sortConfig.recent;
+
+        if (cursor) {
+            finalFilter[field] = order === -1
+                ? { $lt: cursor }
+                : { $gt: cursor };
+        }
 
         const total = await Product.countDocuments(finalFilter);
 
@@ -419,10 +244,13 @@ export const getBrandLanding = async (req, res) => {
             .populate("category", "name slug banner isActive")
             .populate("formulation", "name slug isActive")
             .populate("skinTypes", "name slug isActive")
-            .sort(sortOptions[sort] || { createdAt: -1 })
-            .skip((page - 1) * limit)
-            .limit(limit)
+            .sort({ [field]: order })
+            .limit(limit + 1)
             .lean();
+
+        const hasMore = products.length > limit;
+        if (hasMore) products.pop();
+
 
         const now = new Date();
         const promotions = await Promotion.find({
@@ -438,18 +266,26 @@ export const getBrandLanding = async (req, res) => {
             .select("name slug")
             .lean();
 
+        const nextCursor =
+            products.length > 0 ? products[products.length - 1][field] : null;
+
+        let message = null;
+        if (!enrichedProducts.length && cursor)
+            message = "🎉 You’ve reached the end! No more products to show.";
+
+        if (!enrichedProducts.length && !cursor)
+            message = `No products available for ${brand.name}.`;
+
+
         const response = {
             brand: { _id: brand._id, name: brand.name, logo: brand.logo, banner: brand.banner },
             products: enrichedProducts,
             categories,
             pagination: {
-                page,
-                limit,
-                total,
-                totalPages: Math.ceil(total / limit),
-                hasMore: page < Math.ceil(total / limit)
+                hasMore,
+                nextCursor
             },
-            message: products.length ? `Showing products for ${brand.name}.` : `No products available for ${brand.name}.`
+            message
         };
 
         // ---------------------------------------------

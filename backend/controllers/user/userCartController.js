@@ -250,7 +250,7 @@ export const addToCart = async (req, res) => {
 // Helper to add/update cart items
 async function handleCart(cart, product, variants, qty) {
   if (!Array.isArray(cart)) cart = [];
-
+  
   // 🧩 CASE 1 — Non-variant product
   if (variants.length === 0) {
     const stock = Number(product.quantity ?? 0);

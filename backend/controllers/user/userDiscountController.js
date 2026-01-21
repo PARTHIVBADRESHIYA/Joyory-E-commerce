@@ -441,9 +441,9 @@ export const getDiscountProducts = async (req, res) => {
         if (cached) return res.json(JSON.parse(cached));
 
         let {
-            page = 1,
             limit = 12,
             sort = "recent",
+            cursor,
             priceMin,
             priceMax,
             rating,
@@ -451,7 +451,6 @@ export const getDiscountProducts = async (req, res) => {
             ...queryFilters
         } = req.query;
 
-        page = Number(page);
         limit = Math.min(Number(limit) || 12, 50);
 
         // -------------------------------
@@ -539,13 +538,22 @@ export const getDiscountProducts = async (req, res) => {
         // -------------------------------
         // 6️⃣ SORT
         // -------------------------------
-        const sortStage = {
-            "low-high": { price: 1 },
-            "high-low": { price: -1 },
-            "discount": { discountPercentage: -1 },
-            "popularity": { popularity: -1 },
-            "recent": { createdAt: -1 }
-        }[sort] || { createdAt: -1 };
+        const sortConfig = {
+            recent: { field: "_id", order: -1 },
+            "low-high": { field: "minPrice", order: 1 },
+            "high-low": { field: "maxPrice", order: -1 },
+            discount: { field: "discountPercentage", order: -1 },
+            popularity: { field: "popularity", order: -1 }
+        };
+
+        const { field, order } = sortConfig[sort] || sortConfig.recent;
+
+        if (cursor) {
+            finalFilter[field] = order === -1
+                ? { $lt: cursor }
+                : { $gt: cursor };
+        }
+
 
         // -------------------------------
         // 7️⃣ COUNT
@@ -559,11 +567,9 @@ export const getDiscountProducts = async (req, res) => {
             .select("name slugs price discountedPrice minPrice maxPrice brand category variants avgRating images stock shortDescription")
             .populate("brand", "name slug")
             .populate("category", "name slug")
-            .sort(sortStage)
-            .skip((page - 1) * limit)
-            .limit(limit)
+            .sort({ [field]: order })
+            .limit(limit + 1)
             .lean();
-
         // -------------------------------
         // 9️⃣ PROMOTIONS
         // -------------------------------
@@ -591,11 +597,28 @@ export const getDiscountProducts = async (req, res) => {
             priority: 9999
         };
 
+        const hasMore = products.length > limit;
+        if (hasMore) products.pop();
+
         const enriched = await enrichProductsUnified(
             products,
             promotions,
             discountOverride
         );
+
+
+        const nextCursor =
+            products.length > 0 ? products[products.length - 1][field] : null;
+
+        let message = null;
+
+        if (!products.length && cursor) {
+            message = "🎉 You’ve reached the end! No more products to show.";
+        }
+
+        if (!products.length && !cursor) {
+            message = "No products found under this discount.";
+        }
 
         // -------------------------------
         // 1️⃣1️⃣ RESPONSE
@@ -605,8 +628,11 @@ export const getDiscountProducts = async (req, res) => {
             discountId,
             products: enriched,
             totalCount,
-            totalPages: Math.ceil(totalCount / limit),
-            currentPage: page
+            pagination: {
+                hasMore,
+                nextCursor
+            },
+            message
         };
 
         await redis.set(redisKey, JSON.stringify(response), "EX", 120);

@@ -447,6 +447,123 @@ export const getAllProducts = async (req, res) => {
     }
 };
 
+// export const getProductsByCategory = async (req, res) => {
+//     try {
+//         const slug = req.params.slug.toLowerCase();
+//         const redis = getRedis();
+
+//         const redisKey = `cat:v2:${slug}:${JSON.stringify(req.query)}`;
+//         const cached = await redis.get(redisKey);
+//         if (cached) return res.json(JSON.parse(cached));
+
+//         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
+//         page = +page || 1;
+//         limit = +limit || 12;
+
+//         // Normalize filters
+//         ["skinTypes", "brandIds", "formulations", "finishes"].forEach(k => {
+//             if (typeof queryFilters[k] === "string") queryFilters[k] = [queryFilters[k]];
+//         });
+
+//         // 🔹 Category
+//         const category = await Category.findOne({ slug })
+//             .select("name slug ancestors bannerImage thumbnailImage")
+//             .lean();
+
+//         if (!category) {
+//             return res.status(404).json({ message: "Category not found" });
+//         }
+
+//         // 🔥 Track CATEGORY VIEW (non-blocking)
+//         try {
+//             if (req.user?._id) {
+//                 UserActivity.create({
+//                     user: req.user._id,
+//                     type: "category_view",
+//                     category: category._id
+//                 }).catch(err => console.error("Category activity log failed:", err));
+//             }
+//         } catch (err) {
+//             console.error("Category activity log error:", err);
+//         }
+
+//         // 🔹 Cached descendants
+//         const descKey = `cat_desc:${category._id}`;
+//         let categoryIds = await redis.get(descKey);
+
+//         if (!categoryIds) {
+//             const descendants = await getDescendantCategoryIds(category._id);
+//             categoryIds = [category._id, ...descendants];
+//             await redis.set(descKey, JSON.stringify(categoryIds), "EX", 3600);
+//         } else {
+//             categoryIds = JSON.parse(categoryIds);
+//         }
+
+//         // 🔹 Filters
+//         const filters = normalizeFilters(queryFilters);
+//         filters.categoryIds = categoryIds.map(String);
+
+//         const finalFilter = await applyDynamicFilters(filters);
+//         finalFilter.isPublished = true;
+
+//         // 🔹 Sort
+//         const sortMap = {
+//             recent: { createdAt: -1 },
+//             priceLowToHigh: { minPrice: 1 },
+//             priceHighToLow: { maxPrice: -1 },
+//             rating: { avgRating: -1 }
+//         };
+
+//         // 🔹 Products (NO writes, lean only)
+//         const products = await Product.find(finalFilter)
+//             .select("name slugs  price discountedPrice minPrice maxPrice brand category variants avgRating")
+//             .populate("brand", "name slug")
+//             .populate("category", "name slug")
+//             .populate("formulation", "name slug isActive")
+//             .populate("skinTypes", "name slug isActive")
+//             .sort(sortMap[sort] || sortMap.recent)
+//             .skip((page - 1) * limit)
+//             .limit(limit)
+//             .lean();
+
+//         // 🔹 Promotions (cached)
+//         let promotions = await redis.get("active_promotions");
+//         if (!promotions) {
+//             promotions = await Promotion.find({
+//                 status: "active",
+//                 startDate: { $lte: new Date() },
+//                 endDate: { $gte: new Date() }
+//             }).lean();
+//             await redis.set("active_promotions", JSON.stringify(promotions), "EX", 120);
+//         } else {
+//             promotions = JSON.parse(promotions);
+//         }
+
+//         const enriched = await enrichProductsUnified(products, promotions);
+
+//         const response = {
+//             category,
+//             breadcrumb: [],
+//             products: enriched,
+//             pagination: {
+//                 page,
+//                 limit,
+//                 total: enriched.length,
+//                 totalPages: Math.ceil(enriched.length / limit),
+//                 hasMore: enriched.length === limit
+//             }
+//         };
+
+//         await redis.set(redisKey, JSON.stringify(response), "EX", 120);
+//         return res.json(response);
+
+//     } catch (err) {
+//         console.error("❌ getProductsByCategory:", err);
+//         return res.status(500).json({ message: "Failed to load products" });
+//     }
+// };
+
+
 export const getProductsByCategory = async (req, res) => {
     try {
         const slug = req.params.slug.toLowerCase();
@@ -456,9 +573,10 @@ export const getProductsByCategory = async (req, res) => {
         const cached = await redis.get(redisKey);
         if (cached) return res.json(JSON.parse(cached));
 
-        let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
-        page = +page || 1;
-        limit = +limit || 12;
+
+        let { limit = 9, sort = "recent", cursor, ...queryFilters } = req.query;
+        limit = Math.min(Number(limit) || 9, 50);
+
 
         // Normalize filters
         ["skinTypes", "brandIds", "formulations", "finishes"].forEach(k => {
@@ -506,13 +624,25 @@ export const getProductsByCategory = async (req, res) => {
         const finalFilter = await applyDynamicFilters(filters);
         finalFilter.isPublished = true;
 
-        // 🔹 Sort
-        const sortMap = {
-            recent: { createdAt: -1 },
-            priceLowToHigh: { minPrice: 1 },
-            priceHighToLow: { maxPrice: -1 },
-            rating: { avgRating: -1 }
+
+
+        const sortConfig = {
+            recent: { field: "_id", order: -1 },
+            priceLowToHigh: { field: "minPrice", order: 1 },
+            priceHighToLow: { field: "maxPrice", order: -1 },
+            rating: { field: "avgRating", order: -1 }
         };
+
+        const { field, order } = sortConfig[sort] || sortConfig.recent;
+
+
+        if (cursor) {
+            finalFilter[field] = order === -1
+                ? { $lt: cursor }
+                : { $gt: cursor };
+        }
+
+
 
         // 🔹 Products (NO writes, lean only)
         const products = await Product.find(finalFilter)
@@ -521,9 +651,9 @@ export const getProductsByCategory = async (req, res) => {
             .populate("category", "name slug")
             .populate("formulation", "name slug isActive")
             .populate("skinTypes", "name slug isActive")
-            .sort(sortMap[sort] || sortMap.recent)
-            .skip((page - 1) * limit)
-            .limit(limit)
+            .sort({ [field]: order })
+            .limit(limit + 1)
+
             .lean();
 
         // 🔹 Promotions (cached)
@@ -539,19 +669,50 @@ export const getProductsByCategory = async (req, res) => {
             promotions = JSON.parse(promotions);
         }
 
+        const hasMore = products.length > limit;
+        if (hasMore) products.pop();
+
+
         const enriched = await enrichProductsUnified(products, promotions);
 
+        const countKey = `cat:products:total:${slug}:${JSON.stringify(finalFilter)}`;
+        let totalProducts = await redis.get(countKey);
+
+        if (!totalProducts) {
+            totalProducts = await Product.countDocuments(finalFilter);
+            await redis.set(countKey, totalProducts, "EX", 300);
+        }
+
+        totalProducts = Number(totalProducts);
+
+        let message = null;
+
+        if (!enriched.length && cursor) {
+            // User scrolled till end
+            message = "🎉 You’ve reached the end! No more products to show.";
+        }
+
+        if (!enriched.length && !cursor) {
+            // First load but no products
+            message = "No products found for the selected category.";
+        }
+
+
+        const nextCursor =
+            products.length > 0 ? products[products.length - 1][field] : null;
+
         const response = {
+            titleMessage: totalProducts > 0
+                ? `${totalProducts} products found`
+                : "No products found",
             category,
             breadcrumb: [],
             products: enriched,
             pagination: {
-                page,
-                limit,
-                total: enriched.length,
-                totalPages: Math.ceil(enriched.length / limit),
-                hasMore: enriched.length === limit
-            }
+                hasMore,
+                nextCursor
+            },
+            message
         };
 
         await redis.set(redisKey, JSON.stringify(response), "EX", 120);
@@ -793,7 +954,7 @@ export const getSingleProduct = async (req, res) => {
         return res.status(200).json(response);
 
     } catch (err) {
-        console.error("❌ getSingleProduct error:", err);   
+        console.error("❌ getSingleProduct error:", err);
         return res.status(500).json({
             message: "🚫 Failed to fetch product",
             error: err.message
@@ -950,25 +1111,184 @@ export const getAllSkinTypes = async (req, res) => {
     }
 };
 
+// export const getProductsBySkinType = async (req, res) => {
+//     try {
+//         const { slug } = req.params;
+//         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
+
+//         page = Number(page) || 1;
+//         limit = Number(limit) || 12;
+
+//         // 🔹 Find SkinType
+//         const skinType = await SkinType.findOne({
+//             slug: slug.toLowerCase(),
+//             isDeleted: false
+//         })
+//             .select("name slug _id")
+//             .lean();
+
+//         if (!skinType) {
+//             return res.status(404).json({
+//                 message: "❌ Skin type not found or may have been removed."
+//             });
+//         }
+
+//         // 🔹 Normalize filters
+//         const filters = normalizeFilters(queryFilters);
+//         filters.skinTypes = [skinType._id.toString()];
+
+//         // 🔹 Apply category-wise filtering
+//         if (filters.categorySlugs?.length) {
+//             const categoryDocs = await Category.find({
+//                 slug: { $in: filters.categorySlugs.map((s) => s.toLowerCase()) },
+//                 isActive: true,
+//             })
+//                 .select("_id")
+//                 .lean();
+
+//             filters.categoryIds = categoryDocs.map((c) => c._id.toString());
+//         }
+
+//         // 🔹 Apply dynamic filters
+//         const finalFilter = await applyDynamicFilters(filters);
+//         finalFilter.isPublished = true;
+
+//         // 🔹 Sorting options
+//         const sortOptions = {
+//             recent: { createdAt: -1 },
+//             priceLowToHigh: { price: 1 },
+//             priceHighToLow: { price: -1 },
+//             rating: { avgRating: -1 },
+//         };
+
+//         // 🚀 Run count + products in parallel
+//         const [total, products] = await Promise.all([
+//             Product.countDocuments(finalFilter),
+//             Product.find(finalFilter)
+//                 .populate("category", "name slug isActive")
+//                 .populate("formulation", "name slug isActive")
+//                 .populate("brand", "name slug isActive")
+//                 .sort(sortOptions[sort] || { createdAt: -1 })
+//                 .skip((page - 1) * limit)
+//                 .limit(limit)
+//                 .lean()
+//         ]);
+
+//         // 🚀 PROMOTION CACHING (60 seconds)
+//         let promotions;
+//         const nowTs = Date.now();
+
+//         if (_promoCache.data && nowTs - _promoCache.ts < _promoCache.ttl) {
+//             promotions = _promoCache.data; // use cache
+//         } else {
+//             const freshPromos = await Promotion.find({
+//                 status: "active",
+//                 startDate: { $lte: new Date() },
+//                 endDate: { $gte: new Date() }
+//             }).lean();
+
+//             _promoCache = {
+//                 ts: nowTs,
+//                 data: freshPromos,
+//                 ttl: 60000
+//             };
+
+//             promotions = freshPromos;
+//         }
+
+//         // 🔹 Enrich products
+//         const enrichedProducts = await enrichProductsUnified(products, promotions);
+
+//         // 🔹 Add stock messages
+//         const enrichedWithStockMsg = enrichedProducts.map((prod) => {
+//             if (Array.isArray(prod.variants)) {
+//                 prod.variants = prod.variants.map((v) => {
+//                     const vStock = v.stock ?? 0;
+
+//                     if (vStock <= 0) v.stockMessage = "Out of stock";
+//                     else if (vStock === 1) v.stockMessage = "🔥 Only 1 left!";
+//                     else if (vStock <= 3) v.stockMessage = `⚡ Just ${vStock} left — selling fast!`;
+//                     else if (vStock < 10) v.stockMessage = `💨 Few left (${vStock} in stock)`;
+//                     else v.stockMessage = null;
+
+//                     return v;
+//                 });
+//             }
+//             return prod;
+//         });
+
+//         // 🔹 Reattach populated relations
+//         const productsWithRelations = enrichedWithStockMsg.map((prod, i) => ({
+//             ...prod,
+//             category: products[i].category || null,
+//             formulation: products[i].formulation || null,
+//             skinTypes: products[i].skinTypes || [],
+//             brand: products[i].brand || null,
+//         }));
+
+//         // 🔹 Derive unique categories for filter options
+//         const uniqueCategoryIds = await Product.distinct("category", {
+//             skinTypes: skinType._id,
+//             isPublished: true
+//         });
+
+//         const categories = await Category.find({
+//             _id: { $in: uniqueCategoryIds },
+//             isActive: true
+//         })
+//             .select("name slug")
+//             .lean();
+
+//         const message = products.length
+//             ? `✨ Showing curated products specially for ${skinType.name} skin type.`
+//             : `😔 No products available for ${skinType.name} skin type right now — we're adding new ones soon!`;
+
+//         // 🔹 Final Response
+//         return res.status(200).json({
+//             success: true,
+//             skinType: { _id: skinType._id, name: skinType.name, slug: skinType.slug },
+//             products: productsWithRelations,
+//             categories,
+//             pagination: {
+//                 page,
+//                 limit,
+//                 total,
+//                 totalPages: Math.ceil(total / limit),
+//                 hasMore: page < Math.ceil(total / limit),
+//             },
+//             message,
+//         });
+
+//     } catch (err) {
+//         console.error("🔥 Error in getProductsBySkinType:", err);
+//         return res.status(500).json({
+//             success: false,
+//             message: "🚫 Oops! Something went wrong while fetching products.",
+//             error: err.message,
+//         });
+//     }
+// };
 export const getProductsBySkinType = async (req, res) => {
     try {
+        const redis = getRedis();
         const { slug } = req.params;
-        let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
 
-        page = Number(page) || 1;
-        limit = Number(limit) || 12;
+        let { limit = 9, sort = "recent", cursor, ...queryFilters } = req.query;
+        limit = Math.min(Number(limit) || 9, 50);
 
-        // 🔹 Find SkinType
+        const redisKey = `skin:v2:${slug}:${JSON.stringify(req.query)}`;
+        const cached = await redis.get(redisKey);
+        if (cached) return res.json(JSON.parse(cached));
+
+        // 🔹 Find Skin Type
         const skinType = await SkinType.findOne({
             slug: slug.toLowerCase(),
             isDeleted: false
-        })
-            .select("name slug _id")
-            .lean();
+        }).select("name slug _id").lean();
 
         if (!skinType) {
             return res.status(404).json({
-                message: "❌ Skin type not found or may have been removed."
+                message: "Skin type not found"
             });
         }
 
@@ -976,135 +1296,112 @@ export const getProductsBySkinType = async (req, res) => {
         const filters = normalizeFilters(queryFilters);
         filters.skinTypes = [skinType._id.toString()];
 
-        // 🔹 Apply category-wise filtering
+        // 🔹 Category filtering
         if (filters.categorySlugs?.length) {
             const categoryDocs = await Category.find({
-                slug: { $in: filters.categorySlugs.map((s) => s.toLowerCase()) },
-                isActive: true,
-            })
-                .select("_id")
-                .lean();
+                slug: { $in: filters.categorySlugs.map(s => s.toLowerCase()) },
+                isActive: true
+            }).select("_id").lean();
 
-            filters.categoryIds = categoryDocs.map((c) => c._id.toString());
+            filters.categoryIds = categoryDocs.map(c => c._id.toString());
         }
 
         // 🔹 Apply dynamic filters
         const finalFilter = await applyDynamicFilters(filters);
         finalFilter.isPublished = true;
 
-        // 🔹 Sorting options
-        const sortOptions = {
-            recent: { createdAt: -1 },
-            priceLowToHigh: { price: 1 },
-            priceHighToLow: { price: -1 },
-            rating: { avgRating: -1 },
+        // 🔹 Sorting (same style as category API)
+        const sortConfig = {
+            recent: { field: "_id", order: -1 },
+            priceLowToHigh: { field: "minPrice", order: 1 },
+            priceHighToLow: { field: "maxPrice", order: -1 },
+            rating: { field: "avgRating", order: -1 }
         };
 
-        // 🚀 Run count + products in parallel
-        const [total, products] = await Promise.all([
-            Product.countDocuments(finalFilter),
-            Product.find(finalFilter)
-                .populate("category", "name slug isActive")
-                .populate("formulation", "name slug isActive")
-                .populate("brand", "name slug isActive")
-                .sort(sortOptions[sort] || { createdAt: -1 })
-                .skip((page - 1) * limit)
-                .limit(limit)
-                .lean()
-        ]);
+        const { field, order } = sortConfig[sort] || sortConfig.recent;
 
-        // 🚀 PROMOTION CACHING (60 seconds)
-        let promotions;
-        const nowTs = Date.now();
+        if (cursor) {
+            finalFilter[field] = order === -1
+                ? { $lt: cursor }
+                : { $gt: cursor };
+        }
 
-        if (_promoCache.data && nowTs - _promoCache.ts < _promoCache.ttl) {
-            promotions = _promoCache.data; // use cache
-        } else {
-            const freshPromos = await Promotion.find({
+        // 🔹 Fetch Products
+        const products = await Product.find(finalFilter)
+            .select("name slugs price discountedPrice minPrice maxPrice brand category variants avgRating")
+            .populate("category", "name slug isActive")
+            .populate("formulation", "name slug isActive")
+            .populate("brand", "name slug isActive")
+            .sort({ [field]: order })
+            .limit(limit + 1)
+            .lean();
+
+        // 🔹 Promotions (cached like your category API)
+        let promotions = await redis.get("active_promotions");
+        if (!promotions) {
+            promotions = await Promotion.find({
                 status: "active",
                 startDate: { $lte: new Date() },
                 endDate: { $gte: new Date() }
             }).lean();
-
-            _promoCache = {
-                ts: nowTs,
-                data: freshPromos,
-                ttl: 60000
-            };
-
-            promotions = freshPromos;
+            await redis.set("active_promotions", JSON.stringify(promotions), "EX", 120);
+        } else {
+            promotions = JSON.parse(promotions);
         }
 
-        // 🔹 Enrich products
-        const enrichedProducts = await enrichProductsUnified(products, promotions);
+        const hasMore = products.length > limit;
+        if (hasMore) products.pop();
 
-        // 🔹 Add stock messages
-        const enrichedWithStockMsg = enrichedProducts.map((prod) => {
-            if (Array.isArray(prod.variants)) {
-                prod.variants = prod.variants.map((v) => {
-                    const vStock = v.stock ?? 0;
+        const enriched = await enrichProductsUnified(products, promotions);
 
-                    if (vStock <= 0) v.stockMessage = "Out of stock";
-                    else if (vStock === 1) v.stockMessage = "🔥 Only 1 left!";
-                    else if (vStock <= 3) v.stockMessage = `⚡ Just ${vStock} left — selling fast!`;
-                    else if (vStock < 10) v.stockMessage = `💨 Few left (${vStock} in stock)`;
-                    else v.stockMessage = null;
+        const nextCursor =
+            products.length > 0 ? products[products.length - 1][field] : null;
 
-                    return v;
-                });
-            }
-            return prod;
-        });
+        // 🔹 Total Count Cache
+        const countKey = `skin:products:total:${slug}:${JSON.stringify(finalFilter)}`;
+        let totalProducts = await redis.get(countKey);
 
-        // 🔹 Reattach populated relations
-        const productsWithRelations = enrichedWithStockMsg.map((prod, i) => ({
-            ...prod,
-            category: products[i].category || null,
-            formulation: products[i].formulation || null,
-            skinTypes: products[i].skinTypes || [],
-            brand: products[i].brand || null,
-        }));
+        if (!totalProducts) {
+            totalProducts = await Product.countDocuments(finalFilter);
+            await redis.set(countKey, totalProducts, "EX", 300);
+        }
 
-        // 🔹 Derive unique categories for filter options
-        const uniqueCategoryIds = await Product.distinct("category", {
-            skinTypes: skinType._id,
-            isPublished: true
-        });
+        totalProducts = Number(totalProducts);
 
-        const categories = await Category.find({
-            _id: { $in: uniqueCategoryIds },
-            isActive: true
-        })
-            .select("name slug")
-            .lean();
+        let message = null;
 
-        const message = products.length
-            ? `✨ Showing curated products specially for ${skinType.name} skin type.`
-            : `😔 No products available for ${skinType.name} skin type right now — we're adding new ones soon!`;
+        if (!enriched.length && cursor) {
+            message = "🎉 You’ve reached the end! No more products to show.";
+        }
 
-        // 🔹 Final Response
-        return res.status(200).json({
-            success: true,
-            skinType: { _id: skinType._id, name: skinType.name, slug: skinType.slug },
-            products: productsWithRelations,
-            categories,
-            pagination: {
-                page,
-                limit,
-                total,
-                totalPages: Math.ceil(total / limit),
-                hasMore: page < Math.ceil(total / limit),
+        if (!enriched.length && !cursor) {
+            message = `No products found for ${skinType.name} skin type.`;
+        }
+
+        const response = {
+            titleMessage: totalProducts > 0
+                ? `${totalProducts} products found`
+                : "No products found",
+            skinType: {
+                _id: skinType._id,
+                name: skinType.name,
+                slug: skinType.slug
             },
-            message,
-        });
+            products: enriched,
+            pagination: {
+                hasMore,
+                nextCursor
+            },
+            message
+        };
+
+        await redis.set(redisKey, JSON.stringify(response), "EX", 120);
+        return res.json(response);
 
     } catch (err) {
-        console.error("🔥 Error in getProductsBySkinType:", err);
+        console.error("❌ getProductsBySkinType:", err);
         return res.status(500).json({
-            success: false,
-            message: "🚫 Oops! Something went wrong while fetching products.",
-            error: err.message,
+            message: "Failed to load products"
         });
     }
 };
-
