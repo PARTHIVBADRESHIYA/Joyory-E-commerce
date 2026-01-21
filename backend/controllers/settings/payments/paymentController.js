@@ -3421,7 +3421,6 @@ export const setRefundMethod = async (req, res) => {
 
 
 // controllers/orderController.js
-// controllers/orderController.js
 export const getOrderSuccessDetails = async (req, res) => {
     try {
         const { orderId } = req.params;
@@ -3501,26 +3500,42 @@ export const getOrderSuccessDetails = async (req, res) => {
         if (order.paid && order.paymentStatus === "success") {
             refundInfo.applicable = true;
 
-            // Available methods depend on how user paid
             const methods = [];
+            const paymentMethod = order.paymentMethod
 
-            // Razorpay refund only if payment was online
-            if (order.paymentMethod !== "COD") {
+            // 1️⃣ Wallet payment → ONLY Wallet refund
+            if (["Wallet", "GiftCard"].includes(paymentMethod)) {
                 methods.push({
-                    key: "razorpay",
-                    label: "Original Payment Method"
+                    key: "wallet",
+                    label: "Joyory Wallet",
+                    note: "This order was paid using Wallet, so the refund will be credited back to your Joyory Wallet instantly."
                 });
+
+                refundInfo.helperText =
+                    "Wallet refunds are instant and can be reused for future purchases.";
             }
 
-            // Wallet refund always allowed
-            methods.push({
-                key: "wallet",
-                label: "Joyory Wallet"
-            });
+            // 2️⃣ Online payment → Razorpay + Wallet
+            else if (["upi", "card", "netbanking", "razorpay","Online"].includes(paymentMethod)) {
+                methods.push({
+                    key: "razorpay",
+                    label: "Original Payment Method",
+                    note: "Refund will be sent back to the same account you used for payment. Usually takes 3–5 working days."
+                });
+
+                methods.push({
+                    key: "wallet",
+                    label: "Joyory Wallet",
+                    note: "Get an instant refund in your Joyory Wallet and use it for your next orders."
+                });
+
+                refundInfo.helperText =
+                    "Original payment refunds take 3–5 working days. Wallet refunds are instant.";
+            }
 
             refundInfo.availableMethods = methods;
 
-            // If user already selected refund method
+            // If refund already selected
             if (order.orderRefund?.method) {
                 refundInfo.selectedMethod = order.orderRefund.method;
                 refundInfo.status = order.orderRefund.status;
@@ -3593,43 +3608,6 @@ export const getOrderSuccessDetails = async (req, res) => {
             },
         };
 
-
-
-        // Only paid orders can have refund
-        if (order.paid && order.paymentStatus === "success") {
-            refundInfo.applicable = true;
-
-            // Available methods depend on how user paid
-            const methods = [];
-
-            // Razorpay refund only if payment was online
-            if (order.paymentMethod !== "COD") {
-                methods.push({
-                    key: "razorpay",
-                    label: "Original Payment Method"
-                });
-            }
-
-            // Wallet refund always allowed
-            methods.push({
-                key: "wallet",
-                label: "Joyory Wallet"
-            });
-
-            refundInfo.availableMethods = methods;
-
-            // If user already selected refund method
-            if (order.orderRefund?.method) {
-                refundInfo.selectedMethod = order.orderRefund.method;
-                refundInfo.status = order.orderRefund.status;
-
-                refundInfo.selectedMethodLabel =
-                    order.orderRefund.method === "razorpay"
-                        ? "Original Payment Method"
-                        : "Joyory Wallet";
-            }
-        }
-
         return res.status(200).json({
             success: true,
             message: "Your order has been placed successfully!",
@@ -3681,22 +3659,6 @@ const getNextSteps = (order) => {
 
     return steps;
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 export const payForOrder = async (req, res) => {
     try {
