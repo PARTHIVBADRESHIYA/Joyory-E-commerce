@@ -3468,6 +3468,14 @@ export const getOrderSuccessDetails = async (req, res) => {
         }
 
         // ❌ Online payment must be completed
+        if (order.paymentStatus === "refund_initiated" || order.paymentStatus === "refunded") {
+            return res.status(400).json({
+                success: false,
+                message: "Your refund has already been processed for this order. No further action is needed from your side."
+            });
+        }
+
+        // ❌ Online payment must be completed
         if (order.paymentMethod !== "COD" && order.paymentStatus !== "success") {
             return res.status(400).json({
                 success: false,
@@ -3475,9 +3483,54 @@ export const getOrderSuccessDetails = async (req, res) => {
             });
         }
 
+
         // 📦 Delivery estimate = createdAt + 7 days
         const deliveryEstimate = new Date(order.createdAt);
         deliveryEstimate.setDate(deliveryEstimate.getDate() + 7);
+
+        // 🧾 Refund availability logic
+        let refundInfo = {
+            applicable: false,
+            selectedMethod: null,
+            selectedMethodLabel: null,
+            status: null,
+            availableMethods: []
+        };
+
+        // Only paid orders can have refund
+        if (order.paid && order.paymentStatus === "success") {
+            refundInfo.applicable = true;
+
+            // Available methods depend on how user paid
+            const methods = [];
+
+            // Razorpay refund only if payment was online
+            if (order.paymentMethod !== "COD") {
+                methods.push({
+                    key: "razorpay",
+                    label: "Original Payment Method"
+                });
+            }
+
+            // Wallet refund always allowed
+            methods.push({
+                key: "wallet",
+                label: "Joyory Wallet"
+            });
+
+            refundInfo.availableMethods = methods;
+
+            // If user already selected refund method
+            if (order.orderRefund?.method) {
+                refundInfo.selectedMethod = order.orderRefund.method;
+                refundInfo.status = order.orderRefund.status;
+
+                refundInfo.selectedMethodLabel =
+                    order.orderRefund.method === "razorpay"
+                        ? "Original Payment Method"
+                        : "Joyory Wallet";
+            }
+        }
 
         // 📋 Order summary
         const orderSummary = {
@@ -3527,6 +3580,8 @@ export const getOrderSuccessDetails = async (req, res) => {
                 variant: item.variant,
             })),
 
+            refund: refundInfo,
+
             // 📌 Next steps
             nextSteps: getNextSteps(order),
 
@@ -3537,6 +3592,43 @@ export const getOrderSuccessDetails = async (req, res) => {
                 hours: "9 AM - 6 PM, Monday to Saturday",
             },
         };
+
+
+
+        // Only paid orders can have refund
+        if (order.paid && order.paymentStatus === "success") {
+            refundInfo.applicable = true;
+
+            // Available methods depend on how user paid
+            const methods = [];
+
+            // Razorpay refund only if payment was online
+            if (order.paymentMethod !== "COD") {
+                methods.push({
+                    key: "razorpay",
+                    label: "Original Payment Method"
+                });
+            }
+
+            // Wallet refund always allowed
+            methods.push({
+                key: "wallet",
+                label: "Joyory Wallet"
+            });
+
+            refundInfo.availableMethods = methods;
+
+            // If user already selected refund method
+            if (order.orderRefund?.method) {
+                refundInfo.selectedMethod = order.orderRefund.method;
+                refundInfo.status = order.orderRefund.status;
+
+                refundInfo.selectedMethodLabel =
+                    order.orderRefund.method === "razorpay"
+                        ? "Original Payment Method"
+                        : "Joyory Wallet";
+            }
+        }
 
         return res.status(200).json({
             success: true,
