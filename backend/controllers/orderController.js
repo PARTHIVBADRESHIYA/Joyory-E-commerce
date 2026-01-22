@@ -1558,47 +1558,53 @@ export const adminRejectRefund = async (req, res) => {
         }
 
         const refund = order.orderRefund;
-        if (!refund || refund.status === "completed") {
+
+        if (!refund || !["requested", "pending"].includes(refund.status)) {
             return res.status(400).json({
                 success: false,
-                message: "Refund already completed or invalid"
+                message: "Refund cannot be rejected in its current state"
             });
         }
 
-        refund.status = "rejected";
-        refund.rejectedAt = new Date();
-        refund.rejectionReason = rejectionReason || "Rejected by admin";
+        // ❌ Mark refund as permanently failed
+        refund.status = "failed";
+        refund.failureReason = rejectionReason || "Rejected by admin";
+        refund.lockedAt = null;
+        refund.nextRetryAt = null;
 
         refund.audit_trail.push({
-            status: "rejected",
+            status: "failed",
             action: "admin_rejected_refund",
             performedBy: adminId,
             performedByModel: "Admin",
-            notes: refund.rejectionReason
+            notes: refund.failureReason
         });
 
-        order.paymentStatus = "refund_failed";
+        order.paymentStatus = "failed";
+
         await order.save();
 
+        // 📧 Notify User
         await sendEmail(
             order.user.email,
             "❌ Refund Request Rejected",
             `
             <p>Hi ${order.user.name},</p>
-            <p>Your refund request for Order <strong>#${order._id}</strong> was rejected.</p>
-            <p><strong>Reason:</strong> ${refund.rejectionReason}</p>
+            <p>Your refund request for Order <strong>#${order.orderNumber || order._id}</strong> has been rejected.</p>
+            <p><strong>Reason:</strong> ${refund.failureReason}</p>
+            <p>If you believe this is incorrect, please contact support.</p>
             <p>Regards,<br/>Team Joyory Beauty</p>
             `
         );
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
-            message: "Refund rejected successfully."
+            message: "Refund rejected and marked as failed successfully."
         });
 
     } catch (err) {
         console.error("adminRejectRefund error:", err);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "Refund rejection failed"
         });
@@ -1607,65 +1613,79 @@ export const adminRejectRefund = async (req, res) => {
 
 export const getAllRefundRequests = async (req, res) => {
     try {
-        const { fromDate, toDate } = req.query;
-        const matchQuery = { "refund.status": { $exists: true } };
+        const { fromDate, toDate, status } = req.query;
 
-        // ✅ Optional date filter
+        const matchQuery = {
+            "orderRefund.status": { $exists: true }
+        };
+
         if (fromDate || toDate) {
             matchQuery.createdAt = {};
             if (fromDate) matchQuery.createdAt.$gte = new Date(fromDate);
             if (toDate) matchQuery.createdAt.$lte = new Date(toDate);
         }
 
-        // ✅ Fetch all refund orders
+        // 🔎 Status filter
+        if (status) {
+            matchQuery["orderRefund.status"] = status;
+        }
+
+        // 📦 Fetch all refund orders
         const refunds = await Order.find(matchQuery)
             .populate("user", "name email phone")
-            .populate("refund.refundAudit.changedBy", "name email")
-            .select("orderId user amount refund cancellation orderStatus paymentStatus createdAt")
+            .select("orderNumber user amount orderRefund orderStatus paymentStatus createdAt")
             .sort({ createdAt: -1 });
 
-        // ✅ Aggregate to get counts & totals for all statuses
+        // 📊 Refund Statistics
         const refundStats = await Order.aggregate([
             { $match: matchQuery },
             {
                 $group: {
-                    _id: "$refund.status",
+                    _id: "$orderRefund.status",
                     count: { $sum: 1 },
-                    totalAmount: { $sum: "$amount" },
-                },
-            },
+                    totalAmount: { $sum: "$orderRefund.amount" }
+                }
+            }
         ]);
 
-        // ✅ Cancelled order count
-        const cancelledOrders = await Order.countDocuments({ orderStatus: "Cancelled" });
+        // Helper
+        const getStat = (status) =>
+            refundStats.find(s => s._id === status) || { count: 0, totalAmount: 0 };
 
-        // ✅ Extract data for approved and rejected refunds
-        const approved = refundStats.find(s => s._id === "approved") || { count: 0, totalAmount: 0 };
-        const rejected = refundStats.find(s => s._id === "rejected") || { count: 0, totalAmount: 0 };
+        const completed = getStat("completed");
+        const failed = getStat("failed");
+        const processing = getStat("processing");
+        const pending = getStat("pending");
+        const retrying = getStat("retrying");
 
-        // ✅ Total refund requests (all statuses)
         const totalRefundRequests = refundStats.reduce((sum, s) => sum + s.count, 0);
 
-        // ✅ Final response
-        res.status(200).json({
+        const cancelledOrders = await Order.countDocuments({ orderStatus: "Cancelled" });
+
+        return res.status(200).json({
             success: true,
             message: "Refund summary fetched successfully",
             summary: {
-                totalRefundRequests,               // total refunds overall
-                approvedRefundCount: approved.count,   // ✅ approved count
-                totalApprovedAmount: approved.totalAmount, // ✅ approved amount
-                rejectedRefundCount: rejected.count, // ✅ rejected count
-                cancelledOrders,                   // ✅ cancelled orders count
+                totalRefundRequests,
+                completedRefunds: completed.count,
+                completedAmount: completed.totalAmount,
+
+                failedRefunds: failed.count,
+                processingRefunds: processing.count,
+                pendingRefunds: pending.count,
+                retryingRefunds: retrying.count,
+
+                cancelledOrders
             },
             count: refunds.length,
-            refunds,
+            refunds
         });
 
     } catch (err) {
         console.error("getAllRefundRequests error:", err);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
-            message: "Failed to fetch refund summary",
+            message: "Failed to fetch refund summary"
         });
     }
 };
