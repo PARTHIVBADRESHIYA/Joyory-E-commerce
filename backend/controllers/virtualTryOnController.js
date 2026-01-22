@@ -28,7 +28,6 @@ export const updateProductVTO = async (req, res) => {
     }
 };
 
-
 export const getAllVTOProducts = async (req, res) => {
     try {
         const products = await Product.find({ supportsVTO: true })
@@ -39,103 +38,6 @@ export const getAllVTOProducts = async (req, res) => {
         res.status(500).json({ message: "Error fetching VTO products", error: error.message });
     }
 };
-
-
-
-// export const getAllVTOEnabledProducts = async (req, res) => {
-//     try {
-//         const redisKey = `vtoProducts:${JSON.stringify(req.query)}`;
-//         const cached = await redis.get(redisKey);
-
-//         if (cached) {
-//             return res.status(200).json(JSON.parse(cached));
-//         }
-
-//         // 🔹 Pagination + Sorting
-//         let { page = 1, limit = 12, sort = "recent", ...queryFilters } = req.query;
-//         page = Number(page) || 1;
-//         limit = Math.min(Number(limit) || 12, 50);
-
-//         // Base VTO filter
-//         const finalFilter = {
-//             supportsVTO: true,
-//             vtoType: { $ne: null },
-//             isPublished: true,
-//         };
-
-//         // You can extend filters same as getAllProducts
-//         // Prevent dynamic filters from overriding VTO logic
-//         // Prevent dynamic filters from overriding VTO logic
-//         const dynamic = normalizeFilters(queryFilters);
-
-//         for (const key in dynamic) {
-//             if (
-//                 ["supportsVTO", "vtoType", "isPublished"].includes(key) ||
-//                 dynamic[key] === undefined ||
-//                 dynamic[key] === null ||
-//                 dynamic[key] === "" ||
-//                 (Array.isArray(dynamic[key]) && dynamic[key].length === 0)
-//             ) {
-//                 continue;
-//             }
-
-//             finalFilter[key] = dynamic[key];
-//         }
-
-
-//         const sortOptions = {
-//             recent: { createdAt: -1 },
-//             priceLowToHigh: { minPrice: 1 },
-//             priceHighToLow: { minPrice: -1 },
-//             rating: { avgRating: -1 },
-//             discount: { discountPercent: -1 },
-//         };
-
-//         const total = await Product.countDocuments(finalFilter);
-
-//         const products = await Product.find(finalFilter)
-//             .populate("brand", "name slug logo isActive")
-//             .populate("category", "name slug")
-//             .populate("skinTypes", "name slug")
-//             .populate("formulation", "name slug")
-//             .sort(sortOptions[sort] || { createdAt: -1 })
-//             .skip((page - 1) * limit)
-//             .limit(limit)
-//             .lean();
-
-//         const now = new Date();
-//         const promotions = await Promotion.find({
-//             status: "active",
-//             startDate: { $lte: now },
-//             endDate: { $gte: now }
-//         }).lean();
-
-//         const enriched = await enrichProductsUnified(products, promotions);
-
-//         const response = {
-//             products: enriched,
-//             pagination: {
-//                 page,
-//                 limit,
-//                 total,
-//                 totalPages: Math.ceil(total / limit),
-//                 hasMore: page < Math.ceil(total / limit)
-//             }
-//         };
-
-//         await redis.set(redisKey, JSON.stringify(response), "EX", 60);
-
-//         return res.status(200).json(response);
-
-//     } catch (err) {
-//         console.error("❌ getAllVTOEnabledProducts error:", err);
-//         return res.status(500).json({
-//             message: "Failed to fetch VTO enabled products.",
-//             error: err.message
-//         });
-//     }
-// };
-
 
 export const getAllVTOEnabledProducts = async (req, res) => {
     try {

@@ -985,6 +985,7 @@ export const getShipmentDetails = async (req, res) => {
       "shipments._id": shipment_id
     })
       .populate("shipments.products.productId")
+      .populate("invoice")   // ✅ ADD THIS
       .lean();
 
     if (!order) {
@@ -1135,6 +1136,16 @@ export const getShipmentDetails = async (req, res) => {
       paymentMethod: order.paymentMethod || null,
 
       trackingTimeline,
+
+      // ✅ ADD INVOICE DETAILS HERE
+      invoice: order.invoice
+        ? {
+          invoiceId: order.invoice._id,
+          invoiceNumber: order.invoice.invoiceNumber || null,
+          invoiceUrl: order.invoice.invoiceUrl || null,
+          invoiceDate: order.invoice.createdAt || null
+        }
+        : null,
 
       orderInfo: {
         _id: order._id,              // ✅ ADD THIS
