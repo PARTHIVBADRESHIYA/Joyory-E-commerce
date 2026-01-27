@@ -103,6 +103,73 @@ export const createBrand = async (req, res) => {
     }
 };
 
+// export const updateBrand = async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const { name, description, isActive, warehouses, primaryWarehouse } = req.body;
+
+//         const update = {};
+
+//         if (name) {
+//             const slug = toSlug(name);
+//             update.name = name;
+//             update.slug = slug;
+//         }
+
+//         if (description !== undefined) update.description = description;
+//         if (isActive !== undefined) update.isActive = isActive;
+
+//         // Handle warehouses update
+//         if (warehouses) {
+//             let parsedWarehouses = warehouses; // ← no JSON.parse()
+
+//             // Ensure array
+//             if (!Array.isArray(parsedWarehouses)) {
+//                 return res.status(400).json({
+//                     message: "warehouses must be an array"
+//                 });
+//             }
+
+//             update.warehouses = parsedWarehouses.map((w, index) => ({
+//                 _id: w._id || undefined,
+//                 label: w.label || "",
+//                 code: w.code || `${toSlug(name || brand.name)}_WH_${index + 1}`,
+//                 address: w.address || "",
+//                 isActive: w.isActive !== undefined ? w.isActive : true
+//             }));
+//         }
+
+//         // Set primary warehouse
+//         if (primaryWarehouse) {
+//             update.primaryWarehouse = primaryWarehouse;
+//         }
+
+//         // ---------- CLOUDINARY UPLOADS ----------
+//         if (req.files?.logo?.[0]?.buffer) {
+//             const result = await uploadToCloudinary(
+//                 req.files.logo[0].buffer,
+//                 "brands/logo"
+//             );
+//             update.logo = typeof result === "string" ? result : result.secure_url;
+//         }
+
+//         if (req.files?.banner?.[0]?.buffer) {
+//             const result = await uploadToCloudinary(
+//                 req.files.banner[0].buffer,
+//                 "brands/banner"
+//             );
+//             update.banner = typeof result === "string" ? result : result.secure_url;
+//         }
+
+//         const brand = await Brand.findByIdAndUpdate(id, update, { new: true });
+//         if (!brand)
+//             return res.status(404).json({ message: "Brand not found" });
+
+//         res.json({ message: "Brand updated", brand });
+//     } catch (err) {
+//         res.status(500).json({ message: "Failed to update brand", error: err.message });
+//     }
+// };
 export const updateBrand = async (req, res) => {
     try {
         const { id } = req.params;
@@ -119,11 +186,20 @@ export const updateBrand = async (req, res) => {
         if (description !== undefined) update.description = description;
         if (isActive !== undefined) update.isActive = isActive;
 
-        // Handle warehouses update
         if (warehouses) {
-            let parsedWarehouses = warehouses; // ← no JSON.parse()
+            let parsedWarehouses = warehouses;
 
-            // Ensure array
+            // 🔥 multipart/form-data always sends strings
+            if (typeof warehouses === "string") {
+                try {
+                    parsedWarehouses = JSON.parse(warehouses);
+                } catch (err) {
+                    return res.status(400).json({
+                        message: "Invalid warehouses JSON"
+                    });
+                }
+            }
+
             if (!Array.isArray(parsedWarehouses)) {
                 return res.status(400).json({
                     message: "warehouses must be an array"
@@ -132,12 +208,13 @@ export const updateBrand = async (req, res) => {
 
             update.warehouses = parsedWarehouses.map((w, index) => ({
                 _id: w._id || undefined,
-                label: w.label || "",
+                label: w.name || w.label || "",
                 code: w.code || `${toSlug(name || brand.name)}_WH_${index + 1}`,
                 address: w.address || "",
                 isActive: w.isActive !== undefined ? w.isActive : true
             }));
         }
+
 
         // Set primary warehouse
         if (primaryWarehouse) {
@@ -170,7 +247,6 @@ export const updateBrand = async (req, res) => {
         res.status(500).json({ message: "Failed to update brand", error: err.message });
     }
 };
-
 export const deleteBrand = async (req, res) => {
     try {
         const { id } = req.params;

@@ -81,7 +81,7 @@ const productSchema = new mongoose.Schema({
     supportsVTO: { type: Boolean, default: false },
     vtoType: {
         type: String,
-        enum: ["lips", "face", null],
+        enum: ["lips", "eyes", null],
         default: null
     },
     isPublished: { type: Boolean, default: true }
