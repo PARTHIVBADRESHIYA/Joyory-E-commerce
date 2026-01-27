@@ -615,7 +615,6 @@ export const getPromotionProducts = async (req, res) => {
         // ----------------------------------------------
         // 🔹 Count & Fetch
         // ----------------------------------------------
-        const total = await Product.countDocuments(finalFilter);
 
         const rawProducts = await Product.find(finalFilter)
             .populate("brand", "name slug logo isActive")
@@ -655,7 +654,15 @@ export const getPromotionProducts = async (req, res) => {
             ...activePromotions
         ]);
 
+        const countKey = `cat:products:total:${idOrSlug}:${JSON.stringify(finalFilter)}`;
+        let totalProducts = await redis.get(countKey);
 
+        if (!totalProducts) {
+            totalProducts = await Product.countDocuments(finalFilter);
+            await redis.set(countKey, totalProducts, "EX", 300);
+        }
+
+        totalProducts = Number(totalProducts);
         // attach relations
         const productsWithRelations = enrichedProducts.map((p, i) => ({
             ...p,
@@ -698,6 +705,9 @@ export const getPromotionProducts = async (req, res) => {
         }
 
         const payload = {
+            titleMessage: totalProducts > 0
+                ? `${totalProducts} products found`
+                : "No products found",
             promoMeta: {
                 ...promo,
                 slug: promo.slug || null

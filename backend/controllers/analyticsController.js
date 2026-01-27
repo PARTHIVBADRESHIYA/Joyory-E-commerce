@@ -860,27 +860,114 @@ export const getAnalyticsDashboard = async (req, res) => {
         const draftOrdersCount = statsAgg.draftOrders[0]?.count || 0;
 
         // Calculate refund losses from returns
+        // const refundLossAgg = await Order.aggregate([
+        //     {
+        //         $match: {
+        //             createdAt: { $gte: currentStartMs, $lte: currentEndMs },
+        //             "shipments.returns.refund.status": "completed"
+        //         }
+        //     },
+        //     { $unwind: "$shipments" },
+        //     { $unwind: "$shipments.returns" },
+        //     {
+        //         $match: { "shipments.returns.refund.status": "completed" }
+        //     },
+        //     {
+        //         $group: {
+        //             _id: null,
+        //             totalRefundLoss: { $sum: "$shipments.returns.refund.amount" }
+        //         }
+        //     }
+        // ]);
+
         const refundLossAgg = await Order.aggregate([
             {
                 $match: {
                     createdAt: { $gte: currentStartMs, $lte: currentEndMs },
-                    "shipments.returns.refund.status": "completed"
+                    $or: [
+                        { "shipments.returns.refund.status": "completed" },
+                        { "orderRefund.status": "completed" }
+                    ]
                 }
             },
-            { $unwind: "$shipments" },
-            { $unwind: "$shipments.returns" },
             {
-                $match: { "shipments.returns.refund.status": "completed" }
+                $project: {
+                    refundAmount: {
+                        $cond: [
+                            { $eq: ["$orderRefund.status", "completed"] },
+                            "$orderRefund.amount",
+                            {
+                                $sum: {
+                                    $map: {
+                                        input: "$shipments",
+                                        as: "s",
+                                        in: {
+                                            $sum: {
+                                                $map: {
+                                                    input: "$$s.returns",
+                                                    as: "r",
+                                                    in: {
+                                                        $cond: [
+                                                            { $eq: ["$$r.refund.status", "completed"] },
+                                                            "$$r.refund.amount",
+                                                            0
+                                                        ]
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                }
             },
             {
                 $group: {
                     _id: null,
-                    totalRefundLoss: { $sum: "$shipments.returns.refund.amount" }
+                    totalRefundLoss: { $sum: "$refundAmount" }
                 }
             }
         ]);
 
         const totalRefundLoss = refundLossAgg[0]?.totalRefundLoss || 0;
+
+        // ================= REFUNDED ORDERS COUNT (CURRENT PERIOD) =================
+        const refundedOrdersAgg = await Order.aggregate([
+            {
+                $match: {
+                    createdAt: { $gte: currentStartMs, $lte: currentEndMs },
+                    $or: [
+                        { "shipments.returns.refund.status": "completed" },
+                        { "orderRefund.status": "completed" }
+                    ]
+                }
+            },
+            { $group: { _id: "$_id" } }, // one order counted once
+            { $count: "count" }
+        ]);
+
+        const refundedOrdersCount = refundedOrdersAgg[0]?.count || 0;
+
+
+        // ================= REFUNDED ORDERS COUNT (PREVIOUS PERIOD) =================
+        const refundedOrdersPrevAgg = await Order.aggregate([
+            {
+                $match: {
+                    createdAt: { $gte: prevStartMs, $lte: prevEndMs },
+                    $or: [
+                        { "shipments.returns.refund.status": "completed" },
+                        { "orderRefund.status": "completed" }
+                    ]
+                }
+            },
+            { $group: { _id: "$_id" } },
+            { $count: "count" }
+        ]);
+
+        const refundedOrdersPrevCount = refundedOrdersPrevAgg[0]?.count || 0;
+
 
         // Calculate paid cancellation losses
         const cancellationLossAgg = await Order.aggregate([
@@ -1345,7 +1432,7 @@ export const getAnalyticsDashboard = async (req, res) => {
                     completed: calcGrowth(current.completedOrders || 0, previous.completedOrders || 0),
                     active: calcGrowth(current.processingOrders || 0, 0), // Using processing as active
                     cancelled: calcGrowth(current.cancelledOrders || 0, previous.cancelledOrders || 0),
-                    refunded: { value: 0, changePercent: 0, trend: "neutral" }, // Based on refund status
+                    refunded: calcGrowth(refundedOrdersCount, refundedOrdersPrevCount),
                     draft: { value: draftOrdersCount },
                     shipped: { value: current.shippedOrders || 0 },
                     processing: { value: current.processingOrders || 0 },

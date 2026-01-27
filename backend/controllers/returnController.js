@@ -680,17 +680,30 @@ export const approveShipmentReturn = async (req, res) => {
             });
         }
 
-        // 4. WAREHOUSE ADDRESS
-        const warehouseAddress = {
-            name: "Joyory_Warehouse",
-            address: "504-A, Synergy Tower, Corporate Rd, Next to Vodafone House, Near L&T Construction, Prahlad Nagar, Ahmedabad, Gujarat 380015",
-            city: "Ahmedabad",
-            state: "Gujarat",
-            pincode: "380015",
-            phone: "7990032368",
-            email: process.env.WAREHOUSE_EMAIL || "joyory2025@gmail.com",
-            country: "India"
-        };
+        // // 4. WAREHOUSE ADDRESS
+        // const warehouseAddress = {
+        //     name: "Joyory_Warehouse",
+        //     address: "504-A, Synergy Tower, Corporate Rd, Next to Vodafone House, Near L&T Construction, Prahlad Nagar, Ahmedabad, Gujarat 380015",
+        //     city: "Ahmedabad",
+        //     state: "Gujarat",
+        //     pincode: "380015",
+        //     phone: "7990032368",
+        //     email: process.env.WAREHOUSE_EMAIL || "joyory2025@gmail.com",
+        //     country: "India"
+        // };
+
+        const warehouseAddress = JSON.parse(process.env.WAREHOUSE_JSON);
+
+        if (
+            !warehouseAddress?.name ||
+            !warehouseAddress?.address ||
+            !warehouseAddress?.city ||
+            !warehouseAddress?.state ||
+            !warehouseAddress?.pincode ||
+            !warehouseAddress?.phone
+        ) {
+            throw new Error("WAREHOUSE_JSON is missing required fields");
+        }
 
         // 5. CREATE DELHIVERY REVERSE SHIPMENT
         let reverseShipment;
@@ -700,7 +713,7 @@ export const approveShipmentReturn = async (req, res) => {
                 shipment,
                 returnItems: returnReq.items,
                 pickupAddress: pickupAddress, // Use the normalized address
-                warehouseAddress
+                warehouseAddress: JSON.parse(process.env.WAREHOUSE_JSON),
             });
         } catch (err) {
             console.error("🔴 Delhivery API Error:", err.message);
@@ -768,7 +781,7 @@ export const approveShipmentReturn = async (req, res) => {
         });
     }
 };
-    
+
 export const markShipmentReturnReceived = async (req, res) => {
     try {
         const { shipment_id, returnId } = req.params;

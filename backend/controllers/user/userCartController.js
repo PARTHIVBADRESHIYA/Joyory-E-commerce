@@ -250,7 +250,7 @@ export const addToCart = async (req, res) => {
 // Helper to add/update cart items
 async function handleCart(cart, product, variants, qty) {
   if (!Array.isArray(cart)) cart = [];
-  
+
   // 🧩 CASE 1 — Non-variant product
   if (variants.length === 0) {
     const stock = Number(product.quantity ?? 0);
@@ -1486,7 +1486,7 @@ async function getCachedProduct(productId) {
   const redis = getRedis();   // 🔥 REQUIRED
 
   const key = `prod:${String(productId).trim()}`;
-  try { 
+  try {
     const cached = await redis.get(key);
     if (cached) return JSON.parse(cached);
   } catch (e) {
@@ -1870,6 +1870,7 @@ export const getCartSummary = async (req, res) => {
           applicableCoupons = [];
           inapplicableCoupons = Array.isArray(allDiscountDocs)
             ? allDiscountDocs.map(d => ({
+              discountId: String(d._id),
               code: d.code,
               label: d.name,
               type: d.type,

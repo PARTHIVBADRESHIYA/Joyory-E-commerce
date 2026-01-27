@@ -558,7 +558,6 @@ export const getDiscountProducts = async (req, res) => {
         // -------------------------------
         // 7️⃣ COUNT
         // -------------------------------
-        const totalCount = await Product.countDocuments(finalFilter);
 
         // -------------------------------
         // 8️⃣ FETCH PRODUCTS
@@ -606,6 +605,15 @@ export const getDiscountProducts = async (req, res) => {
             discountOverride
         );
 
+        const countKey = `cat:products:total:${discountId}:${JSON.stringify(finalFilter)}`;
+        let totalProducts = await redis.get(countKey);
+
+        if (!totalProducts) {
+            totalProducts = await Product.countDocuments(finalFilter);
+            await redis.set(countKey, totalProducts, "EX", 300);
+        }
+
+        totalProducts = Number(totalProducts);
 
         const nextCursor =
             products.length > 0 ? products[products.length - 1][field] : null;
@@ -626,8 +634,10 @@ export const getDiscountProducts = async (req, res) => {
         const response = {
             success: true,
             discountId,
+            titleMessage: totalProducts > 0
+                ? `${totalProducts} products found`
+                : "No products found",
             products: enriched,
-            totalCount,
             pagination: {
                 hasMore,
                 nextCursor

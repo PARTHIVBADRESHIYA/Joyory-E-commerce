@@ -116,22 +116,6 @@ export const getBrandCategoryProducts = async (req, res) => {
             .limit(limit + 1)
             .lean();
 
-
-        if (!products.length) {
-            const response = {
-                brand,
-                category,
-                products: [],
-                pagination: { page, limit, total: 0, totalPages: 0, hasMore: false },
-                message: "No products available for this brand and category at the moment."
-            };
-
-            // 🔥 SAVE empty response to cache also
-            await redis.set(redisKey, JSON.stringify(response), "EX", 60);
-
-            return res.status(200).json(response);
-        }
-
         const now = new Date();
         const promotions = await Promotion.find({
             status: "active",
@@ -144,6 +128,17 @@ export const getBrandCategoryProducts = async (req, res) => {
 
         const enrichedProducts = await enrichProductsUnified(products, promotions);
 
+        const countKey = `cat:products:total:${brandSlug}:${JSON.stringify(finalFilter)}`;
+        let totalProducts = await redis.get(countKey);
+
+        if (!totalProducts) {
+            totalProducts = await Product.countDocuments(finalFilter);
+            await redis.set(countKey, totalProducts, "EX", 300);
+        }
+
+        totalProducts = Number(totalProducts);
+
+
         const nextCursor =
             products.length > 0 ? products[products.length - 1][field] : null;
 
@@ -155,6 +150,7 @@ export const getBrandCategoryProducts = async (req, res) => {
             message = "No products found for this brand and category.";
 
         const brandData = {
+
             _id: brand._id,
             name: brand.name,
             slug: brand.slug,
@@ -163,6 +159,9 @@ export const getBrandCategoryProducts = async (req, res) => {
         };
 
         const response = {
+            titleMessage: totalProducts > 0
+                ? `${totalProducts} products found`
+                : "No products found",
             brand: brandData,
             category,
             products: enrichedProducts,
@@ -266,6 +265,17 @@ export const getBrandLanding = async (req, res) => {
             .select("name slug")
             .lean();
 
+
+        const countKey = `cat:products:total:${brandSlug}:${JSON.stringify(finalFilter)}`;
+        let totalProducts = await redis.get(countKey);
+
+        if (!totalProducts) {
+            totalProducts = await Product.countDocuments(finalFilter);
+            await redis.set(countKey, totalProducts, "EX", 300);
+        }
+
+        totalProducts = Number(totalProducts);
+
         const nextCursor =
             products.length > 0 ? products[products.length - 1][field] : null;
 
@@ -278,6 +288,9 @@ export const getBrandLanding = async (req, res) => {
 
 
         const response = {
+            titleMessage: totalProducts > 0
+                ? `${totalProducts} products found`
+                : "No products found",
             brand: { _id: brand._id, name: brand.name, logo: brand.logo, banner: brand.banner },
             products: enrichedProducts,
             categories,
