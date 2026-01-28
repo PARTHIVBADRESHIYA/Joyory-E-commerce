@@ -1,17 +1,30 @@
-// import mongoose from 'mongoose';
-// const connectDB = async () => {
-//     try {
-//         const conn = await mongoose.connect(process.env.MONGO_URI, {
-//         });
-//         console.log(`MongoDB Connected`);
 
+
+
+// import mongoose from "mongoose";
+
+// let isConnected = false;
+
+// const connectDB = async () => {
+//     if (isConnected) return;
+
+//     try {
 //         mongoose.set("strictQuery", false);
 
+//         await mongoose.connect(process.env.MONGO_URI, {
+//             maxPoolSize: 10,
+//             minPoolSize: 3,         // 🔥 Keep 3 alive (enough for warmup)
+//             serverSelectionTimeoutMS: 30000,
+//         });
+
+//         isConnected = true;
+//         console.log("✅ MongoDB Connected");
 //     } catch (error) {
-//         console.error(`Error: ${error.message}`);
-//         process.exit(1); // Exit on failure
+//         console.error("❌ Mongo error:", error.message);
+//         process.exit(1);
 //     }
 // };
+
 
 // export default connectDB;
 
@@ -28,8 +41,10 @@ const connectDB = async () => {
         mongoose.set("strictQuery", false);
 
         await mongoose.connect(process.env.MONGO_URI, {
-            maxPoolSize: 10,
-            serverSelectionTimeoutMS: 30000,
+            maxPoolSize: 20,        // 🔥 Increased from 10
+            minPoolSize: 5,         // 🔥 NEW - keeps 5 connections alive
+            serverSelectionTimeoutMS: 15000,  // 🔥 Reduced from 30000 (faster failure detection)
+            socketTimeoutMS: 60000,  // 🔥 NEW - prevents hanging connections
         });
 
         isConnected = true;
@@ -39,6 +54,5 @@ const connectDB = async () => {
         process.exit(1);
     }
 };
-
 
 export default connectDB;

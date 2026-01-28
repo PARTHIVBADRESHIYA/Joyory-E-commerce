@@ -674,8 +674,23 @@ dayjs.extend(isBetween);
 
 
 
+const roundNumbers = (value, decimals = 2) => {
+    if (typeof value === "number") {
+        return Number(value.toFixed(decimals));
+    }
 
+    if (Array.isArray(value)) {
+        return value.map(v => roundNumbers(v, decimals));
+    }
 
+    if (value && typeof value === "object") {
+        return Object.fromEntries(
+            Object.entries(value).map(([k, v]) => [k, roundNumbers(v, decimals)])
+        );
+    }
+
+    return value;
+};
 
 const calcGrowth = (current, previous) => {
     if (previous === 0) {
@@ -1270,7 +1285,7 @@ export const getAnalyticsDashboard = async (req, res) => {
                             $project: {
                                 _id: 0,
                                 category: "$category.name",
-                                categoryId: "$category._id",
+                                categoryId: { $toString: "$category._id" },
                                 sales: "$qtySold",
                                 revenue: 1
                             }
@@ -1298,7 +1313,7 @@ export const getAnalyticsDashboard = async (req, res) => {
                             $project: {
                                 _id: 0,
                                 brand: "$brand.name",
-                                brandId: "$brand._id",
+                                brandId: { $toString: "$brand._id" },
                                 sales: "$qtySold",
                                 revenue: 1
                             }
@@ -1365,7 +1380,7 @@ export const getAnalyticsDashboard = async (req, res) => {
             {
                 $project: {
                     _id: 0,
-                    productId: "$_id",
+                    productId: {$toString: "$_id"},
                     productName: "$name",
                     variantId: "$variants.sku",
                     shadeName: "$variants.shadeName",
@@ -1424,7 +1439,8 @@ export const getAnalyticsDashboard = async (req, res) => {
             shipmentStatus: o.shipments?.[0]?.status || "Not Shipped"
         }));
 
-        res.json({
+        const response = {
+
             success: true,
             summary: {
                 orders: {
@@ -1495,7 +1511,9 @@ export const getAnalyticsDashboard = async (req, res) => {
                 categoryTrends,
                 stockAlerts
             }
-        });
+        };
+
+        res.json(roundNumbers(response, 2));
 
     } catch (err) {
         console.error("Dashboard error:", err);
