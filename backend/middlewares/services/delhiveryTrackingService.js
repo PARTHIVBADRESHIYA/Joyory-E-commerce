@@ -783,18 +783,18 @@ export const scanPendingRefunds = async () => {
 // };
 
 export const startDelhiveryCron = () => {
-    cron.schedule("*/2 * * * *", async () => {
+    cron.schedule("*/20 * * * *", async () => {
         console.log("🔄 Delhivery tracking sync running every 1 minutes");
         await syncDelhiveryShipments();
     });
 
-    cron.schedule("* * * * *", async () => {
+    cron.schedule("*/30 * * * *", async () => {
         console.log("🔁 Refund scan running (every 2 min)");
         await scanPendingRefunds();
     });
 
 
-    cron.schedule("*/5 * * * *", async () => {
+    cron.schedule("*/40 * * * *", async () => {
         console.log("🔁 Refund scan running (every 5 min)");
         await scanPendingOrderRefunds();
     });

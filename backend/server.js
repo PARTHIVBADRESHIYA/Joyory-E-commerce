@@ -499,54 +499,8 @@ import userGiftCardRoutes from "./routes/user/userGiftCardRoutes.js";
 import userWalletRoutes from "./routes/user/userWalletRoutes.js";
 import userAnalyticsRoutes from "./routes/user/userAnalyticsRoutes.js";
 import { getRedis } from "./middlewares/utils/redis.js";
-import Promotion from "./models/Promotion.js";
-import Category from "./models/Category.js";
 // ================= CONNECT DB =================
 connectDB();
-
-// 🔥 ADD THIS WARMUP FUNCTION
-async function warmUpServer() {
-    try {
-        console.log("🔥 Warming up server...");
-
-        const redis = getRedis();
-
-        // 1. Warm Redis
-        await redis.ping();
-        console.log("✅ Redis connection warmed");
-
-        // 2. Wait for Mongo to be fully connected
-        if (mongoose.connection.readyState !== 1) {
-            console.log("⏳ Waiting for MongoDB connection...");
-            await new Promise((resolve) => {
-                mongoose.connection.once("open", resolve);
-            });
-        }
-
-        await mongoose.connection.db.admin().ping();
-        console.log("✅ MongoDB connection warmed");
-
-        // 3. Pre-cache active promotions
-        const promos = await Promotion.find({
-            status: "active",
-            startDate: { $lte: new Date() },
-            endDate: { $gte: new Date() }
-        }).lean();
-
-        await redis.set("active_promotions", JSON.stringify(promos), "EX", 120);
-        console.log(`✅ Cached ${promos.length} active promotions`);
-
-        // 4. Warm category model
-        await Category.findOne().lean();
-        console.log("✅ Category model warmed");
-
-        console.log("🚀 Server fully warmed and ready!");
-    } catch (err) {
-        console.error("⚠️ Warmup failed (non-critical):", err.message);
-    }
-}
-
-
 
 // 🔥 START REFUND WORKER ONLY AFTER DB IS READY
 import "./middlewares/services/refundWorker.js";
@@ -809,10 +763,4 @@ process.on("uncaughtException", (err) => console.error("🚨 Uncaught Exception:
 
 // ================= START SERVER =================
 const PORT = process.env.PORT || 5000;
-// server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
-
-// 🔥 MODIFY YOUR SERVER START
-server.listen(PORT, async () => {
-    console.log(`✅ Server running on port ${PORT}`);
-    await warmUpServer(); // 👈 Run warmup after server starts
-});
+server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));

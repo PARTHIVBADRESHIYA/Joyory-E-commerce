@@ -154,7 +154,7 @@ async function processPayouts() {
 }
 
 // --- Schedule to run every minute ---
-cron.schedule("5 * * * *", () => {
+cron.schedule("0 0 * * *", () => {
     processPayouts();
 });
 

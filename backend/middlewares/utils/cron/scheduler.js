@@ -1,7 +1,7 @@
 import cron from "node-cron";
 import Product from "../../../models/Product.js";
 
-cron.schedule("* * * * *", async () => {
+cron.schedule("*/10 * * * *", async () => {
     const now = new Date();
     // console.log("⏰ Cron job triggered at:", now.toISOString(), "| Local:", now.toLocaleString());
     try {
