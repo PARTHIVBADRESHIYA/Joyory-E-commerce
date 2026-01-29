@@ -577,6 +577,157 @@ export const adminConfirmOrder = async (req, res) => {
             location: "Delhivery"
         });
         await finalOrder.save();
+        // 📧 Email (non-blocking)
+        sendEmail(
+            finalOrder.user.email,
+            `Your Order #${finalOrder.customOrderId || finalOrder._id} is Confirmed 🚀`,
+            `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                max-width: 600px;
+                margin: 0 auto;
+                padding: 20px;
+            }
+            .header {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                padding: 30px;
+                text-align: center;
+                border-radius: 10px 10px 0 0;
+                color: white;
+            }
+            .header h1 {
+                margin: 0;
+                font-size: 28px;
+            }
+            .content {
+                background: #f9f9f9;
+                padding: 30px;
+                border-radius: 0 0 10px 10px;
+            }
+            .order-info {
+                background: white;
+                border-radius: 8px;
+                padding: 20px;
+                margin: 20px 0;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }
+            .order-info h3 {
+                color: #667eea;
+                margin-top: 0;
+            }
+            .status-badge {
+                display: inline-block;
+                background: #4CAF50;
+                color: white;
+                padding: 6px 15px;
+                border-radius: 20px;
+                font-weight: bold;
+                margin: 5px 0;
+            }
+            .footer {
+                text-align: center;
+                margin-top: 30px;
+                padding-top: 20px;
+                border-top: 1px solid #eee;
+                color: #666;
+                font-size: 14px;
+            }
+            .highlight {
+                color: #667eea;
+                font-weight: bold;
+            }
+            .emoji {
+                font-size: 20px;
+            }
+            .btn {
+                display: inline-block;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 12px 30px;
+                text-decoration: none;
+                border-radius: 5px;
+                margin: 15px 0;
+                font-weight: bold;
+            }
+            .product-list {
+                background: #fff;
+                border-radius: 8px;
+                padding: 15px;
+                margin: 15px 0;
+            }
+            .product-item {
+                padding: 10px;
+                border-bottom: 1px solid #eee;
+            }
+            .product-item:last-child {
+                border-bottom: none;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1><span class="emoji">🎉</span> Order Confirmed!</h1>
+            <p>Thank you for your purchase, ${finalOrder.shippingAddress.name.split(' ')[0]}!</p>
+        </div>
+        
+        <div class="content">
+            <p>Hi <span class="highlight">${finalOrder.shippingAddress.name}</span>,</p>
+            
+            <p>Great news! Your order has been confirmed and is now being prepared for shipment by our team.</p>
+            
+            <div class="order-info">
+                <h3><span class="emoji">📦</span> Order Details</h3>
+                <p><strong>Order ID:</strong> <span class="highlight">${finalOrder.customOrderId || finalOrder._id}</span></p>
+                <p><strong>Order Date:</strong> ${new Date(finalOrder.createdAt).toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                <p><strong>Total Amount:</strong> ₹${finalOrder.amount.toLocaleString('en-IN')}</p>
+                <p><strong>Payment Method:</strong> ${finalOrder.paymentMethod}</p>
+                <p><strong>Shipping Address:</strong><br>
+                ${finalOrder.shippingAddress.addressLine1}<br>
+                ${finalOrder.shippingAddress.city}, ${finalOrder.shippingAddress.state} - ${finalOrder.shippingAddress.pincode}
+                </p>
+            </div>
+            
+            <div class="order-info">
+                <h3><span class="emoji">🚚</span> Current Status</h3>
+                <div class="status-badge">Awaiting Pickup</div>
+                <p>Your order is being packed and will be handed over to our delivery partner soon.</p>
+                <p>We'll send you tracking details as soon as the courier picks up your package.</p>
+            </div>
+            
+            <div style="text-align: center; margin: 25px 0;">
+                <a href="${process.env.APP_URL || 'https://joyory.com/'}Myorders" class="btn">
+                    View Order Details
+                </a>
+            </div>
+            
+            <p><strong>📞 Need Help?</strong></p>
+            <p>If you have any questions about your order, contact our customer support:</p>
+            <ul>
+                <li>Email: hello@joyory.com</li>
+                <li>Phone: +91 9601177701 </li>
+                <li>Hours: Mon-Sat, 10AM - 7PM</li>
+            </ul>
+            
+            <div class="footer">
+                <p>Thank you for shopping with <span class="highlight">JOYORY</span>! 💖</p>
+                <p>We're excited to serve you!</p>
+                <p><small>This is an automated email, please do not reply directly.</small></p>
+            </div>
+        </div>
+    </body>
+    </html>
+    `
+        ).catch(err => {
+            console.warn("📧 Email send failed:", err.message);
+            // Optional: Log to monitoring service
+            // logToService("email_failed", { orderId: finalOrder._id, error: err.message });
+        });
 
         return res.json({
             success: true,
