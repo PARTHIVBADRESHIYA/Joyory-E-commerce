@@ -772,7 +772,7 @@ export const sendVerificationEmail = async (user, otp) => {
             <div class="otp-code">${otp}</div>
             
             <div class="note">
-                <strong>⚠️ Important:</strong> This OTP is valid for 10 minutes only.
+                <strong>⚠️ Important:</strong> This OTP is valid for 5 minutes only.
                 Do not share this code with anyone.
             </div>
             

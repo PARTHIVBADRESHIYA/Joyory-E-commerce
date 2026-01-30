@@ -103,6 +103,7 @@ export const createDelhiveryShipment = async ({
     };
 };
 
+
 // export const createDelhiveryReturnShipment = async ({
 //     order,
 //     returnItems,
@@ -110,10 +111,51 @@ export const createDelhiveryShipment = async ({
 //     warehouseAddress
 // }) => {
 
+//     // const payload = {
+//     //     shipments: [
+//     //         {
+//     //             // CUSTOMER (PICKUP POINT)
+//     //             name: pickupAddress.name,
+//     //             add: pickupAddress.address,
+//     //             city: pickupAddress.city,
+//     //             state: pickupAddress.state,
+//     //             pin: String(pickupAddress.pincode),
+//     //             phone: pickupAddress.phone,
+//     //             email: pickupAddress.email || "returns@customer.com",
+//     //             country: "India",
+
+//     //             order: `RET-${order.orderId}`,
+//     //             order_date: new Date().toISOString(),
+
+//     //             // 🔥 REVERSE IDENTIFIER
+//     //             is_reverse: true,
+//     //             payment_mode: "Pickup",
+//     //             cod_amount: 0,
+
+//     //             shipment_value: order.totalAmount || 100,
+//     //             total_amount: order.totalAmount || 100,
+
+//     //             quantity: returnItems.reduce((s, i) => s + i.quantity, 0),
+//     //             weight: 500,
+//     //             shipping_mode: "Surface",
+
+//     //             products_desc: "Customer Return",
+
+//     //             // RETURN DESTINATION (YOUR WAREHOUSE)
+//     //             return_name: warehouseAddress.name,
+//     //             return_add: warehouseAddress.address,
+//     //             return_city: warehouseAddress.city,
+//     //             return_state: warehouseAddress.state,
+//     //             return_pin: String(warehouseAddress.pincode),
+//     //             return_country: "India",
+//     //             return_phone: warehouseAddress.phone
+//     //         }
+//     //     ]
+//     // };
 //     const payload = {
 //         shipments: [
 //             {
-//                 // CUSTOMER (PICKUP POINT)
+//                 // 🔁 CUSTOMER = PICKUP POINT
 //                 name: pickupAddress.name,
 //                 add: pickupAddress.address,
 //                 city: pickupAddress.city,
@@ -126,7 +168,7 @@ export const createDelhiveryShipment = async ({
 //                 order: `RET-${order.orderId}`,
 //                 order_date: new Date().toISOString(),
 
-//                 // 🔥 REVERSE IDENTIFIER
+//                 // 🔥 REVERSE FLAGS
 //                 is_reverse: true,
 //                 payment_mode: "Pickup",
 //                 cod_amount: 0,
@@ -140,16 +182,21 @@ export const createDelhiveryShipment = async ({
 
 //                 products_desc: "Customer Return",
 
-//                 // RETURN DESTINATION (YOUR WAREHOUSE)
-//                 return_name: warehouseAddress.name,
-//                 return_add: warehouseAddress.address,
-//                 return_city: warehouseAddress.city,
-//                 return_state: warehouseAddress.state,
-//                 return_pin: String(warehouseAddress.pincode),
-//                 return_country: "India",
-//                 return_phone: warehouseAddress.phone
+//                 // 🔥 DELIVERY ADDRESS = WAREHOUSE
+//                 delivery_name: warehouseAddress.name,
+//                 delivery_add: warehouseAddress.address,
+//                 delivery_city: warehouseAddress.city,
+//                 delivery_state: warehouseAddress.state,
+//                 delivery_pin: String(warehouseAddress.pincode),
+//                 delivery_country: "India",
+//                 delivery_phone: warehouseAddress.phone
 //             }
-//         ]
+//         ],
+
+//         // 🔥 ABSOLUTELY REQUIRED
+//         pickup_location: {
+//             name: process.env.DELHIVERY_PICKUP_NAME
+//         }
 //     };
 
 //     const res = await axios.post(
@@ -166,83 +213,56 @@ export const createDelhiveryShipment = async ({
 //         }
 //     );
 
-//     const pkg = res.data?.packages?.[0];
+//     // const pkg = res.data?.packages?.[0];
 
-//     if (!pkg || pkg.status !== "Success" || !pkg.waybill) {
-//         throw new Error(`Reverse pickup failed: ${JSON.stringify(pkg)}`);
+//     // if (!pkg || pkg.status !== "Success" || !pkg.waybill) {
+//     //     throw new Error(`Reverse pickup failed: ${JSON.stringify(pkg)}`);
+//     // }
+
+//     const pkg = res.data?.packages?.[0] || res.data;
+
+//     if (!pkg?.waybill) {
+//         throw new Error(`Reverse pickup failed: ${JSON.stringify(res.data)}`);
+//     }
+
+//     // ✅ allow duplicate order id
+//     if (pkg.status === "Fail" && !pkg.remarks?.includes("Duplicate order id")) {
+//         throw new Error(`Reverse pickup failed: ${JSON.stringify(res.data)}`);
 //     }
 
 //     return {
 //         provider: "delhivery",
 //         waybill: pkg.waybill,
+//         delhivery_reverse_pickup_id: pkg.refnum,
+//         tracking_url: `https://www.delhivery.com/track/package/${pkg.waybill}`,
 //         status: "pickup_scheduled"
 //     };
+
 // };
+
 export const createDelhiveryReturnShipment = async ({
     order,
     returnItems,
     pickupAddress,
     warehouseAddress
 }) => {
-
-    // const payload = {
-    //     shipments: [
-    //         {
-    //             // CUSTOMER (PICKUP POINT)
-    //             name: pickupAddress.name,
-    //             add: pickupAddress.address,
-    //             city: pickupAddress.city,
-    //             state: pickupAddress.state,
-    //             pin: String(pickupAddress.pincode),
-    //             phone: pickupAddress.phone,
-    //             email: pickupAddress.email || "returns@customer.com",
-    //             country: "India",
-
-    //             order: `RET-${order.orderId}`,
-    //             order_date: new Date().toISOString(),
-
-    //             // 🔥 REVERSE IDENTIFIER
-    //             is_reverse: true,
-    //             payment_mode: "Pickup",
-    //             cod_amount: 0,
-
-    //             shipment_value: order.totalAmount || 100,
-    //             total_amount: order.totalAmount || 100,
-
-    //             quantity: returnItems.reduce((s, i) => s + i.quantity, 0),
-    //             weight: 500,
-    //             shipping_mode: "Surface",
-
-    //             products_desc: "Customer Return",
-
-    //             // RETURN DESTINATION (YOUR WAREHOUSE)
-    //             return_name: warehouseAddress.name,
-    //             return_add: warehouseAddress.address,
-    //             return_city: warehouseAddress.city,
-    //             return_state: warehouseAddress.state,
-    //             return_pin: String(warehouseAddress.pincode),
-    //             return_country: "India",
-    //             return_phone: warehouseAddress.phone
-    //         }
-    //     ]
-    // };
     const payload = {
         shipments: [
             {
-                // 🔁 CUSTOMER = PICKUP POINT
-                name: pickupAddress.name,
-                add: pickupAddress.address,
-                city: pickupAddress.city,
-                state: pickupAddress.state,
-                pin: String(pickupAddress.pincode),
-                phone: pickupAddress.phone,
-                email: pickupAddress.email || "returns@customer.com",
+                // 🔥 WAREHOUSE ADDRESS (Delivery Address for return)
+                name: warehouseAddress.name, // "Joyory Luxe Pvt Ltd"
+                add: warehouseAddress.address, // Full address
+                city: warehouseAddress.city, // "Ahmedabad"
+                state: warehouseAddress.state, // "Gujarat"
+                pin: String(warehouseAddress.pincode), // "380015"
+                phone: warehouseAddress.phone, // "7990032368"
+                email: warehouseAddress.email || "returns@joyory.com",
                 country: "India",
 
                 order: `RET-${order.orderId}`,
                 order_date: new Date().toISOString(),
 
-                // 🔥 REVERSE FLAGS
+                // 🔥 REVERSE PICKUP - CUSTOMER ADDRESS
                 is_reverse: true,
                 payment_mode: "Pickup",
                 cod_amount: 0,
@@ -256,22 +276,29 @@ export const createDelhiveryReturnShipment = async ({
 
                 products_desc: "Customer Return",
 
-                // 🔥 DELIVERY ADDRESS = WAREHOUSE
-                delivery_name: warehouseAddress.name,
-                delivery_add: warehouseAddress.address,
-                delivery_city: warehouseAddress.city,
-                delivery_state: warehouseAddress.state,
-                delivery_pin: String(warehouseAddress.pincode),
-                delivery_country: "India",
-                delivery_phone: warehouseAddress.phone
+                // 🔥 CUSTOMER ADDRESS (Pickup Address for return)
+                return_name: pickupAddress.name,
+                return_add: pickupAddress.address,
+                return_city: pickupAddress.city,
+                return_state: pickupAddress.state,
+                return_pin: String(pickupAddress.pincode),
+                return_country: "India",
+                return_phone: pickupAddress.phone,
+
+                // 🔥 Seller info (important for dashboard display)
+                seller_name: process.env.STORE_NAME || "Joyory",
+                seller_address: warehouseAddress.address,
+                seller_gst_tin: ""
             }
         ],
 
-        // 🔥 ABSOLUTELY REQUIRED
+        // 🔥 Required pickup location
         pickup_location: {
-            name: process.env.DELHIVERY_PICKUP_NAME
+            name: process.env.DELHIVERY_PICKUP_NAME || "Joyory_Warehouse"
         }
     };
+
+    console.log("📤 RETURN SHIPMENT PAYLOAD:", JSON.stringify(payload, null, 2));
 
     const res = await axios.post(
         `${process.env.DELHIVERY_BASE_URL}/api/cmu/create.json`,
@@ -287,19 +314,13 @@ export const createDelhiveryReturnShipment = async ({
         }
     );
 
-    // const pkg = res.data?.packages?.[0];
-
-    // if (!pkg || pkg.status !== "Success" || !pkg.waybill) {
-    //     throw new Error(`Reverse pickup failed: ${JSON.stringify(pkg)}`);
-    // }
-
     const pkg = res.data?.packages?.[0] || res.data;
 
     if (!pkg?.waybill) {
         throw new Error(`Reverse pickup failed: ${JSON.stringify(res.data)}`);
     }
 
-    // ✅ allow duplicate order id
+    // ✅ Allow duplicate order id
     if (pkg.status === "Fail" && !pkg.remarks?.includes("Duplicate order id")) {
         throw new Error(`Reverse pickup failed: ${JSON.stringify(res.data)}`);
     }
@@ -311,9 +332,7 @@ export const createDelhiveryReturnShipment = async ({
         tracking_url: `https://www.delhivery.com/track/package/${pkg.waybill}`,
         status: "pickup_scheduled"
     };
-
 };
-
 
 export const cancelDelhiveryShipment = async (waybill) => {
     if (!waybill) throw new Error("Waybill required for Delhivery cancel");
