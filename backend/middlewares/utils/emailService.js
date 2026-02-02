@@ -704,7 +704,7 @@ const generateWelcomeEmailHTML = (user, wallet, referralInfo) => {
           <td style="background:#222;color:#aaa;text-align:center;padding:20px;font-size:12px;">
             <p style="margin:0;">
               Need help? Contact us at
-              <a href="mailto:joyory2025@gmail.com" style="color:#aaa;">joyory2025@gmail.com</a>
+              <a href="mailto:hello@joyory.com" style="color:#aaa;">hello@joyory.com</a>
             </p>
             <p style="margin:10px 0 0;">
               © ${new Date().getFullYear()} Joyory
@@ -1189,9 +1189,9 @@ export const sendAbandonedCartEmail = async (user, stage) => {
             <p style="margin: 0 0 15px 0; font-size: 14px; color: #fff;">
               Need help with your order?
             </p>
-            <a href="mailto:joyory2025@gmail.com" 
+            <a href="mailto:hello@joyory.com" 
                style="color: #8a7dff; text-decoration: none; font-weight: 500;">
-              joyory2025@gmail.com
+              hello@joyory.com
             </a>
             
             <p style="margin: 20px 0 0 0; font-size: 12px; color: #888;">
@@ -1286,6 +1286,242 @@ export const sendAbandonedCartEmail = async (user, stage) => {
     throw error;
   }
 };
+
+export const sendShipmentDeliveredEmail = async ({
+  user,
+  order,
+  shipment
+}) => {
+  try {
+    const appUrl = process.env.APP_URL || "https://joyory.com/";
+    const customerName = user.name || order.customerName || "Customer";
+    const orderNumber = order.orderId || order.orderNumber || "-";
+    const trackingNumber = shipment.waybill || "-";
+    const courierName = shipment.courier_name || "Delhivery";
+    const trackingUrl = shipment.tracking_url || "#";
+
+    const subject = `Your Order #${orderNumber} has been delivered`;
+
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Order Delivered</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    @media only screen and (max-width: 600px) {
+      .container { width: 100% !important; }
+      .header { padding: 24px 20px !important; }
+      .content { padding: 24px 20px !important; }
+      .button { padding: 14px 28px !important; }
+    }
+  </style>
+</head>
+<body style="margin:0; padding:0; background-color:#f9fafb; font-family:'Inter', Arial, sans-serif; line-height:1.6; color:#374151;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f9fafb; padding:32px 0;">
+    <tr>
+      <td align="center">
+        <!-- Main Container -->
+        <table class="container" width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
+          
+          <!-- Header -->
+          <tr>
+            <td class="header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 32px; text-align: center;">
+              <div style="margin-bottom: 20px;">
+                <h1 style="font-family:'Poppins', Arial, sans-serif; font-size: 32px; font-weight: 700; color:#ffffff; margin:0 0 8px 0; letter-spacing: -0.5px;">
+                  Joyory
+                </h1>
+                <p style="color: rgba(255, 255, 255, 0.95); font-size: 15px; margin:0;">Premium Beauty & Cosmetics</p>
+              </div>
+              
+              <div style="background: rgba(255, 255, 255, 0.15); border-radius: 12px; padding: 16px; display: inline-block; margin-top: 16px;">
+                <table cellpadding="0" cellspacing="0" style="border-collapse: collapse;">
+                  <tr>
+                    <td style="padding-right: 12px; vertical-align: middle;">
+                      <!-- PERFECTLY CENTERED TICK IN CIRCLE -->
+                      <div style="background-color:#ffffff; border-radius:50%; width:48px; height:48px; text-align:center; line-height:48px; color:#667eea; font-size:28px; font-weight:bold;">
+                        ✓
+                      </div>
+                    </td>
+                    <td style="vertical-align: middle;">
+                      <h2 style="color:#ffffff; font-size:20px; font-weight:600; margin:0 0 4px 0; text-align:left;">Delivered Successfully!</h2>
+                      <p style="color: rgba(255, 255, 255, 0.9); font-size:14px; margin:0; text-align:left;">Your order has been delivered</p>
+                    </td>
+                  </tr>
+                </table>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Content -->
+          <tr>
+            <td class="content" style="padding: 40px 32px;">
+              <!-- Greeting -->
+              <p style="font-size: 16px; color: #4b5563; margin: 0 0 24px 0;">
+                Hi ${customerName},
+              </p>
+              
+              <p style="font-size: 16px; color: #4b5563; margin: 0 0 32px 0;">
+                Great news! Your Joyory order <strong style="color: #111827;">#${orderNumber}</strong> has been successfully delivered. 
+                We hope you love your new products!
+              </p>
+
+              <!-- Order Summary -->
+              <div style="background-color: #f8fafc; border-radius: 12px; padding: 24px; margin: 0 0 32px 0; border: 1px solid #e2e8f0;">
+                <h3 style="font-size: 18px; font-weight: 600; color: #111827; margin: 0 0 20px 0; font-family: 'Poppins', Arial, sans-serif;">
+                  Delivery Details
+                </h3>
+                
+                <table width="100%" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td width="50%" style="padding: 8px 0;">
+                      <p style="font-size: 14px; color: #6b7280; margin: 0 0 4px 0; font-weight: 500;">Order Number</p>
+                      <p style="font-size: 16px; color: #111827; margin: 0; font-weight: 600;">#${orderNumber}</p>
+                    </td>
+                    <td width="50%" style="padding: 8px 0;">
+                      <p style="font-size: 14px; color: #6b7280; margin: 0 0 4px 0; font-weight: 500;">Tracking Number</p>
+                      <p style="font-size: 16px; color: #111827; margin: 0; font-weight: 600;">${trackingNumber}</p>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 8px 0;">
+                      <p style="font-size: 14px; color: #6b7280; margin: 0 0 4px 0; font-weight: 500;">Courier Partner</p>
+                      <p style="font-size: 16px; color: #111827; margin: 0; font-weight: 600;">${courierName}</p>
+                    </td>
+                    <td style="padding: 8px 0;">
+                      <p style="font-size: 14px; color: #6b7280; margin: 0 0 4px 0; font-weight: 500;">Delivery Status</p>
+                      <p style="font-size: 16px; color: #10b981; margin: 0; font-weight: 600;">✓ Delivered</p>
+                    </td>
+                  </tr>
+                </table>
+              </div>
+
+              <!-- CTA Buttons -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 32px 0;">
+                <tr>
+                  <td align="center">
+                    ${trackingUrl && trackingUrl !== "#" ? `
+                    <a href="${trackingUrl}" 
+                       class="button" 
+                       style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                              color: #ffffff; 
+                              text-decoration: none; 
+                              padding: 16px 32px; 
+                              border-radius: 8px; 
+                              font-weight: 600; 
+                              font-size: 16px; 
+                              display: inline-block;
+                              box-shadow: 0 4px 6px -1px rgba(102, 126, 234, 0.2);">
+                      Track Your Order
+                    </a>
+                    ` : ''}
+                    
+                    <a href="${appUrl}Myorders" 
+                       style="background-color: #ffffff; 
+                              color: #667eea; 
+                              text-decoration: none; 
+                              padding: 16px 32px; 
+                              border-radius: 8px; 
+                              font-weight: 600; 
+                              font-size: 16px; 
+                              display: inline-block;
+                              margin-left: 12px;
+                              border: 2px solid #667eea;">
+                      View Order Details
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Next Steps -->
+              <div style="background-color: #f0f9ff; border-left: 4px solid #3b82f6; padding: 20px; border-radius: 0 8px 8px 0; margin: 0 0 32px 0;">
+                <h4 style="font-size: 16px; font-weight: 600; color: #1e40af; margin: 0 0 12px 0; font-family: 'Poppins', Arial, sans-serif;">
+                  What's Next?
+                </h4>
+                <ul style="margin: 0; padding-left: 20px; color: #4b5563;">
+                  <li style="margin-bottom: 8px;">Your order is now eligible for returns/replacements within ${order.returnPolicy?.days || 7} days</li>
+                  <li style="margin-bottom: 8px;">Share your feedback and review the products</li>
+                  <li>Contact us within 48 hours for any delivery-related concerns</li>
+                </ul>
+              </div>
+
+              <!-- Closing -->
+              <p style="font-size: 16px; color: #4b5563; margin: 0 0 8px 0;">
+                Thank you for shopping with Joyory! 
+              </p>
+              <p style="font-size: 16px; color: #4b5563; margin: 0;">
+                We look forward to serving you again soon. 💜
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #111827; padding: 32px; text-align: center;">
+              <!-- Contact Info -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 24px 0;">
+                <tr>
+                  <td align="center">
+                    <p style="color: #9ca3af; font-size: 14px; margin: 0 0 12px 0;">
+                      Need help with your order?
+                    </p>
+                    <a href="mailto:hello@joyory.com" 
+                       style="color: #8b5cf6; text-decoration: none; font-weight: 600; font-size: 16px;">
+                      hello@joyory.com
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Social Links (Optional) -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 24px 0;">
+                <tr>
+                  <td align="center">
+                    <a href="${appUrl}" style="display: inline-block; margin: 0 8px;">
+                      <span style="color: #9ca3af; font-size: 14px;">Website</span>
+                    </a>
+                    <span style="color: #4b5563;">•</span>
+                    <a href="#" style="display: inline-block; margin: 0 8px;">
+                      <span style="color: #9ca3af; font-size: 14px;">Return Policy</span>
+                    </a>
+                    <span style="color: #4b5563;">•</span>
+                    <a href="#" style="display: inline-block; margin: 0 8px;">
+                      <span style="color: #9ca3af; font-size: 14px;">Track Order</span>
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Copyright -->
+              <p style="color: #6b7280; font-size: 14px; margin: 0;">
+                © ${new Date().getFullYear()} Joyory. All rights reserved.
+              </p>
+              <p style="color: #6b7280; font-size: 12px; margin: 8px 0 0 0;">
+                This email was sent to ${user.email}
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+`;
+
+    await sendEmail(user.email, subject, html);
+
+    console.log(`✅ Delivered email sent to ${user.email} for order #${orderNumber}`);
+    return true;
+
+  } catch (err) {
+    console.error("❌ Failed to send delivered email", err);
+    throw err;
+  }
+};
+
 
 
 // export const sendAbandonedCartEmail = async (user, stage) => {
@@ -1522,9 +1758,9 @@ export const sendAbandonedCartEmail = async (user, stage) => {
 //             <p style="margin: 0 0 15px 0; font-size: 14px; color: #fff;">
 //               Need help with your order?
 //             </p>
-//             <a href="mailto:joyory2025@gmail.com" 
+//             <a href="mailto:hello@joyory.com" 
 //                style="color: #8a7dff; text-decoration: none; font-weight: 500;">
-//               joyory2025@gmail.com
+//               hello@joyory.com
 //             </a>
             
 //             <p style="margin: 20px 0 0 0; font-size: 12px; color: #888;">

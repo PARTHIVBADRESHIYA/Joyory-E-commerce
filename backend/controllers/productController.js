@@ -1997,6 +1997,950 @@ const updateProductById = async (req, res) => {
 //         res.status(500).json({ message: 'Error fetching products', error: error.message });
 //     }
 // };
+
+
+// const getProductFilterOptions = async (req, res) => {
+//     try {
+//         const query = req.query;
+
+//         // Optional: Only get filters for published products
+//         const baseFilter = query.publishedOnly === 'true' ? { isPublished: true } : {};
+
+//         // ==================== AGGREGATION PIPELINES ====================
+
+//         // 1. GET ALL BRANDS (with product counts)
+//         const brands = await Brand.find({})
+//             .select('_id name slug logo')
+//             .sort({ name: 1 })
+//             .lean();
+
+//         const brandCounts = await Product.aggregate([
+//             { $match: baseFilter },
+//             { $group: { _id: "$brand", count: { $sum: 1 } } }
+//         ]);
+
+//         const brandsWithCount = brands.map(brand => {
+//             const countData = brandCounts.find(bc => bc._id?.toString() === brand._id.toString());
+//             return {
+//                 _id: brand._id,
+//                 name: brand.name,
+//                 slug: brand.slug,
+//                 logo: brand.logo,
+//                 productCount: countData?.count || 0
+//             };
+//         }).filter(b => b.productCount > 0);
+
+//         // 2. GET ALL CATEGORIES (with product counts, hierarchical)
+//         const categories = await Category.find({})
+//             .select('_id name slug parent level image')
+//             .sort({ name: 1 })
+//             .lean();
+
+//         const categoryCounts = await Product.aggregate([
+//             { $match: baseFilter },
+//             { $unwind: "$categoryHierarchy" },
+//             {
+//                 $group: {
+//                     _id: "$categoryHierarchy",
+//                     count: { $sum: 1 }
+//                 }
+//             }
+//         ]);
+
+
+//         const categoriesWithCount = categories.map(cat => {
+//             const countData = categoryCounts.find(cc => cc._id?.toString() === cat._id.toString());
+//             return {
+//                 _id: cat._id,
+//                 name: cat.name,
+//                 slug: cat.slug,
+//                 parent: cat.parent,
+//                 level: cat.level,
+//                 image: cat.image,
+//                 productCount: countData?.count || 0
+//             };
+//         }).filter(c => c.productCount > 0);
+
+//         // 3. GET ALL SKIN TYPES (with product counts)
+//         const skinTypes = await SkinType.find({})
+//             .select('_id name slug description icon')
+//             .sort({ name: 1 })
+//             .lean();
+
+//         const skinTypeCounts = await Product.aggregate([
+//             { $match: baseFilter },
+//             { $unwind: "$skinTypes" },
+//             { $group: { _id: "$skinTypes", count: { $sum: 1 } } }
+//         ]);
+
+//         const skinTypesWithCount = skinTypes.map(st => {
+//             const countData = skinTypeCounts.find(stc => stc._id?.toString() === st._id.toString());
+//             return {
+//                 _id: st._id,
+//                 name: st.name,
+//                 slug: st.slug,
+//                 description: st.description,
+//                 icon: st.icon,
+//                 productCount: countData?.count || 0
+//             };
+//         }).filter(st => st.productCount > 0);
+
+//         // 4. GET ALL FORMULATIONS (with product counts)
+//         const formulations = await Formulation.find({})
+//             .select('_id name slug description')
+//             .sort({ name: 1 })
+//             .lean();
+
+//         const formulationCounts = await Product.aggregate([
+//             { $match: baseFilter },
+//             { $group: { _id: "$formulation", count: { $sum: 1 } } }
+//         ]);
+
+//         const formulationsWithCount = formulations.map(form => {
+//             const countData = formulationCounts.find(fc => fc._id?.toString() === form._id.toString());
+//             return {
+//                 _id: form._id,
+//                 name: form.name,
+//                 slug: form.slug,
+//                 description: form.description,
+//                 productCount: countData?.count || 0
+//             };
+//         }).filter(f => f.productCount > 0);
+
+//         // 5. GET ALL UNIQUE FINISHES (with counts)
+//         const finishes = await Product.aggregate([
+//             { $match: { ...baseFilter, finish: { $ne: null, $exists: true } } },
+//             { $group: { _id: "$finish", count: { $sum: 1 } } },
+//             { $sort: { _id: 1 } }
+//         ]);
+
+//         const finishOptions = finishes.map(f => ({
+//             value: f._id,
+//             label: f._id.charAt(0).toUpperCase() + f._id.slice(1), // Capitalize
+//             productCount: f.count
+//         }));
+
+//         // 6. GET ALL UNIQUE PRODUCT TAGS (with counts)
+//         const productTags = await Product.aggregate([
+//             { $match: baseFilter },
+//             { $unwind: "$productTags" },
+//             { $group: { _id: "$productTags", count: { $sum: 1 } } },
+//             { $sort: { count: -1 } }
+//         ]);
+
+//         const productTagOptions = productTags.map(tag => ({
+//             value: tag._id,
+//             label: tag._id.split('-').map(word =>
+//                 word.charAt(0).toUpperCase() + word.slice(1)
+//             ).join(' '),
+//             productCount: tag.count
+//         }));
+
+//         // 7. GET VARIANT-LEVEL FILTER OPTIONS
+
+//         // Get all products for variant analysis
+//         const productsForVariants = await Product.find(baseFilter)
+//             .select('variants')
+//             .lean();
+
+//         // Tone Keys
+//         const toneKeysMap = new Map();
+//         productsForVariants.forEach(product => {
+//             product.variants?.forEach(variant => {
+//                 variant.toneKeys?.forEach(key => {
+//                     toneKeysMap.set(key, (toneKeysMap.get(key) || 0) + 1);
+//                 });
+//             });
+//         });
+
+//         const toneKeyOptions = Array.from(toneKeysMap.entries()).map(([key, count]) => ({
+//             value: key,
+//             label: key.charAt(0).toUpperCase() + key.slice(1),
+//             variantCount: count
+//         })).sort((a, b) => b.variantCount - a.variantCount);
+
+//         // Undertone Keys
+//         const undertoneKeysMap = new Map();
+//         productsForVariants.forEach(product => {
+//             product.variants?.forEach(variant => {
+//                 variant.undertoneKeys?.forEach(key => {
+//                     undertoneKeysMap.set(key, (undertoneKeysMap.get(key) || 0) + 1);
+//                 });
+//             });
+//         });
+
+//         const undertoneKeyOptions = Array.from(undertoneKeysMap.entries()).map(([key, count]) => ({
+//             value: key,
+//             label: key.charAt(0).toUpperCase() + key.slice(1),
+//             variantCount: count
+//         })).sort((a, b) => b.variantCount - a.variantCount);
+
+//         // Family Keys
+//         const familyKeysMap = new Map();
+//         productsForVariants.forEach(product => {
+//             product.variants?.forEach(variant => {
+//                 if (variant.familyKey) {
+//                     familyKeysMap.set(variant.familyKey, (familyKeysMap.get(variant.familyKey) || 0) + 1);
+//                 }
+//             });
+//         });
+
+//         const familyKeyOptions = Array.from(familyKeysMap.entries()).map(([key, count]) => ({
+//             value: key,
+//             label: key.charAt(0).toUpperCase() + key.slice(1),
+//             variantCount: count
+//         })).sort((a, b) => b.variantCount - a.variantCount);
+
+//         // 8. GET PRICE RANGE
+//         const priceRange = await Product.aggregate([
+//             { $match: baseFilter },
+//             {
+//                 $group: {
+//                     _id: null,
+//                     minPrice: { $min: "$minPrice" },
+//                     maxPrice: { $max: "$maxPrice" }
+//                 }
+//             }
+//         ]);
+
+//         const priceRangeData = priceRange[0] || { minPrice: 0, maxPrice: 10000 };
+
+//         // 9. GET VTO OPTIONS
+//         const vtoTypes = await Product.aggregate([
+//             { $match: { ...baseFilter, vtoType: { $ne: null, $exists: true } } },
+//             { $group: { _id: "$vtoType", count: { $sum: 1 } } }
+//         ]);
+
+//         const vtoOptions = vtoTypes.map(vto => ({
+//             value: vto._id,
+//             label: vto._id.charAt(0).toUpperCase() + vto._id.slice(1),
+//             productCount: vto.count
+//         }));
+
+//         // 10. STOCK STATUS OPTIONS (These are computed, not stored)
+//         const stockStatusOptions = [
+//             {
+//                 value: 'in_stock',
+//                 label: 'In Stock',
+//                 description: 'Products with sufficient stock'
+//             },
+//             {
+//                 value: 'low_stock',
+//                 label: 'Low Stock',
+//                 description: 'Products running low on stock'
+//             },
+//             {
+//                 value: 'out_of_stock',
+//                 label: 'Out of Stock',
+//                 description: 'Products currently unavailable'
+//             }
+//         ];
+
+//         // 11. RATING OPTIONS
+//         const ratingOptions = [
+//             { value: 4.5, label: '4.5 & Above', icon: '⭐' },
+//             { value: 4.0, label: '4.0 & Above', icon: '⭐' },
+//             { value: 3.5, label: '3.5 & Above', icon: '⭐' },
+//             { value: 3.0, label: '3.0 & Above', icon: '⭐' }
+//         ];
+
+//         // 12. DISCOUNT OPTIONS
+//         const hasDiscountCount = await Product.countDocuments({
+//             ...baseFilter,
+//             discountedPrice: { $ne: null, $gt: 0 }
+//         });
+
+//         // ==================== RESPONSE ====================
+//         res.status(200).json({
+//             success: true,
+//             message: 'Filter options retrieved successfully',
+//             filters: {
+//                 // Main Product Filters
+//                 brands: {
+//                     title: 'Brands',
+//                     filterKey: 'brand',
+//                     type: 'checkbox',
+//                     options: brandsWithCount,
+//                     description: 'Filter by brand name or slug'
+//                 },
+
+//                 categories: {
+//                     title: 'Categories',
+//                     filterKey: 'category',
+//                     type: 'checkbox',
+//                     options: categoriesWithCount,
+//                     description: 'Filter by category (includes subcategories)',
+//                     hierarchical: true
+//                 },
+
+//                 skinTypes: {
+//                     title: 'Skin Type',
+//                     filterKey: 'skinType',
+//                     type: 'checkbox',
+//                     options: skinTypesWithCount,
+//                     description: 'Filter by suitable skin types'
+//                 },
+
+//                 formulations: {
+//                     title: 'Formulation',
+//                     filterKey: 'formulation',
+//                     type: 'checkbox',
+//                     options: formulationsWithCount,
+//                     description: 'Filter by product formulation type'
+//                 },
+
+//                 finishes: {
+//                     title: 'Finish',
+//                     filterKey: 'finish',
+//                     type: 'checkbox',
+//                     options: finishOptions,
+//                     description: 'Filter by product finish'
+//                 },
+
+//                 productTags: {
+//                     title: 'Product Tags',
+//                     filterKey: 'productTags',
+//                     type: 'checkbox',
+//                     options: productTagOptions,
+//                     description: 'Filter by product tags (vegan, cruelty-free, etc.)'
+//                 },
+
+//                 // Variant-Level Filters
+//                 toneKeys: {
+//                     title: 'Tone',
+//                     filterKey: 'toneKey',
+//                     type: 'checkbox',
+//                     options: toneKeyOptions,
+//                     description: 'Filter by shade tone (warm, cool, neutral)',
+//                     variantLevel: true
+//                 },
+
+//                 undertoneKeys: {
+//                     title: 'Undertone',
+//                     filterKey: 'undertoneKey',
+//                     type: 'checkbox',
+//                     options: undertoneKeyOptions,
+//                     description: 'Filter by shade undertone',
+//                     variantLevel: true
+//                 },
+
+//                 familyKeys: {
+//                     title: 'Color Family',
+//                     filterKey: 'familyKey',
+//                     type: 'checkbox',
+//                     options: familyKeyOptions,
+//                     description: 'Filter by color family (red, nude, pink, etc.)',
+//                     variantLevel: true
+//                 },
+
+//                 // Price Range
+//                 priceRange: {
+//                     title: 'Price Range',
+//                     filterKey: 'minPrice,maxPrice',
+//                     type: 'range',
+//                     min: Math.floor(priceRangeData.minPrice || 0),
+//                     max: Math.ceil(priceRangeData.maxPrice || 10000),
+//                     step: 50,
+//                     description: 'Filter by price range'
+//                 },
+
+//                 // Rating
+//                 rating: {
+//                     title: 'Customer Rating',
+//                     filterKey: 'minRating',
+//                     type: 'radio',
+//                     options: ratingOptions,
+//                     description: 'Filter by minimum rating'
+//                 },
+
+//                 // VTO Support
+//                 vto: {
+//                     title: 'Virtual Try-On',
+//                     filterKey: 'supportsVTO',
+//                     type: 'toggle',
+//                     description: 'Products with virtual try-on support'
+//                 },
+
+//                 vtoType: {
+//                     title: 'VTO Type',
+//                     filterKey: 'vtoType',
+//                     type: 'radio',
+//                     options: vtoOptions,
+//                     description: 'Type of virtual try-on'
+//                 },
+
+//                 // Stock Status
+//                 stockStatus: {
+//                     title: 'Availability',
+//                     filterKey: 'stockStatus',
+//                     type: 'radio',
+//                     options: stockStatusOptions,
+//                     description: 'Filter by stock availability'
+//                 },
+
+//                 // Discount
+//                 discount: {
+//                     title: 'Discounted Items',
+//                     filterKey: 'hasDiscount',
+//                     type: 'toggle',
+//                     productCount: hasDiscountCount,
+//                     description: 'Show only discounted products'
+//                 },
+
+//                 // Published Status (Admin only)
+//                 publishedStatus: {
+//                     title: 'Published Status',
+//                     filterKey: 'isPublished',
+//                     type: 'radio',
+//                     options: [
+//                         { value: 'true', label: 'Published' },
+//                         { value: 'false', label: 'Unpublished' },
+//                         { value: 'all', label: 'All' }
+//                     ],
+//                     description: 'Filter by published status',
+//                     adminOnly: true
+//                 }
+//             },
+
+//             // Usage Guide
+//             usage: {
+//                 description: 'How to use these filters in API calls',
+//                 examples: [
+//                     {
+//                         description: 'Filter by single brand',
+//                         url: '/api/products?brand=nykaa'
+//                     },
+//                     {
+//                         description: 'Filter by multiple brands',
+//                         url: '/api/products?brand=nykaa,lakme,maybelline'
+//                     },
+//                     {
+//                         description: 'Filter by category and skin type',
+//                         url: '/api/products?category=lipstick&skinType=oily'
+//                     },
+//                     {
+//                         description: 'Filter by price range',
+//                         url: '/api/products?minPrice=500&maxPrice=2000'
+//                     },
+//                     {
+//                         description: 'Filter by tone and undertone',
+//                         url: '/api/products?toneKey=warm&undertoneKey=golden'
+//                     },
+//                     {
+//                         description: 'Filter by rating',
+//                         url: '/api/products?minRating=4.0'
+//                     },
+//                     {
+//                         description: 'Multiple filters combined',
+//                         url: '/api/products?brand=nykaa&category=lipstick&toneKey=warm&minPrice=500&maxPrice=1500'
+//                     },
+//                     {
+//                         description: 'Search by product ID or slug',
+//                         url: '/api/products?search=507f1f77bcf86cd799439011'
+//                     }
+//                 ]
+//             },
+
+//             // Metadata
+//             metadata: {
+//                 totalProducts: await Product.countDocuments(baseFilter),
+//                 totalBrands: brandsWithCount.length,
+//                 totalCategories: categoriesWithCount.length,
+//                 totalSkinTypes: skinTypesWithCount.length,
+//                 totalFormulations: formulationsWithCount.length,
+//                 generatedAt: new Date().toISOString()
+//             }
+//         });
+
+//     } catch (error) {
+//         console.error('Error fetching filter options:', error);
+//         res.status(500).json({
+//             success: false,
+//             message: 'Error fetching filter options',
+//             error: error.message
+//         });
+//     }
+// };
+const getProductFilterOptions = async (req, res) => {
+    try {
+        const query = req.query;
+
+        // Optional: Only get filters for published products
+        const baseFilter = query.publishedOnly === 'true' ? { isPublished: true } : {};
+
+        // ==================== AGGREGATION PIPELINES ====================
+
+        // 1. GET ALL BRANDS (with product counts)
+        const brands = await Brand.find({})
+            .select('_id name slug logo')
+            .sort({ name: 1 })
+            .lean();
+
+        const brandCounts = await Product.aggregate([
+            { $match: baseFilter },
+            { $group: { _id: "$brand", count: { $sum: 1 } } }
+        ]);
+
+        const brandsWithCount = brands.map(brand => {
+            const countData = brandCounts.find(bc => bc._id?.toString() === brand._id.toString());
+            return {
+                _id: brand._id,
+                name: brand.name,
+                slug: brand.slug,
+                logo: brand.logo,
+                productCount: countData?.count || 0
+            };
+        }).filter(b => b.productCount > 0);
+
+        // 2. GET ALL CATEGORIES (with product counts, hierarchical)
+        const categories = await Category.find({})
+            .select('_id name slug parent level image')
+            .sort({ name: 1 })
+            .lean();
+
+        const categoryCounts = await Product.aggregate([
+            { $match: baseFilter },
+
+            {
+                $project: {
+                    allCategories: {
+                        $setUnion: [
+                            ["$category"],              // direct category
+                            { $ifNull: ["$categoryHierarchy", []] } // parents
+                        ]
+                    }
+                }
+            },
+
+            { $unwind: "$allCategories" },
+
+            {
+                $group: {
+                    _id: "$allCategories",
+                    count: { $sum: 1 }
+                }
+            }
+        ]);
+
+
+        const categoriesWithCount = categories.map(cat => {
+            const countData = categoryCounts.find(
+                cc => cc._id?.toString() === cat._id.toString()
+            );
+
+            return {
+                _id: cat._id,
+                name: cat.name,
+                slug: cat.slug,
+                parent: cat.parent,
+                level: cat.level,
+                image: cat.image,
+                productCount: countData?.count || 0
+            };
+        });
+
+
+        // 3. GET ALL SKIN TYPES (with product counts)
+        const skinTypes = await SkinType.find({})
+            .select('_id name slug description icon')
+            .sort({ name: 1 })
+            .lean();
+
+        const skinTypeCounts = await Product.aggregate([
+            { $match: baseFilter },
+            { $unwind: "$skinTypes" },
+            { $group: { _id: "$skinTypes", count: { $sum: 1 } } }
+        ]);
+
+        const skinTypesWithCount = skinTypes.map(st => {
+            const countData = skinTypeCounts.find(stc => stc._id?.toString() === st._id.toString());
+            return {
+                _id: st._id,
+                name: st.name,
+                slug: st.slug,
+                description: st.description,
+                icon: st.icon,
+                productCount: countData?.count || 0
+            };
+        }).filter(st => st.productCount > 0);
+
+        // 4. GET ALL FORMULATIONS (with product counts)
+        const formulations = await Formulation.find({})
+            .select('_id name slug description')
+            .sort({ name: 1 })
+            .lean();
+
+        const formulationCounts = await Product.aggregate([
+            { $match: baseFilter },
+            { $group: { _id: "$formulation", count: { $sum: 1 } } }
+        ]);
+
+        const formulationsWithCount = formulations.map(form => {
+            const countData = formulationCounts.find(fc => fc._id?.toString() === form._id.toString());
+            return {
+                _id: form._id,
+                name: form.name,
+                slug: form.slug,
+                description: form.description,
+                productCount: countData?.count || 0
+            };
+        }).filter(f => f.productCount > 0);
+
+        // 5. GET ALL UNIQUE FINISHES (with counts)
+        const finishes = await Product.aggregate([
+            { $match: { ...baseFilter, finish: { $ne: null, $exists: true } } },
+            { $group: { _id: "$finish", count: { $sum: 1 } } },
+            { $sort: { _id: 1 } }
+        ]);
+
+        const finishOptions = finishes.map(f => ({
+            value: f._id,
+            label: f._id.charAt(0).toUpperCase() + f._id.slice(1), // Capitalize
+            productCount: f.count
+        }));
+
+        // 6. GET ALL UNIQUE PRODUCT TAGS (with counts)
+        const productTags = await Product.aggregate([
+            { $match: baseFilter },
+            { $unwind: "$productTags" },
+            { $group: { _id: "$productTags", count: { $sum: 1 } } },
+            { $sort: { count: -1 } }
+        ]);
+
+        const productTagOptions = productTags.map(tag => ({
+            value: tag._id,
+            label: tag._id.split('-').map(word =>
+                word.charAt(0).toUpperCase() + word.slice(1)
+            ).join(' '),
+            productCount: tag.count
+        }));
+
+        // 7. GET VARIANT-LEVEL FILTER OPTIONS
+
+        // Get all products for variant analysis
+        const productsForVariants = await Product.find(baseFilter)
+            .select('variants')
+            .lean();
+
+        // Tone Keys
+        const toneKeysMap = new Map();
+        productsForVariants.forEach(product => {
+            product.variants?.forEach(variant => {
+                variant.toneKeys?.forEach(key => {
+                    toneKeysMap.set(key, (toneKeysMap.get(key) || 0) + 1);
+                });
+            });
+        });
+
+        const toneKeyOptions = Array.from(toneKeysMap.entries()).map(([key, count]) => ({
+            value: key,
+            label: key.charAt(0).toUpperCase() + key.slice(1),
+            variantCount: count
+        })).sort((a, b) => b.variantCount - a.variantCount);
+
+        // Undertone Keys
+        const undertoneKeysMap = new Map();
+        productsForVariants.forEach(product => {
+            product.variants?.forEach(variant => {
+                variant.undertoneKeys?.forEach(key => {
+                    undertoneKeysMap.set(key, (undertoneKeysMap.get(key) || 0) + 1);
+                });
+            });
+        });
+
+        const undertoneKeyOptions = Array.from(undertoneKeysMap.entries()).map(([key, count]) => ({
+            value: key,
+            label: key.charAt(0).toUpperCase() + key.slice(1),
+            variantCount: count
+        })).sort((a, b) => b.variantCount - a.variantCount);
+
+        // Family Keys
+        const familyKeysMap = new Map();
+        productsForVariants.forEach(product => {
+            product.variants?.forEach(variant => {
+                if (variant.familyKey) {
+                    familyKeysMap.set(variant.familyKey, (familyKeysMap.get(variant.familyKey) || 0) + 1);
+                }
+            });
+        });
+
+        const familyKeyOptions = Array.from(familyKeysMap.entries()).map(([key, count]) => ({
+            value: key,
+            label: key.charAt(0).toUpperCase() + key.slice(1),
+            variantCount: count
+        })).sort((a, b) => b.variantCount - a.variantCount);
+
+        // 8. GET PRICE RANGE
+        const priceRange = await Product.aggregate([
+            { $match: baseFilter },
+            {
+                $group: {
+                    _id: null,
+                    minPrice: { $min: "$minPrice" },
+                    maxPrice: { $max: "$maxPrice" }
+                }
+            }
+        ]);
+
+        const priceRangeData = priceRange[0] || { minPrice: 0, maxPrice: 10000 };
+
+        // 9. GET VTO OPTIONS
+        const vtoTypes = await Product.aggregate([
+            { $match: { ...baseFilter, vtoType: { $ne: null, $exists: true } } },
+            { $group: { _id: "$vtoType", count: { $sum: 1 } } }
+        ]);
+
+        const vtoOptions = vtoTypes.map(vto => ({
+            value: vto._id,
+            label: vto._id.charAt(0).toUpperCase() + vto._id.slice(1),
+            productCount: vto.count
+        }));
+
+        // 10. STOCK STATUS OPTIONS (These are computed, not stored)
+        const stockStatusOptions = [
+            {
+                value: 'in_stock',
+                label: 'In Stock',
+                description: 'Products with sufficient stock'
+            },
+            {
+                value: 'low_stock',
+                label: 'Low Stock',
+                description: 'Products running low on stock'
+            },
+            {
+                value: 'out_of_stock',
+                label: 'Out of Stock',
+                description: 'Products currently unavailable'
+            }
+        ];
+
+        // 11. RATING OPTIONS
+        const ratingOptions = [
+            { value: 4.5, label: '4.5 & Above', icon: '⭐' },
+            { value: 4.0, label: '4.0 & Above', icon: '⭐' },
+            { value: 3.5, label: '3.5 & Above', icon: '⭐' },
+            { value: 3.0, label: '3.0 & Above', icon: '⭐' }
+        ];
+
+        // 12. DISCOUNT OPTIONS
+        const hasDiscountCount = await Product.countDocuments({
+            ...baseFilter,
+            discountedPrice: { $ne: null, $gt: 0 }
+        });
+
+        // ==================== RESPONSE ====================
+        res.status(200).json({
+            success: true,
+            message: 'Filter options retrieved successfully',
+            filters: {
+                // Main Product Filters
+                brands: {
+                    title: 'Brands',
+                    filterKey: 'brand',
+                    type: 'checkbox',
+                    options: brandsWithCount,
+                    description: 'Filter by brand name or slug'
+                },
+
+                categories: {
+                    title: 'Categories',
+                    filterKey: 'category',
+                    type: 'checkbox',
+                    options: categoriesWithCount,
+                    description: 'Filter by category (includes subcategories)',
+                    hierarchical: true
+                },
+
+                skinTypes: {
+                    title: 'Skin Type',
+                    filterKey: 'skinType',
+                    type: 'checkbox',
+                    options: skinTypesWithCount,
+                    description: 'Filter by suitable skin types'
+                },
+
+                formulations: {
+                    title: 'Formulation',
+                    filterKey: 'formulation',
+                    type: 'checkbox',
+                    options: formulationsWithCount,
+                    description: 'Filter by product formulation type'
+                },
+
+                finishes: {
+                    title: 'Finish',
+                    filterKey: 'finish',
+                    type: 'checkbox',
+                    options: finishOptions,
+                    description: 'Filter by product finish'
+                },
+
+                productTags: {
+                    title: 'Product Tags',
+                    filterKey: 'productTags',
+                    type: 'checkbox',
+                    options: productTagOptions,
+                    description: 'Filter by product tags (vegan, cruelty-free, etc.)'
+                },
+
+                // Variant-Level Filters
+                toneKeys: {
+                    title: 'Tone',
+                    filterKey: 'toneKey',
+                    type: 'checkbox',
+                    options: toneKeyOptions,
+                    description: 'Filter by shade tone (warm, cool, neutral)',
+                    variantLevel: true
+                },
+
+                undertoneKeys: {
+                    title: 'Undertone',
+                    filterKey: 'undertoneKey',
+                    type: 'checkbox',
+                    options: undertoneKeyOptions,
+                    description: 'Filter by shade undertone',
+                    variantLevel: true
+                },
+
+                familyKeys: {
+                    title: 'Color Family',
+                    filterKey: 'familyKey',
+                    type: 'checkbox',
+                    options: familyKeyOptions,
+                    description: 'Filter by color family (red, nude, pink, etc.)',
+                    variantLevel: true
+                },
+
+                // Price Range
+                priceRange: {
+                    title: 'Price Range',
+                    filterKey: 'minPrice,maxPrice',
+                    type: 'range',
+                    min: Math.floor(priceRangeData.minPrice || 0),
+                    max: Math.ceil(priceRangeData.maxPrice || 10000),
+                    step: 50,
+                    description: 'Filter by price range'
+                },
+
+                // Rating
+                rating: {
+                    title: 'Customer Rating',
+                    filterKey: 'minRating',
+                    type: 'radio',
+                    options: ratingOptions,
+                    description: 'Filter by minimum rating'
+                },
+
+                // VTO Support
+                vto: {
+                    title: 'Virtual Try-On',
+                    filterKey: 'supportsVTO',
+                    type: 'toggle',
+                    description: 'Products with virtual try-on support'
+                },
+
+                vtoType: {
+                    title: 'VTO Type',
+                    filterKey: 'vtoType',
+                    type: 'radio',
+                    options: vtoOptions,
+                    description: 'Type of virtual try-on'
+                },
+
+                // Stock Status
+                stockStatus: {
+                    title: 'Availability',
+                    filterKey: 'stockStatus',
+                    type: 'radio',
+                    options: stockStatusOptions,
+                    description: 'Filter by stock availability'
+                },
+
+                // Discount
+                discount: {
+                    title: 'Discounted Items',
+                    filterKey: 'hasDiscount',
+                    type: 'toggle',
+                    productCount: hasDiscountCount,
+                    description: 'Show only discounted products'
+                },
+
+                // Published Status (Admin only)
+                publishedStatus: {
+                    title: 'Published Status',
+                    filterKey: 'isPublished',
+                    type: 'radio',
+                    options: [
+                        { value: 'true', label: 'Published' },
+                        { value: 'false', label: 'Unpublished' },
+                        { value: 'all', label: 'All' }
+                    ],
+                    description: 'Filter by published status',
+                    adminOnly: true
+                }
+            },
+
+            // Usage Guide
+            usage: {
+                description: 'How to use these filters in API calls',
+                examples: [
+                    {
+                        description: 'Filter by single brand',
+                        url: '/api/products?brand=nykaa'
+                    },
+                    {
+                        description: 'Filter by multiple brands',
+                        url: '/api/products?brand=nykaa,lakme,maybelline'
+                    },
+                    {
+                        description: 'Filter by category and skin type',
+                        url: '/api/products?category=lipstick&skinType=oily'
+                    },
+                    {
+                        description: 'Filter by price range',
+                        url: '/api/products?minPrice=500&maxPrice=2000'
+                    },
+                    {
+                        description: 'Filter by tone and undertone',
+                        url: '/api/products?toneKey=warm&undertoneKey=golden'
+                    },
+                    {
+                        description: 'Filter by rating',
+                        url: '/api/products?minRating=4.0'
+                    },
+                    {
+                        description: 'Multiple filters combined',
+                        url: '/api/products?brand=nykaa&category=lipstick&toneKey=warm&minPrice=500&maxPrice=1500'
+                    },
+                    {
+                        description: 'Search by product ID or slug',
+                        url: '/api/products?search=507f1f77bcf86cd799439011'
+                    }
+                ]
+            },
+
+            // Metadata
+            metadata: {
+                totalProducts: await Product.countDocuments(baseFilter),
+                totalBrands: brandsWithCount.length,
+                totalCategories: categoriesWithCount.length,
+                totalSkinTypes: skinTypesWithCount.length,
+                totalFormulations: formulationsWithCount.length,
+                generatedAt: new Date().toISOString()
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching filter options:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching filter options',
+            error: error.message
+        });
+    }
+};
+
 const getAllProducts = async (req, res) => {
     try {
         const query = req.query;
@@ -2007,13 +2951,71 @@ const getAllProducts = async (req, res) => {
         const limit = Number(query.limit) || 12;
         const skip = (page - 1) * limit;
 
-        // ------------------------- FILTERS -------------------------
-        if (query.brand) filter.brand = { $in: query.brand.split(',') };
+        // ------------------------- SEARCH BY ID OR SLUG -------------------------
+        if (query.search) {
+            const searchTerm = query.search.trim();
 
+            // Check if it's a valid MongoDB ObjectId
+            const isValidObjectId = /^[a-f\d]{24}$/i.test(searchTerm);
+
+            if (isValidObjectId) {
+                // Search by product ID
+                filter._id = searchTerm;
+            } else {
+                // Search by slug (in slugs array)
+                filter.slugs = { $in: [searchTerm] };
+            }
+        }
+
+        // ------------------------- BRAND FILTER -------------------------
+        if (query.brand) {
+            const brandInput = query.brand.split(',');
+            const brandIds = [];
+            const brandSlugs = [];
+
+            for (const item of brandInput) {
+                if (/^[a-f\d]{24}$/i.test(item)) {
+                    brandIds.push(item);
+                } else {
+                    brandSlugs.push(item);
+                }
+            }
+
+            if (brandIds.length > 0 && brandSlugs.length > 0) {
+                filter.$or = [
+                    { brand: { $in: brandIds } },
+                    { brandSlug: { $in: brandSlugs } }
+                ];
+            } else if (brandIds.length > 0) {
+                filter.brand = { $in: brandIds };
+            } else if (brandSlugs.length > 0) {
+                filter.brandSlug = { $in: brandSlugs };
+            }
+        }
+
+        // ------------------------- CATEGORY FILTER (with children) -------------------------
         if (query.category) {
-            const categoryIds = query.category.split(',');
+            const categoryInput = query.category.split(',');
+            const categoryIds = [];
+            const categorySlugs = [];
+
+            for (const item of categoryInput) {
+                if (/^[a-f\d]{24}$/i.test(item)) {
+                    categoryIds.push(item);
+                } else {
+                    categorySlugs.push(item);
+                }
+            }
+
+            // Fetch category IDs from slugs
+            if (categorySlugs.length > 0) {
+                const categoryDocs = await Category.find({ slug: { $in: categorySlugs } }, '_id');
+                categoryIds.push(...categoryDocs.map(c => c._id.toString()));
+            }
+
             const allCategoryIds = new Set(categoryIds);
 
+            // Recursive function to fetch child categories
             const fetchChildren = async (parentId) => {
                 const children = await Category.find({ parent: parentId }, '_id');
                 for (const child of children) {
@@ -2031,24 +3033,201 @@ const getAllProducts = async (req, res) => {
             filter.category = { $in: Array.from(allCategoryIds) };
         }
 
-        if (query.shadeOptions) filter.shadeOptions = { $in: query.shadeOptions.split(',') };
-        if (query.colorOptions) filter.colorOptions = { $in: query.colorOptions.split(',') };
-        if (query.productTags) filter.productTags = { $in: query.productTags.split(',') };
+        // ------------------------- SKIN TYPE FILTER -------------------------
+        if (query.skinType) {
+            const skinTypeInput = query.skinType.split(',');
+            const skinTypeIds = [];
+            const skinTypeSlugs = [];
 
-        const dynamicFilters = [
-            'preference', 'ingredients', 'benefits', 'concern', 'skinType',
-            'makeupFinish', 'formulation', 'color', 'skinTone', 'gender', 'age', 'conscious'
-        ];
-        dynamicFilters.forEach(attr => {
-            if (query[attr]) {
-                filter.productTags = { $in: query[attr].split(',') };
+            for (const item of skinTypeInput) {
+                if (/^[a-f\d]{24}$/i.test(item)) {
+                    skinTypeIds.push(item);
+                } else {
+                    skinTypeSlugs.push(item);
+                }
             }
-        });
 
+            if (skinTypeIds.length > 0 && skinTypeSlugs.length > 0) {
+                filter.$or = filter.$or || [];
+                filter.$or.push(
+                    { skinTypes: { $in: skinTypeIds } },
+                    { skinTypeSlugs: { $in: skinTypeSlugs } }
+                );
+            } else if (skinTypeIds.length > 0) {
+                filter.skinTypes = { $in: skinTypeIds };
+            } else if (skinTypeSlugs.length > 0) {
+                filter.skinTypeSlugs = { $in: skinTypeSlugs };
+            }
+        }
+
+        // ------------------------- FORMULATION FILTER -------------------------
+        // ------------------------- FORMULATION FILTER -------------------------
+        if (query.formulation) {
+            const formulationInput = query.formulation.split(',');
+            const formulationIds = [];
+            const formulationNames = [];
+
+            for (const item of formulationInput) {
+                if (/^[a-f\d]{24}$/i.test(item)) {
+                    formulationIds.push(item);
+                } else {
+                    formulationNames.push(item);
+                }
+            }
+
+            if (formulationIds.length > 0 && formulationNames.length > 0) {
+                filter.$or = filter.$or || [];
+                filter.$or.push(
+                    { formulation: { $in: formulationIds } },
+                    {
+                        formulation: {
+                            $in: await mongoose.model('Formulation').find(
+                                { name: { $in: formulationNames.map(n => new RegExp(`^${n}$`, 'i')) } },
+                                '_id'
+                            ).then(docs => docs.map(d => d._id))
+                        }
+                    }
+                );
+            }
+            else if (formulationIds.length > 0) {
+                filter.formulation = { $in: formulationIds };
+            }
+            else if (formulationNames.length > 0) {
+                const formulationDocs = await mongoose.model('Formulation').find(
+                    { name: { $in: formulationNames.map(n => new RegExp(`^${n}$`, 'i')) } },
+                    '_id'
+                );
+
+                filter.formulation = { $in: formulationDocs.map(f => f._id) };
+            }
+        }
+
+
+        // ------------------------- FINISH FILTER -------------------------
+        if (query.finish) {
+            filter.finish = { $in: query.finish.split(',') };
+        }
+
+        // ------------------------- PRODUCT TAGS FILTER -------------------------
+        if (query.productTags) {
+            filter.productTags = { $in: query.productTags.split(',') };
+        }
+
+        // ------------------------- VARIANT-LEVEL FILTERS -------------------------
+        // Filter by tone keys
+        if (query.toneKey) {
+            filter['variants.toneKeys'] = { $in: query.toneKey.split(',') };
+        }
+
+        // Filter by undertone keys
+        if (query.undertoneKey) {
+            filter['variants.undertoneKeys'] = { $in: query.undertoneKey.split(',') };
+        }
+
+        // Filter by family key
+        if (query.familyKey) {
+            filter['variants.familyKey'] = { $in: query.familyKey.split(',') };
+        }
+
+        // Filter by shade name
+        if (query.shadeName) {
+            filter['variants.shadeName'] = { $regex: query.shadeName, $options: 'i' };
+        }
+
+        // Filter by SKU
+        if (query.sku) {
+            filter['variants.sku'] = query.sku;
+        }
+
+        // ------------------------- PRICE RANGE FILTER -------------------------
+        // ------------------------- PRICE RANGE FILTER (VARIANT LEVEL) -------------------------
         if (query.minPrice || query.maxPrice) {
-            filter.price = {};
-            if (query.minPrice) filter.price.$gte = Number(query.minPrice);
-            if (query.maxPrice) filter.price.$lte = Number(query.maxPrice);
+            const priceConditions = [];
+
+            if (query.minPrice) {
+                priceConditions.push({
+                    $or: [
+                        { "variants.discountedPrice": { $gte: Number(query.minPrice) } },
+                        { "variants.displayPrice": { $gte: Number(query.minPrice) } }
+                    ]
+                });
+            }
+
+            if (query.maxPrice) {
+                priceConditions.push({
+                    $or: [
+                        { "variants.discountedPrice": { $lte: Number(query.maxPrice) } },
+                        { "variants.displayPrice": { $lte: Number(query.maxPrice) } }
+                    ]
+                });
+            }
+
+            filter.$and = [...(filter.$and || []), ...priceConditions];
+        }
+
+        // ------------------------- PUBLISHED STATUS FILTER -------------------------
+        if (query.isPublished !== undefined) {
+            filter.isPublished = query.isPublished === 'true';
+        }
+
+        // ------------------------- VTO FILTER -------------------------
+        if (query.supportsVTO !== undefined) {
+            filter.supportsVTO = query.supportsVTO === 'true';
+        }
+
+        if (query.vtoType) {
+            filter.vtoType = query.vtoType;
+        }
+
+        // ------------------------- DISCOUNT FILTER -------------------------
+        if (query.hasDiscount === 'true') {
+            filter.discountedPrice = { $ne: null, $gt: 0 };
+        }
+
+        // ------------------------- STOCK FILTER (VARIANT THRESHOLD) -------------------------
+        if (query.stockStatus) {
+            switch (query.stockStatus) {
+
+                case 'out_of_stock':
+                    filter['variants.stock'] = 0;
+                    break;
+
+                case 'low_stock':
+                    filter.$expr = {
+                        $and: [
+                            { $gt: ["$variants.stock", 0] },
+                            { $lt: ["$variants.stock", "$variants.thresholdValue"] }
+                        ]
+                    };
+                    break;
+
+                case 'in_stock':
+                    filter.$expr = {
+                        $gte: ["$variants.stock", "$variants.thresholdValue"]
+                    };
+                    break;
+            }
+        }
+
+
+        // ------------------------- RATING FILTER -------------------------
+        if (query.minRating) {
+            filter.avgRating = { $gte: Number(query.minRating) };
+        }
+
+        // ------------------------- DATE FILTERS -------------------------
+        if (query.createdAfter) {
+            filter.createdAt = filter.createdAt || {};
+            filter.createdAt.$gte = new Date(query.createdAfter);
+        }
+        if (query.createdBefore) {
+            filter.createdAt = filter.createdAt || {};
+            filter.createdAt.$lte = new Date(query.createdBefore);
+        }
+
+        // ------------------------- SELLER FILTER -------------------------
+        if (query.seller) {
+            filter.seller = query.seller;
         }
 
         // ------------------------- FETCH PRODUCTS -------------------------
@@ -2058,23 +3237,118 @@ const getAllProducts = async (req, res) => {
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
-            .populate('category', 'name')
+            .populate('category', 'name slug')
+            .populate('brand', 'name slug')
+            .populate('skinTypes', 'name slug')
+            .populate('formulation', 'name slug')
+            .populate('seller', 'name email')
             .lean();
+
+        // ------------------------- GET FILTER COUNTS -------------------------
+        const getCounts = async () => {
+            // Get all products matching current filter (without pagination)
+            const allFilteredProducts = await Product.find(filter)
+                .select('brand category skinTypes formulation finish productTags variants brandSlug categorySlug skinTypeSlugs formulationSlug')
+                .lean();
+
+            const counts = {
+                brands: {},
+                categories: {},
+                skinTypes: {},
+                formulations: {},
+                finishes: {},
+                productTags: {},
+                toneKeys: {},
+                undertoneKeys: {},
+                familyKeys: {},
+                total: total
+            };
+
+            // Count occurrences
+            allFilteredProducts.forEach(product => {
+                // Brand counts
+                if (product.brand) {
+                    const brandId = product.brand.toString();
+                    counts.brands[brandId] = (counts.brands[brandId] || 0) + 1;
+                }
+
+                // Category counts
+                if (product.category) {
+                    const catId = product.category.toString();
+                    counts.categories[catId] = (counts.categories[catId] || 0) + 1;
+                }
+
+                // Skin type counts
+                if (product.skinTypes) {
+                    product.skinTypes.forEach(st => {
+                        const stId = st.toString();
+                        counts.skinTypes[stId] = (counts.skinTypes[stId] || 0) + 1;
+                    });
+                }
+
+                // Formulation counts
+                if (product.formulation) {
+                    const formId = product.formulation.toString();
+                    counts.formulations[formId] = (counts.formulations[formId] || 0) + 1;
+                }
+
+                // Finish counts
+                if (product.finish) {
+                    counts.finishes[product.finish] = (counts.finishes[product.finish] || 0) + 1;
+                }
+
+                // Product tags counts
+                if (product.productTags) {
+                    product.productTags.forEach(tag => {
+                        counts.productTags[tag] = (counts.productTags[tag] || 0) + 1;
+                    });
+                }
+
+                // Variant-level counts
+                if (product.variants) {
+                    product.variants.forEach(variant => {
+                        // Tone keys
+                        if (variant.toneKeys) {
+                            variant.toneKeys.forEach(key => {
+                                counts.toneKeys[key] = (counts.toneKeys[key] || 0) + 1;
+                            });
+                        }
+
+                        // Undertone keys
+                        if (variant.undertoneKeys) {
+                            variant.undertoneKeys.forEach(key => {
+                                counts.undertoneKeys[key] = (counts.undertoneKeys[key] || 0) + 1;
+                            });
+                        }
+
+                        // Family keys
+                        if (variant.familyKey) {
+                            counts.familyKeys[variant.familyKey] = (counts.familyKeys[variant.familyKey] || 0) + 1;
+                        }
+                    });
+                }
+            });
+
+            return counts;
+        };
+
+        // Only get counts if requested (optional, as it can be expensive)
+        let filterCounts = null;
+        if (query.includeCounts === 'true') {
+            filterCounts = await getCounts();
+        }
 
         // ------------------------- FORMAT RESPONSE -------------------------
         const dashboardData = products.map((p) => {
-
             // Default product image
             let image = null;
             if (p.variants?.length > 0 && p.variants[0].images?.length > 0) {
                 image = p.variants[0].images[0];
-            } else if (Array.isArray(p.images) && p.images.length > 0) {
-                image = p.images[0];
             }
 
             const threshold = p.lowStockThreshold ?? 10;
 
-            // ---------------------- Variant Mapping WITH STOCK STATUS ----------------------
+            // Variant Mapping with Stock Status
             const variants = (p.variants || []).map(v => {
                 let stockStatus = "in_stock";
 
@@ -2087,54 +3361,252 @@ const getAllProducts = async (req, res) => {
                 return {
                     sku: v.sku,
                     shadeName: v.shadeName,
+                    slug: v.slug,
                     hex: v.hex,
                     stock: v.stock ?? 0,
-                    stockStatus, // <-- NEW STOCK STATUS FIELD
-                    originalPrice: v.originalPrice,
-                    discountedPrice: v.displayPrice,
-                    discountAmount: v.discountAmount,
-                    image: v.images?.[0] || p.images?.[0] || null,
+                    stockStatus,
+                    sales: v.sales ?? 0,
+                    displayPrice: v.displayPrice,
+                    discountedPrice: v.discountedPrice,
+                    familyKey: v.familyKey,
+                    toneKeys: v.toneKeys || [],
+                    undertoneKeys: v.undertoneKeys || [],
+                    lab: v.lab,
+                    images: v.images || [],
+                    isActive: v.isActive
                 };
             });
 
             return {
                 _id: p._id,
                 name: p.name,
-
+                slugs: p.slugs || [],
                 image,
-                brand: p.brand,
-                category: p.category?.name || '',
+
+                brand: {
+                    _id: p.brand?._id,
+                    name: p.brand?.name,
+                    slug: p.brand?.slug || p.brandSlug
+                },
+
+                category: {
+                    _id: p.category?._id,
+                    name: p.category?.name,
+                    slug: p.category?.slug || p.categorySlug
+                },
+
+                skinTypes: (p.skinTypes || []).map(st => ({
+                    _id: st._id,
+                    name: st.name,
+                    slug: st.slug
+                })),
+
+                formulation: p.formulation ? {
+                    _id: p.formulation._id,
+                    name: p.formulation.name,
+                    slug: p.formulation.slug || p.formulationSlug
+                } : null,
+
+                finish: p.finish,
 
                 price: p.price,
                 discountedPrice: p.discountedPrice,
+                discountPercent: p.discountPercent,
+                minPrice: p.minPrice,
+                maxPrice: p.maxPrice,
 
-                summary: p.summary || (p.description?.slice(0, 100) || ''),
-                ingredients: p.ingredients?.slice(0, 100),
+                summary: p.summary,
+                description: p.description,
+                ingredients: p.ingredients,
+                features: p.features,
 
-                sales: p.sales,
-                remaining: p.quantity,
+                productTags: p.productTags || [],
 
-                variants
+                avgRating: p.avgRating,
+                totalRatings: p.totalRatings,
+
+                isPublished: p.isPublished,
+                supportsVTO: p.supportsVTO,
+                vtoType: p.vtoType,
+
+                seller: p.seller ? {
+                    _id: p.seller._id,
+                    name: p.seller.name,
+                    email: p.seller.email
+                } : null,
+
+                variants,
+
+                createdAt: p.createdAt,
+                updatedAt: p.updatedAt
             };
         });
 
         // ------------------------- RESPONSE -------------------------
-        res.status(200).json({
+        const response = {
             success: true,
             total,
             page,
             totalPages: Math.ceil(total / limit),
             count: dashboardData.length,
-            products: dashboardData,
-        });
+            products: dashboardData
+        };
+
+        // Add counts if requested
+        if (filterCounts) {
+            response.filterCounts = filterCounts;
+        }
+
+        res.status(200).json(response);
 
     } catch (error) {
+        console.error('Error fetching products:', error);
         res.status(500).json({
+            success: false,
             message: 'Error fetching products',
             error: error.message
         });
     }
 };
+
+// const getAllProducts = async (req, res) => {
+//     try {
+//         const query = req.query;
+//         const filter = {};
+
+//         // ------------------------- PAGINATION -------------------------
+//         const page = Number(query.page) || 1;
+//         const limit = Number(query.limit) || 12;
+//         const skip = (page - 1) * limit;
+
+//         // ------------------------- FILTERS -------------------------
+//         if (query.brand) filter.brand = { $in: query.brand.split(',') };
+
+//         if (query.category) {
+//             const categoryIds = query.category.split(',');
+//             const allCategoryIds = new Set(categoryIds);
+
+//             const fetchChildren = async (parentId) => {
+//                 const children = await Category.find({ parent: parentId }, '_id');
+//                 for (const child of children) {
+//                     if (!allCategoryIds.has(child._id.toString())) {
+//                         allCategoryIds.add(child._id.toString());
+//                         await fetchChildren(child._id);
+//                     }
+//                 }
+//             };
+
+//             for (const id of categoryIds) {
+//                 await fetchChildren(id);
+//             }
+
+//             filter.category = { $in: Array.from(allCategoryIds) };
+//         }
+
+//         if (query.shadeOptions) filter.shadeOptions = { $in: query.shadeOptions.split(',') };
+//         if (query.colorOptions) filter.colorOptions = { $in: query.colorOptions.split(',') };
+//         if (query.productTags) filter.productTags = { $in: query.productTags.split(',') };
+
+//         const dynamicFilters = [
+//             'preference', 'ingredients', 'benefits', 'concern', 'skinType',
+//             'makeupFinish', 'formulation', 'color', 'skinTone', 'gender', 'age', 'conscious'
+//         ];
+//         dynamicFilters.forEach(attr => {
+//             if (query[attr]) {
+//                 filter.productTags = { $in: query[attr].split(',') };
+//             }
+//         });
+
+//         if (query.minPrice || query.maxPrice) {
+//             filter.price = {};
+//             if (query.minPrice) filter.price.$gte = Number(query.minPrice);
+//             if (query.maxPrice) filter.price.$lte = Number(query.maxPrice);
+//         }
+
+//         // ------------------------- FETCH PRODUCTS -------------------------
+//         const total = await Product.countDocuments(filter);
+
+//         const products = await Product.find(filter)
+//             .sort({ createdAt: -1 })
+//             .skip(skip)
+//             .limit(limit)
+//             .populate('category', 'name')
+//             .lean();
+
+//         // ------------------------- FORMAT RESPONSE -------------------------
+//         const dashboardData = products.map((p) => {
+
+//             // Default product image
+//             let image = null;
+//             if (p.variants?.length > 0 && p.variants[0].images?.length > 0) {
+//                 image = p.variants[0].images[0];
+//             } else if (Array.isArray(p.images) && p.images.length > 0) {
+//                 image = p.images[0];
+//             }
+
+//             const threshold = p.lowStockThreshold ?? 10;
+
+//             // ---------------------- Variant Mapping WITH STOCK STATUS ----------------------
+//             const variants = (p.variants || []).map(v => {
+//                 let stockStatus = "in_stock";
+
+//                 if (v.stock === 0) {
+//                     stockStatus = "out_of_stock";
+//                 } else if (v.stock < threshold) {
+//                     stockStatus = "few_left";
+//                 }
+
+//                 return {
+//                     sku: v.sku,
+//                     shadeName: v.shadeName,
+//                     hex: v.hex,
+//                     stock: v.stock ?? 0,
+//                     stockStatus, // <-- NEW STOCK STATUS FIELD
+//                     originalPrice: v.originalPrice,
+//                     discountedPrice: v.displayPrice,
+//                     discountAmount: v.discountAmount,
+//                     image: v.images?.[0] || p.images?.[0] || null,
+//                 };
+//             });
+
+//             return {
+//                 _id: p._id,
+//                 name: p.name,
+
+//                 image,
+//                 brand: p.brand,
+//                 category: p.category?.name || '',
+
+//                 price: p.price,
+//                 discountedPrice: p.discountedPrice,
+
+//                 summary: p.summary || (p.description?.slice(0, 100) || ''),
+//                 ingredients: p.ingredients?.slice(0, 100),
+
+//                 sales: p.sales,
+//                 remaining: p.quantity,
+
+//                 variants
+//             };
+//         });
+
+//         // ------------------------- RESPONSE -------------------------
+//         res.status(200).json({
+//             success: true,
+//             total,
+//             page,
+//             totalPages: Math.ceil(total / limit),
+//             count: dashboardData.length,
+//             products: dashboardData,
+//         });
+
+//     } catch (error) {
+//         res.status(500).json({
+//             message: 'Error fetching products',
+//             error: error.message
+//         });
+//     }
+// };
 
 const updateProductStock = async (req, res) => {
     try {
@@ -2401,4 +3873,4 @@ const updateVariantImages = async (req, res) => {
     }
 };
 
-export { addProductController, getSingleProductById, getAllProducts, updateProductStock, updateProductById, deleteProduct, updateVariantImages };
+export { addProductController, getSingleProductById, getAllProducts, getProductFilterOptions, updateProductStock, updateProductById, deleteProduct, updateVariantImages };

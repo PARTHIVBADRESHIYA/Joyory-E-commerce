@@ -1,5 +1,5 @@
 import express from 'express';
-import { addProductController, getAllProducts, getSingleProductById, updateProductStock, updateProductById, deleteProduct, updateVariantImages } from '../controllers/productController.js';
+import { addProductController, getAllProducts, getSingleProductById, updateProductStock,getProductFilterOptions, updateProductById, deleteProduct, updateVariantImages } from '../controllers/productController.js';
 import { verifyAdminOrTeamMember } from '../middlewares/authMiddleware.js';
 import { uploadProduct, uploadProductWithVariants } from '../middlewares/upload.js';
 import { checkPermission } from '../middlewares/authMiddleware.js';
@@ -11,6 +11,7 @@ router.post('/products/add-product', verifyAdminOrTeamMember,checkPermission('pr
     uploadProductWithVariants,
     addProductController);
 router.get('/products', verifyAdminOrTeamMember, checkPermission('products:view'), getAllProducts);
+router.get('/products/filters', verifyAdminOrTeamMember, checkPermission('products:view'), getProductFilterOptions);
 router.get('/products/:id', verifyAdminOrTeamMember,checkPermission("products:view"), getSingleProductById);
 router.patch('/products/:id', verifyAdminOrTeamMember, uploadProduct.any(), // Accept any file dynamically
     checkPermission("products:update"),updateProductById);
@@ -24,5 +25,7 @@ router.patch(
     checkPermission("products:update"),
     updateVariantImages
 );
+
+
 
 export default router; 

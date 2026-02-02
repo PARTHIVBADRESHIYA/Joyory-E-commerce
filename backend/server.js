@@ -436,6 +436,7 @@ import "./middlewares/utils/cron/cleanUpOrders.js";
 import { startDelhiveryCron } from "./middlewares/services/delhiveryTrackingService.js";
 import "./middlewares/utils/cron/autoPayout.js";
 import "./middlewares/utils/cron/abandonedCartCron.js";
+import "./middlewares/utils/cron/deliveredShipmentEmail.js";
 // 🔹 Routes
 import authRoutes from "./routes/authRoutes.js";
 import userRoutes from "./routes/user/userRoutes.js";

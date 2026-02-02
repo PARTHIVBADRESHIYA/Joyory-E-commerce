@@ -174,47 +174,6 @@ productSchema.pre('save', async function (next) {
     next();
 });
 
-// productSchema.pre('findOneAndUpdate', async function (next) {
-//     const update = this.getUpdate();
-//     if (!update) return next();
-
-//     const needsSlug =
-//         update.name ||
-//         update.variant ||
-//         update.brandSlug ||
-//         update.categorySlug;
-
-//     if (!needsSlug) return next();
-
-//     const docToUpdate = await this.model.findOne(this.getQuery());
-//     if (!docToUpdate) return next();
-
-//     const shadePart =
-//         update.variant ??
-//         docToUpdate.variant ??
-//         (docToUpdate.variants?.length === 1
-//             ? docToUpdate.variants[0]?.shadeName
-//             : null);
-
-//     const slugBase = [
-//         update.name ?? docToUpdate.name,
-//         shadePart,
-//         update.brandSlug ?? docToUpdate.brandSlug,
-//         update.categorySlug ?? docToUpdate.categorySlug
-//     ]
-
-//         .filter(Boolean)
-//         .join(" ");
-
-//     update.slug = await generateUniqueSlug(
-//         this.model,
-//         slugBase,
-//         docToUpdate._id
-//     );
-
-//     this.setUpdate(update);
-//     next();
-// });
 
 // 🚀 ULTRA PERFORMANCE INDEXES — copy paste as is
 productSchema.index({ name: 1, brand: 1, category: 1, variant: 1 });
