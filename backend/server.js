@@ -751,6 +751,18 @@ app.get("/health", (req, res) => {
 });
 app.get("/", (req, res) => res.send("✅ API is running..."));
 
+// ================= LOADER.IO VERIFICATION =================
+app.get("/loaderio-e4d7c939d54e1b1a65ed41c0956d9c25.txt", (req, res) => {
+    res.set("Content-Type", "text/plain");
+    res.send("loaderio-e4d7c939d54e1b1a65ed41c0956d9c25");
+});
+
+app.get("/loaderio-e4d7c939d54e1b1a65ed41c0956d9c25", (req, res) => {
+    res.set("Content-Type", "text/plain");
+    res.send("loaderio-e4d7c939d54e1b1a65ed41c0956d9c25");
+});
+
+
 // ================= ERROR HANDLER =================
 app.use((err, req, res, next) => {
     console.error("🔥 Unhandled error:", err);
